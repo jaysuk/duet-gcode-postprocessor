@@ -21,7 +21,7 @@ import {
 import { Analyser, type FileAnalysis } from "../analysis";
 import { parseMetadata, type SlicerMetadata } from "../gcode/metadata";
 import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
-import { alreadyProcessed, buildTransforms, makeStamp, type Recipe, type Stamp } from "../recipe";
+import { alreadyProcessed, buildTransforms, findStamps, makeStamp, type Recipe, type Stamp } from "../recipe";
 import type { OutputPlan } from "./plan";
 
 export interface FileGateway {
@@ -276,4 +276,62 @@ function dirOf(path: string): string {
  */
 export function yieldToUi(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Read a file and analyse it without transforming anything — what the inspector runs.
+ *
+ * Shares the same chunked reader and yield cadence as {@link processFile}, so a 200 MB file is
+ * inspected without ever holding its text.
+ */
+export async function inspectFile(options: {
+	gateway: FileGateway;
+	sourcePath: string;
+	onProgress?: (update: ProgressUpdate) => void;
+	signal?: AbortSignalLike;
+	chunkBytes?: number;
+}): Promise<{ analysis: FileAnalysis; meta: SlicerMetadata; stamps: Array<Stamp>; head: string; bytes: number }> {
+	const report = options.onProgress ?? (() => { });
+	const checkCancelled = () => {
+		if (options.signal?.aborted === true) throw new CancelledError();
+	};
+
+	report({ phase: "downloading", fraction: 0 });
+	const blob = await options.gateway.download(options.sourcePath, (loaded, total) => {
+		report({ phase: "downloading", fraction: total > 0 ? loaded / total : null });
+	});
+	checkCancelled();
+
+	report({ phase: "scanning", fraction: null });
+	const { head, meta } = await prescan(blob);
+	const analyser = new Analyser(meta);
+
+	const decoder = new TextDecoder("utf-8");
+	const chunkBytes = Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES);
+	let carry = "";
+	let offset = 0;
+	let lastYield = Date.now();
+
+	while (offset < blob.size) {
+		checkCancelled();
+		const end = Math.min(offset + chunkBytes, blob.size);
+		const lastChunk = end >= blob.size;
+		const text = carry + decoder.decode(await blob.slice(offset, end).arrayBuffer(), { stream: !lastChunk });
+		const lines = text.split("\n");
+		carry = lastChunk ? "" : (lines.pop() ?? "");
+		if (lastChunk && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+		for (const rawLine of lines) {
+			analyser.line(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
+		}
+		offset = end;
+		report({ phase: "processing", fraction: blob.size > 0 ? offset / blob.size : null });
+		if (Date.now() - lastYield >= YIELD_INTERVAL_MS) {
+			await yieldToUi();
+			lastYield = Date.now();
+		}
+	}
+	if (carry !== "") analyser.line(carry.endsWith("\r") ? carry.slice(0, -1) : carry);
+
+	report({ phase: "done", fraction: 1 });
+	return { analysis: analyser.result(), meta, stamps: findStamps(head), head, bytes: blob.size };
 }

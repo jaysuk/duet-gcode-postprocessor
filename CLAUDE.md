@@ -18,8 +18,11 @@ write back safely.
 2. Never write over a file without a backup, an atomic temp-then-move, and a post-write size
    check. Never touch the file currently printing.
 3. Dry run is the default; applying is always a second, explicit user action.
-4. The heavy work runs in an inline-Blob Web Worker over a chunked Blob read — never load a
-   200 MB G-code file into a JS string on the main thread.
+4. The heavy work runs over a **chunked Blob read on the main thread, yielding every ~16 ms** —
+   never load a 200 MB G-code file into a JS string. A Web Worker was the original plan and is
+   still the right destination, but the bundle is a single IIFE with no dynamic `import()`, so a
+   worker would need the whole pipeline inlined into it at build time. `model/io/transfer.ts`
+   documents this; see `docs/scripting-engines.md` for the route.
 
 Everything below is the general DWC 3.7 plugin scaffolding guide this repo was started from.
 

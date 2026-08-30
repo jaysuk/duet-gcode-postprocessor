@@ -17,6 +17,7 @@
  * change (the worker needs the pipeline bundled into it) and is tracked in PLAN.md.
  */
 
+import { createGcodeApi, type GcodeApi } from "./scriptApi";
 import { StepConfigError, type LineContext, type StepDefinition, type Transform } from "./types";
 
 export interface ScriptConfig {
@@ -53,6 +54,8 @@ export interface ScriptApi {
 	state: Record<string, unknown>;
 	/** Record a message in the run report. */
 	log(message: string): void;
+	/** G-code helpers — the same tested tokeniser the rest of the plugin uses. */
+	gcode: GcodeApi;
 }
 
 export type CompiledScript = (
@@ -70,7 +73,7 @@ export function compileScript(source: string): CompiledScript {
 	const params = ["line", "ctx", "__api", ...SHADOWED_GLOBALS];
 	const body = `
 "use strict";
-const { emit, emitBefore, drop, state, log } = __api;
+const { emit, emitBefore, drop, state, log, gcode } = __api;
 ${source}
 `;
 	try {
@@ -86,9 +89,12 @@ const DEFAULT_SCRIPT = `// Runs once per line. Return a string to replace it, nu
 //
 // Available: line, ctx (layer, z, tool, feedrate, relativeE, object, meta, lineNo),
 //            emit(text), emitBefore(text), drop(), state, log(message)
+//            gcode.parse/num/has/set/scale/offset/remove/isMove/isExtrusion/format
+//
+// Example: slow every extruding move on the first two layers.
 
-if (ctx.layerChanged && ctx.layer === 10) {
-	emit('M291 P"Reached layer 10" S0');
+if (ctx.layer <= 1 && gcode.isExtrusion(line, ctx.relativeE)) {
+	return gcode.scale(line, "F", 0.5, 0);
 }
 return line;
 `;
@@ -117,6 +123,7 @@ export const scriptStep: StepDefinition<ScriptConfig> = {
 		const budget = Number.isFinite(config.maxMsPerLine) && config.maxMsPerLine > 0 ? config.maxMsPerLine : 0.5;
 
 		const state: Record<string, unknown> = {};
+		const gcode = createGcodeApi();
 		const logs: Array<string> = [];
 		let before: Array<string> = [];
 		let after: Array<string> = [];
@@ -128,6 +135,7 @@ export const scriptStep: StepDefinition<ScriptConfig> = {
 			drop() { dropped = true; },
 			state,
 			log(message: string) { if (logs.length < 200) logs.push(String(message)); },
+			gcode,
 		};
 
 		const shadowed = SHADOWED_GLOBALS.map(() => undefined);

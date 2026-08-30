@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseRules, applyRules } from "../model/steps/rules";
 import { compileScript, ScriptAbortError, SHADOWED_GLOBALS } from "../model/steps/script";
+import { createGcodeApi } from "../model/steps/scriptApi";
 import { StepConfigError } from "../model/steps/types";
 import { runStep, SAMPLE } from "./helpers";
 
@@ -119,9 +120,73 @@ describe("the script tier", () => {
 			.toThrow(/line 1: boom/);
 	});
 
+	it("hands scripts the G-code helpers rather than making them write regexes", () => {
+		const out = runStep("script", {
+			source: "return gcode.isExtrusion(line) ? gcode.scale(line, 'F', 0.5, 0) : line;",
+		}, ["G1 X10 E1 F1200", "G1 X20 F9000"].join("\n"));
+		expect(out).toBe(["G1 X10 E1 F600", "G1 X20 F9000"].join("\n"));
+	});
+
 	it("compiles a script that returns nothing without changing the line", () => {
 		const fn = compileScript("");
-		expect(fn("G28", {} as never, { emit() {}, emitBefore() {}, drop() {}, state: {}, log() {} })).toBeUndefined();
+		const api = { emit() {}, emitBefore() {}, drop() {}, state: {}, log() {}, gcode: createGcodeApi() };
+		expect(fn("G28", {} as never, api)).toBeUndefined();
 		expect(runStep("script", { source: "" }, "G28")).toBe("G28");
+	});
+});
+
+describe("the script standard library", () => {
+	const g = createGcodeApi();
+
+	it("parses a line into code, parameters and comment", () => {
+		expect(g.parse("G1 X10 Y20 E1.5 ; travel")).toEqual({
+			code: "G1",
+			params: { X: "10", Y: "20", E: "1.5" },
+			comment: " travel",
+			isComment: false,
+		});
+	});
+
+	it("does not mistake a semicolon inside a string for a comment", () => {
+		expect(g.parse('M291 P"done; go" S0').comment).toBeNull();
+	});
+
+	it("reads numeric and raw parameter values", () => {
+		expect(g.num("G1 F1200", "F")).toBe(1200);
+		expect(g.num("G1 F{var.speed}", "F")).toBeNull();
+		expect(g.str("M98 P\"0:/macros/a.g\"", "P")).toBe('"0:/macros/a.g"');
+		expect(g.has("G1 X1", "Y")).toBe(false);
+	});
+
+	it("sets, scales, offsets and removes parameters in place", () => {
+		expect(g.set("G1 X10  Y20", "Y", 99, 0)).toBe("G1 X10  Y99");
+		expect(g.set("G1 X10", "F", 1200, 0)).toBe("G1 X10 F1200");
+		expect(g.scale("G1 F1200 ; go", "F", 0.5, 0)).toBe("G1 F600 ; go");
+		expect(g.offset("G1 Z0.2", "Z", 0.02, 3)).toBe("G1 Z0.22");
+		expect(g.remove("G1 X10 Y20", "Y")).toBe("G1 X10");
+	});
+
+	it("leaves a line alone when the parameter is absent or not a number", () => {
+		expect(g.scale("G1 X10", "F", 0.5)).toBe("G1 X10");
+		expect(g.scale("G1 F{speed}", "F", 0.5)).toBe("G1 F{speed}");
+	});
+
+	it("identifies moves and extrusion", () => {
+		expect(g.isMove("G1 X1")).toBe(true);
+		expect(g.isMove("M104 S200")).toBe(false);
+		expect(g.isExtrusion("G1 X1 E1")).toBe(true);
+		expect(g.isExtrusion("G1 X1 F9000")).toBe(false);
+		expect(g.isExtrusion("G1 X1 E0", true)).toBe(false);
+	});
+
+	it("rewrites and strips comments", () => {
+		expect(g.setComment("G1 X1 ; old", "new")).toBe("G1 X1 ;new");
+		expect(g.setComment("G1 X1 ; old", null)).toBe("G1 X1");
+		expect(g.setComment("G1 X1", "added")).toBe("G1 X1 ;added");
+	});
+
+	it("formats numbers without trailing zeros", () => {
+		expect(g.format(0.5, 3)).toBe("0.5");
+		expect(g.format(600, 0)).toBe("600");
 	});
 });

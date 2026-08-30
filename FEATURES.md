@@ -3,6 +3,13 @@
 Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would deliver them.
 **v1** = the first release worth installing. **Later** = wanted, not blocking.
 
+> **v0.1.0 delivers every item tagged v1**, plus the rules tier (C1), the script tier (C2–C4), the
+> calibration-tower step (B6), the range of insertion anchors (B3), the preflight checks (E8–E12),
+> and the Flexible-Layouts widget (F1). Still outstanding: auto-run on upload (D5), batch
+> processing (D6), the backup browser (D7 — backups are written, there is no restore UI), automatic
+> recipe selection (D4), run history (D8), and the "Later" items.
+> See [PLAN.md](PLAN.md#status) for the deviations.
+
 ---
 
 ## A. Browsing and inspection

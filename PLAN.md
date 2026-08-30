@@ -6,6 +6,42 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ---
 
+## Status
+
+Implemented in v0.1.0, with 294 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`.
+
+**Built:** phases 0–3 in full, plus most of 4–7 —
+the browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
+inspector and its preflight checks, the streaming engine and safe write path, all eight step types,
+recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
+self-update, and the usage guide.
+
+**Deviations from the plan, and why:**
+
+1. **No Web Worker.** §3.2 called for one; the pipeline instead runs on the main thread over the
+   same chunked Blob read, yielding to the event loop every ~16 ms. The plugin bundle is a single
+   IIFE with no dynamic `import()`, so a worker needs the entire pipeline inlined into it at build
+   time — a build-level change, not a code-level one. The chunking, the memory profile and the
+   working Cancel button are all as designed; only the thread differs. Vite's `?worker&inline` is
+   the likely route and is untested against DWC's rolldown-based lib build.
+2. **Find and replace is per line, not per layer block.** PrusaSlicer applies substitutions to a
+   whole layer block, so a regex there can span lines. Supporting that means buffering a layer and
+   splitting the step chain around block-mode steps, which roughly doubles the pipeline's
+   complexity for a feature most rules do not use. Documented in `docs/usage.md`; deferred.
+3. **The script tier is a guardrail, not a sandbox.** The network globals are shadowed and a
+   watchdog catches runaway loops, but `new Function` code can still reach the real global object.
+   A trust gate stands in front of it. `docs/scripting-engines.md` sets out what a real sandbox
+   (QuickJS in WASM) and real Python (Pyodide) would take.
+4. **i18n is scaffolded, not applied.** The nav caption and widget strings go through
+   `registerPluginMessages`; the rest of the UI is literal English.
+
+**Not built yet:** auto-run on upload (D5), batch processing (D6), a backup browser (backups are
+written and named in the result, but there is no restore UI yet, D7), automatic recipe selection by
+filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8).
+
+---
+
 ## 1. What it is
 
 One DWC page (plus a Flexible-Layouts widget) that does:

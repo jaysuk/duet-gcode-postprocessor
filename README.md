@@ -6,9 +6,22 @@ Browse the G-code files already on your Duet's SD card, apply find/replace rules
 mappings, layer-anchored insertions and scripted transforms, preview the diff, then write the
 result back — without a PC, a slicer re-slice, or an SD card shuffle.
 
-> **Status: planning.** No code yet. [PLAN.md](PLAN.md) is the build plan and
-> [FEATURES.md](FEATURES.md) is the prioritised feature list. Both are up for discussion before
-> the first line of TypeScript gets written.
+> **Status: v0.1.0 — built, tested, not yet run on hardware.** 294 unit, golden-file, safety and
+> component tests pass; typecheck and `verify-build` are green against DWC `v3.7-dev`. The plugin
+> ZIP builds at ~134 KB (40 KB gzipped). What is and is not implemented is listed in
+> [PLAN.md](PLAN.md#status); [docs/usage.md](docs/usage.md) is the full guide.
+
+## What it does
+
+- **Browse** the G-code on the SD card, and **inspect** any file: slicer, print time, layers,
+  extents, tools, temperatures, command histogram, dialect detection, and preflight checks against
+  the machine's own limits.
+- **Transform** it with an ordered recipe: find and replace (PrusaSlicer-compatible), command
+  mapping that moves parameters properly, layer/Z/tool/object-anchored insertion, deletion,
+  parameter arithmetic, calibration-tower sweeps, a no-code rules tier and a JavaScript tier.
+- **Preview** the exact diff before anything is written.
+- **Write it back safely**: backup, atomic temp-then-move, post-write size verification, an
+  identity stamp that catches a repeat run, and a hard refusal to touch the file being printed.
 
 ## Why
 
