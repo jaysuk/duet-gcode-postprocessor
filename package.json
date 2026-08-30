@@ -10,7 +10,8 @@
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
 		"typecheck": "dwc-plugin-typecheck",
-		"verify-build": "dwc-plugin-verify-build"
+		"verify-build": "dwc-plugin-verify-build",
+		"release": "node scripts/release.mjs"
 	},
 	"dependencies": {
 		"dwc-plugin-runtime": "^0.8.8"
