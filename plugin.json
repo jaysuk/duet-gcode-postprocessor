@@ -1,0 +1,16 @@
+{
+	"id": "GCodePostProcessor",
+	"name": "G-code Post-Processor",
+	"author": "James Skitt",
+	"version": "0.1.0",
+	"license": "GPL-3.0-or-later",
+	"homepage": "https://github.com/jaysuk/duet-gcode-postprocessor",
+	"dwcVersion": "auto-major",
+	"tags": [
+		"gcode",
+		"post-processing",
+		"find-replace",
+		"scripting",
+		"files"
+	]
+}

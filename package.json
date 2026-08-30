@@ -1,0 +1,28 @@
+{
+	"name": "duet-gcode-postprocessor",
+	"version": "0.1.0",
+	"description": "G-code post-processor for RepRapFirmware, as a Duet Web Control 3.7 plugin.",
+	"private": true,
+	"license": "GPL-3.0-or-later",
+	"homepage": "https://github.com/jaysuk/duet-gcode-postprocessor",
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"typecheck": "dwc-plugin-typecheck",
+		"verify-build": "dwc-plugin-verify-build"
+	},
+	"dependencies": {
+		"dwc-plugin-runtime": "^0.8.8"
+	},
+	"devDependencies": {
+		"@vitejs/plugin-vue": "^5.2.4",
+		"@vitest/coverage-v8": "^4.1.8",
+		"@vue/test-utils": "^2.4.6",
+		"dwc-plugin-test-kit": "^0.2.8",
+		"happy-dom": "^20.11.15",
+		"vitest": "^4.1.8",
+		"vue": "^3.5.30",
+		"vuetify": "^4.1.0"
+	}
+}
