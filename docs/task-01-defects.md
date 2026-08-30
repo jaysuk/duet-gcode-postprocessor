@@ -110,15 +110,18 @@ back is half a safety feature, and the half that is missing is the half that mat
 **a. Move the working directory.**
 
 ```ts
-export const WORK_DIR = "0:/sys/postproc";
+export const WORK_DIR = "0:/postproc";
 export const BACKUP_DIR = `${WORK_DIR}/backups`;
 export const BACKUP_INDEX = `${WORK_DIR}/backups.json`;
 ```
 
-`0:/sys` is reachable from DWC's file manager, is where standalone-Duet plugin data conventionally
-lives, and is not the Jobs list. **Do not migrate existing backups** — anyone who has a
-`0:/gcodes/.postproc` from a dev build can move or delete it themselves. Note the change in
-`docs/usage.md`.
+A top-level directory on the volume: out of the Jobs list, and out of `0:/sys`, which belongs to the
+machine configuration rather than to a plugin's working files. It is visible in DWC's Explorer, which
+is where someone would go looking for it. Create it on demand — `makeDirectory` is already called
+before the first backup upload and already tolerates "exists".
+
+**Do not migrate existing backups** — anyone who has a `0:/gcodes/.postproc` from a dev build can
+move or delete it themselves. Note the change in `docs/usage.md`.
 
 Leave `tempPath` where it is (`<target>.pp.tmp`, next to the target). It has to be on the same
 volume and directory for the temp-then-move to be a rename rather than a copy, and it exists for

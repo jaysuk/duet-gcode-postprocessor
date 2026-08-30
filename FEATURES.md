@@ -104,6 +104,27 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 
 ---
 
+## G. Machine-aware features (post-v1)
+
+The ideas that need the printer's own knowledge — its heater tuning, its axis limits, its file
+system — and so cannot be done by a slicer or by a desktop script. Designed in
+[docs/feature-ideas.md](docs/feature-ideas.md).
+
+| # | Feature | Notes |
+| --- | --- | --- |
+| G1 | **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right | The enabler for G2–G4; useful alone |
+| G2 | **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment | Needs G1 and a lookahead pass |
+| G3 | **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Needs slicer feature-name normalisation |
+| G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |
+| G5 | **Validate `M98` macro references** against the SD card | Trivial, catches a print-stopping typo |
+| G6 | **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt | |
+| G7 | **Feedrate and acceleration clamping** to the machine's real limits | |
+| G8 | **Cold-extrusion and end-of-file hygiene checks** | |
+| G9 | **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Makes DWC cancel-object work on more files |
+| G10 | **`M37` simulation round-trip** — the firmware's own time estimate, written back into `M73` | |
+| G11 | **Extract or split a layer range** into a standalone file | |
+| G12 | **Per-feature and layer-time statistics** | |
+
 ## Proposed v1 scope
 
 Everything tagged **v1** above: browse, inspect, find/replace, the core step library, the rules
