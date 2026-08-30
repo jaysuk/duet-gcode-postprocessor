@@ -1,0 +1,38 @@
+# duet-gcode-postprocessor
+
+A **G-code post-processor for RepRapFirmware**, delivered as a DuetWebControl 3.7 plugin.
+
+Browse the G-code files already on your Duet's SD card, apply find/replace rules, command
+mappings, layer-anchored insertions and scripted transforms, preview the diff, then write the
+result back — without a PC, a slicer re-slice, or an SD card shuffle.
+
+> **Status: planning.** No code yet. [PLAN.md](PLAN.md) is the build plan and
+> [FEATURES.md](FEATURES.md) is the prioritised feature list. Both are up for discussion before
+> the first line of TypeScript gets written.
+
+## Why
+
+Slicers already do this — PrusaSlicer has *G-code Substitutions* (find/replace with regex) and
+*Post-processing scripts* (an external Perl/Python/Bash executable handed the output file path);
+OrcaSlicer has the same. Both have two limitations this project fixes:
+
+1. **They only run at slice time.** A file already on the SD card — sliced last month, sent by
+   someone else, downloaded from a model site — can't be touched without re-slicing.
+2. **Post-processing scripts need a desktop.** They shell out to a local interpreter. There is
+   nothing equivalent when the printer is the only machine in the loop.
+
+This plugin runs the same class of transformation *in the browser*, against the files already on
+the board, from the same UI you're already looking at.
+
+## Prior art / inspiration
+
+| Project | What's borrowed |
+| --- | --- |
+| [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) | *G-code Substitutions* semantics — find/replace pairs with regex, case-sensitivity and whole-word flags, applied per layer block ([docs](https://help.prusa3d.com/article/g-code-substitutions_301694)) |
+| [PrusaSlicer](https://help.prusa3d.com/article/post-processing-scripts_283913) / [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) | *Post-processing scripts* — the "hand the whole file to a script" model, reimagined as a sandboxed in-browser worker |
+| [oozeBot preFlight](https://github.com/oozebot/preFlight) | Slicer-side profile/metadata conventions and the "know what produced this file" idea |
+| oozeBot OPP | The concept of a dedicated post-processor pass for a specific printer family |
+
+## Licence
+
+GPL-3.0-or-later, matching the other plugins in this family.
