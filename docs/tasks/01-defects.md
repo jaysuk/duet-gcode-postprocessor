@@ -3,7 +3,7 @@
 A self-contained work order. Everything needed to do this is in this file plus the repo; there is no
 conversation history to recover.
 
-**Read [CLAUDE.md](../CLAUDE.md) first** — particularly the four non-negotiables and the "Known
+**Read [README.md](README.md) and then [CLAUDE.md](../../CLAUDE.md) first** — particularly the four non-negotiables and the "Known
 gotchas" section. They are binding here, not background.
 
 ## Why this task exists
@@ -22,10 +22,10 @@ decision that has to be made properly, not worked around.
 ### The defect
 
 `checkSafety` raises a `largeFile` warning above `LARGE_FILE_WARN_BYTES` (250 MB,
-[constants.ts:36](../src/model/constants.ts)). The point of that warning is *"this will take a while,
+[constants.ts:36](../../src/model/constants.ts)). The point of that warning is *"this will take a while,
 leave the tab open"* — advice that is only useful **before** you start.
 
-[`PostProcessorPage.vue:272`](../src/components/PostProcessorPage.vue) feeds it from
+[`PostProcessorPage.vue:272`](../../src/components/PostProcessorPage.vue) feeds it from
 `lastRun.value?.bytesIn`, which does not exist until a run has finished. So the warning can only
 appear after the user has already sat through the thing it was warning about.
 
@@ -94,13 +94,13 @@ belongs on the wiring, not on `checkSafety`:
 
 Two problems, one of which is a design gap rather than a bug.
 
-**Location.** `WORK_DIR = "0:/gcodes/.postproc"` ([constants.ts:23](../src/model/constants.ts)).
+**Location.** `WORK_DIR = "0:/gcodes/.postproc"` ([constants.ts:23](../../src/model/constants.ts)).
 Anything under `0:/gcodes` appears in DWC's Jobs list, so the plugin currently adds a folder to the
 user's print list. The leading dot is not a hiding mechanism on FAT and DWC does not treat it as
 one.
 
 **Restoring is impossible.** `planOutput` names a backup `<stem>.<timestamp><ext>`
-([plan.ts](../src/model/io/plan.ts)) and drops it in a flat directory. **The original path is never
+([plan.ts](../../src/model/io/plan.ts)) and drops it in a flat directory. **The original path is never
 recorded anywhere.** Given `benchy.20260830-112233.gcode` there is no way to know it came from
 `0:/gcodes/prints/benchy.gcode` rather than `0:/gcodes/old/benchy.gcode`. A backup you cannot put
 back is half a safety feature, and the half that is missing is the half that matters.
@@ -132,7 +132,7 @@ The path is referenced in six places. Change all of them, and note that two are 
 | `src/__tests__/transfer.test.ts` | the expected operation order includes the backup path |
 | `docs/usage.md:240` | the "where the output goes" table |
 | `PLAN.md:177` | §3.3's description of the safety layer |
-| `docs/task-01-defects.md` | this file, once it is done |
+| `docs/tasks/01-defects.md` | this file, once it is done |
 
 Leave `tempPath` where it is (`<target>.pp.tmp`, next to the target). It has to be on the same
 volume and directory for the temp-then-move to be a rename rather than a copy, and it exists for
@@ -182,7 +182,7 @@ Unit-test the pure naming helper for the collision case.
 
 **c. Write the index when a backup is taken (impure, in `transfer.ts`).**
 
-At [transfer.ts:240–244](../src/model/io/transfer.ts), where the backup is currently uploaded:
+At [transfer.ts:240–244](../../src/model/io/transfer.ts), where the backup is currently uploaded:
 after the successful backup upload, read the index (`gateway.download(BACKUP_INDEX)`, catching the
 "not found" throw and treating it as empty), add the entry, prune, upload the new index, and delete
 the pruned backup files.
@@ -252,13 +252,13 @@ safety feature nobody knows how to use is not much of a safety feature.
 
 ## Task 3 — the widget stamps a fake plugin version
 
-[`PostProcessorWidget.vue:122`](../src/components/PostProcessorWidget.vue) passes
+[`PostProcessorWidget.vue:122`](../../src/components/PostProcessorWidget.vue) passes
 `pluginVersion: "0.0.0"`. It is harmless today because the widget only ever dry-runs and a dry run
 writes no stamp — but it is a trap for whoever wires Apply into the widget later, and it would
 produce files stamped with a version that never existed.
 
 `PostProcessorPage.vue` has the correct implementation at `installedVersion()`
-([line 434](../src/components/PostProcessorPage.vue)). Move it to `src/dwc/machineSnapshot.ts`
+([line 434](../../src/components/PostProcessorPage.vue)). Move it to `src/dwc/machineSnapshot.ts`
 (which already owns object-model narrowing) as `installedPluginVersion(model): string`, and use it
 in both components. Add a unit test: it returns `"0.0.0"` for a model with no plugins map, and the
 version when one is present.
@@ -267,7 +267,7 @@ version when one is present.
 
 ## Task 4 — PLAN.md's architecture section describes files that do not exist
 
-§3 of [PLAN.md](../PLAN.md) still lists the *planned* layout: `components/RunReport.vue`,
+§3 of [PLAN.md](../../PLAN.md) still lists the *planned* layout: `components/RunReport.vue`,
 `components/StepForms/*.vue`, `worker/processor.ts` and `model/steps/checks.ts`. None exist —
 the run report folded into the page's result alert, one generic `StepFields.vue` replaced the
 per-step forms, there is no worker (see the Status section, which is accurate), and the checks live
@@ -294,35 +294,5 @@ Named explicitly because they are tempting while in these files:
 
 ## Working rules
 
-**Verify with all three gates before committing.** The unit tests alone do not catch the failures
-that matter:
-
-```bash
-npm test
-DWC_DIR=/path/to/DuetWebControl npx dwc-plugin-typecheck
-DWC_DIR=/path/to/DuetWebControl npx dwc-plugin-verify-build
-```
-
-On this machine `DWC_DIR=/c/Users/live/Documents/Github/DuetWebControl`. All three pass on `main`
-today, so any failure is from this task.
-
-**Golden files.** `test/golden/*.gcode` are committed expectations. If a change alters them,
-`npx vitest run -u` regenerates — but **read the resulting diff line by line before committing it**.
-A golden diff is either a bug you just introduced or a fix you can explain. None of the four tasks
-above should change a single golden file; if one does, stop and work out why.
-
-**House style.** Tabs, double quotes, `Array<T>` over `T[]`. Match the density of the surrounding
-comments: explain *why*, never restate the code. Keep transformation logic pure and in `model/`;
-`.vue` files render and delegate.
-
-**Commits.** One per task, imperative subject, body explaining the failure being fixed rather than
-the code being added. End with:
-
-```
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-```
-
-**If a task turns out to be wrong.** These were identified by reading the code, not by running it.
-If Task 1's `sizeOf` turns out not to work through the store for a reason that is not obvious, or
-Task 2's index design collides with something, say so and stop rather than building a workaround —
-a wrong fix in the safety layer is worse than the defect.
+See [README.md](README.md) — the gates, the golden-file rule, house style and commit format apply to
+every task and are not repeated here.

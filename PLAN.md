@@ -40,9 +40,10 @@ self-update, and the usage guide.
 written and named in the result, but there is no restore UI yet, D7), automatic recipe selection by
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8).
 
-**Next:** `docs/task-01-defects.md` is a ready work order for the pre-hardware defect pass. §8 below
-is the roadmap after that — the machine-aware features that are the actual argument for running a
-post-processor on the printer rather than on a laptop.
+**Next:** [`docs/tasks/`](docs/tasks/) holds the work orders — six written, each self-contained
+enough to hand to an agent with no context. §8 below is the roadmap they implement: the
+machine-aware features that are the actual argument for running a post-processor on the printer
+rather than on a laptop.
 
 ---
 
@@ -332,7 +333,7 @@ feature tables are in [FEATURES.md](FEATURES.md) §G–H.
 Ordered by dependency, not by appeal. The first two are infrastructure that four later features
 need, and building them late means building the later features twice.
 
-### Phase 8 — the move-time model *(unlocks 9, 10, 12)*
+### Phase 8 — the move-time model *(unlocks 11, 12)*
 
 A per-move time estimate using **this machine's** `move.axes[].speed`/`acceleration`/`jerk` and
 `move.printingAcceleration`/`travelAcceleration`, rather than the slicer's profile for a printer it
@@ -344,7 +345,7 @@ Bambu all do), interpolate those instead and skip the modelling — then say whi
 **Ships on its own as:** rewriting the `M73` markers with the machine-corrected estimate, so DWC's
 remaining-time is right. That is a reason to install the plugin all by itself.
 
-### Phase 9 — the analysis pass *(unlocks 10, 11, 13)*
+### Phase 9 — the analysis pass *(unlocks 11, 14)*
 
 The architectural change. Everything involving lookahead — pre-heating before a tool change,
 restoring a fan speed when a region ends, anchoring to "90 seconds before X" — is impossible in the
@@ -368,8 +369,11 @@ Two pieces of real work: normalising slicer-specific `;TYPE:` names onto a canon
 overridden region so it cannot undo the override on the next line. Same machinery then gives fan
 scaling, a minimum non-zero speed clamp, and a spin-up kick.
 
-The better first real feature: self-contained, immediately useful, and it forces the feature
-normalisation that Phase 11's reporting wants anyway.
+**Does not depend on phase 9.** An earlier draft said this needed the analysis pass to know where a
+region ends; it does not — a region's end is observable at the transition into the next `;TYPE:`
+marker, which the existing single forward pass already sees. So this is the best *first* feature:
+self-contained, immediately useful, no infrastructure required, and it forces the feature
+normalisation that phase 11's reporting wants anyway.
 
 ### Phase 11 — predictive pre-heat before a tool change
 
