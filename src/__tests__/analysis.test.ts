@@ -4,6 +4,7 @@ import { analyseText } from "../model/analysis";
 import { detectDialect } from "../model/gcode/dialect";
 import { emptySnapshot, runChecks, type MachineSnapshot } from "../model/checks";
 import { parseMetadata } from "../model/gcode/metadata";
+import type { MachineLimits } from "../model/gcode/timeModel";
 import { SAMPLE } from "./helpers";
 
 const MACHINE: MachineSnapshot = {
@@ -18,6 +19,14 @@ const MACHINE: MachineSnapshot = {
 	toolHeaters: [[1], [2]],
 	bedHeaters: [0],
 	anyAxisHomed: true,
+};
+
+const LIMITS: MachineLimits = {
+	maxSpeed: { X: 200, Y: 200, Z: 20, E: 50 },
+	maxAccel: { X: 1500, Y: 1500, Z: 100, E: 1000 },
+	jerk: { X: 15, Y: 15, Z: 2, E: 5 },
+	printAccel: 1000,
+	travelAccel: 1500,
 };
 
 describe("analyseText", () => {
@@ -228,6 +237,50 @@ describe("analyseText", () => {
 
 		it("motorsAddressed is false when motors are never disabled", () => {
 			expect(analyseText("G1 X1").motorsAddressed).toBe(false);
+		});
+	});
+
+	describe("time estimate", () => {
+		it("prefers the slicer's own M73 markers when present", () => {
+			const text = ["M73 P0 R12", "G1 X10 F6000", "M73 P50 R6", "G1 X20 F6000", "M73 P100 R0"].join("\n");
+			const analysis = analyseText(text, undefined, LIMITS);
+			expect(analysis.timeSource).toBe("m73");
+			expect(analysis.estimatedSeconds).toBe(12 * 60);
+		});
+
+		it("uses M73 even without machine limits, since it needs no model at all", () => {
+			const analysis = analyseText("M73 P0 R12");
+			expect(analysis.timeSource).toBe("m73");
+			expect(analysis.estimatedSeconds).toBe(12 * 60);
+		});
+
+		it("uses the first M73's R, not a later one, as the total", () => {
+			const analysis = analyseText("M73 P0 R12\nM73 P50 R6");
+			expect(analysis.estimatedSeconds).toBe(12 * 60);
+		});
+
+		it("falls back to the move-time model when there are no M73 markers", () => {
+			const analysis = analyseText("G28\nG1 X100 Y100 F6000\nG1 X0 Y0 F6000", undefined, LIMITS);
+			expect(analysis.timeSource).toBe("model");
+			expect(analysis.estimatedSeconds).toBeGreaterThan(0);
+		});
+
+		it("reports none when there are no markers and no limits were supplied", () => {
+			const analysis = analyseText("G28\nG1 X100 Y100 F6000");
+			expect(analysis.timeSource).toBe("none");
+			expect(analysis.estimatedSeconds).toBeNull();
+		});
+
+		it("reports none for an empty file even when limits are supplied", () => {
+			const analysis = analyseText("", undefined, LIMITS);
+			expect(analysis.timeSource).toBe("none");
+			expect(analysis.estimatedSeconds).toBeNull();
+		});
+
+		it("reports none for a file with only non-move commands", () => {
+			const analysis = analyseText("M104 S210\nM140 S60", undefined, LIMITS);
+			expect(analysis.timeSource).toBe("none");
+			expect(analysis.estimatedSeconds).toBeNull();
 		});
 	});
 

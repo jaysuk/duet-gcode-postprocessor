@@ -13,6 +13,7 @@ import { findReplaceStep } from "./findReplace";
 import { insertAtStep } from "./insertAt";
 import { paramRewriteStep } from "./paramRewrite";
 import { rangeVaryStep } from "./rangeVary";
+import { rewriteTimeStep } from "./rewriteTime";
 import { rulesStep } from "./rules";
 import { scriptStep } from "./script";
 import type { StepDefinition } from "./types";
@@ -25,6 +26,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	paramRewriteStep,
 	rangeVaryStep,
 	fanByFeatureStep,
+	rewriteTimeStep,
 	rulesStep,
 	scriptStep,
 ] as unknown as Array<StepDefinition<never>>);

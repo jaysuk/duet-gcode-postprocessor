@@ -20,9 +20,12 @@ import {
 } from "../constants";
 import { Analyser, type FileAnalysis } from "../analysis";
 import { addEntry, parseIndex, pruneIndex, serialiseIndex, type BackupEntry } from "./backups";
+import { advance, createState } from "../gcode/state";
+import { TimeEstimator, type MachineLimits } from "../gcode/timeModel";
+import { tokenise } from "../gcode/tokenise";
 import { parseMetadata, type SlicerMetadata } from "../gcode/metadata";
 import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
-import { alreadyProcessed, buildTransforms, findStamps, makeStamp, type Recipe, type Stamp } from "../recipe";
+import { alreadyProcessed, buildTransforms, findStamps, makeStamp, usesRewriteTime, type Recipe, type Stamp } from "../recipe";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
 
 export interface FileGateway {
@@ -62,6 +65,9 @@ export interface ProcessOptions {
 	dryRun: boolean;
 	/** Also collect a full analysis of the *source* during the same pass. */
 	analyse?: boolean;
+	/** This machine's motion limits. Only consulted when the recipe enables `rewriteTime`, which
+	 *  cannot recompute M73 markers without them. */
+	limits?: MachineLimits;
 	onProgress?: (update: ProgressUpdate) => void;
 	signal?: AbortSignalLike;
 	/** Injected for tests. */
@@ -104,6 +110,58 @@ export async function prescan(blob: Blob): Promise<{ head: string; tail: string;
 }
 
 /**
+ * A dedicated forward walk over the already-downloaded blob to total the model's time estimate and
+ * count the M73 markers, *before* the main transform pass reaches the first one — `rewriteTime`
+ * cannot give its first marker a percentage without knowing the whole file's total first.
+ *
+ * This duplicates the chunked-read loop below rather than sharing it; task 05 generalises this exact
+ * problem (a step needing a first look at the whole file) into a proper collector-based second pass
+ * and this will be one of the things it folds in, not a pattern to extend for a second consumer.
+ */
+async function estimateRewriteTimeTotals(
+	blob: Blob,
+	limits: MachineLimits,
+	chunkBytes: number,
+	checkCancelled: () => void,
+): Promise<{ totalSeconds: number; markerCount: number }> {
+	const state = createState();
+	const estimator = new TimeEstimator(limits);
+	let markerCount = 0;
+
+	const decoder = new TextDecoder("utf-8");
+	let carry = "";
+	let offset = 0;
+	let lastYield = Date.now();
+
+	const consume = (rawLine: string): void => {
+		const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+		const token = tokenise(line);
+		advance(state, token);
+		estimator.line(token, state);
+		if (token.letter === "M" && token.code === "M73") markerCount++;
+	};
+
+	while (offset < blob.size) {
+		checkCancelled();
+		const end = Math.min(offset + chunkBytes, blob.size);
+		const lastChunk = end >= blob.size;
+		const text = carry + decoder.decode(await blob.slice(offset, end).arrayBuffer(), { stream: !lastChunk });
+		const lines = text.split("\n");
+		carry = lastChunk ? "" : (lines.pop() ?? "");
+		if (lastChunk && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+		for (const rawLine of lines) consume(rawLine);
+		offset = end;
+		if (Date.now() - lastYield >= YIELD_INTERVAL_MS) {
+			await yieldToUi();
+			lastYield = Date.now();
+		}
+	}
+	if (carry !== "") consume(carry);
+
+	return { totalSeconds: estimator.elapsed, markerCount };
+}
+
+/**
  * Download, transform and (unless this is a dry run) write back.
  *
  * Order of operations when writing: backup first, then upload to a temp name, then move onto the
@@ -128,7 +186,23 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	const { head, meta } = await prescan(blob);
 	const existingStamp = alreadyProcessed(head, recipe);
 
-	const transforms = buildTransforms(recipe, { scriptsTrusted: options.scriptsTrusted });
+	// rewriteTime needs the whole file's total time before its first marker — see
+	// estimateRewriteTimeTotals for why this cannot be folded into the main pass below
+	let rewriteTimeTotals: { totalSeconds: number; markerCount: number } | null = null;
+	if (usesRewriteTime(recipe) && options.limits !== undefined) {
+		report({ phase: "scanning", fraction: 0 });
+		rewriteTimeTotals = await estimateRewriteTimeTotals(
+			blob, options.limits, Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES), checkCancelled,
+		);
+		checkCancelled();
+	}
+
+	const transforms = buildTransforms(recipe, {
+		scriptsTrusted: options.scriptsTrusted,
+		machineLimits: options.limits,
+		totalEstimatedSeconds: rewriteTimeTotals?.totalSeconds ?? null,
+		totalMarkerCount: rewriteTimeTotals?.markerCount ?? 0,
+	});
 	const pipeline = new Pipeline({
 		transforms,
 		meta,
@@ -353,6 +427,7 @@ export async function inspectFile(options: {
 	onProgress?: (update: ProgressUpdate) => void;
 	signal?: AbortSignalLike;
 	chunkBytes?: number;
+	limits?: MachineLimits;
 }): Promise<{ analysis: FileAnalysis; meta: SlicerMetadata; stamps: Array<Stamp>; head: string; bytes: number }> {
 	const report = options.onProgress ?? (() => { });
 	const checkCancelled = () => {
@@ -367,7 +442,7 @@ export async function inspectFile(options: {
 
 	report({ phase: "scanning", fraction: null });
 	const { head, meta } = await prescan(blob);
-	const analyser = new Analyser(meta);
+	const analyser = new Analyser(meta, options.limits);
 
 	const decoder = new TextDecoder("utf-8");
 	const chunkBytes = Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES);

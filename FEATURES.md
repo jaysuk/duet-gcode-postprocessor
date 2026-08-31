@@ -7,10 +7,10 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 > calibration-tower step (B6), the range of insertion anchors (B3), the preflight checks (E8–E12),
 > the Flexible-Layouts widget (F1), the backup manager with restore/download/delete (D7), the fan
 > audit and per-feature override (G3), `M98` macro validation (G5), cold-extrusion and end-of-file
-> hygiene checks (G8), and the Marlin tool-scoped temperature fix (H8). Still outstanding: auto-run
-> on upload (D5), batch processing (D6), automatic recipe selection (D4), run history (D8), the
-> volumetric flow-rate audit and feedrate clamping (G6–G7, need the move-time model first), and the
-> "Later" items.
+> hygiene checks (G8), the Marlin tool-scoped temperature fix (H8), and the move-time model with the
+> `M73` rewrite (G1). Still outstanding: auto-run on upload (D5), batch processing (D6), automatic
+> recipe selection (D4), run history (D8), the volumetric flow-rate audit and feedrate clamping
+> (G6–G7, now unblocked by G1 but not yet built), and the "Later" items.
 > See [PLAN.md](PLAN.md#status) for the deviations.
 
 ---
@@ -115,7 +115,7 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 
 | # | Feature | Notes |
 | --- | --- | --- |
-| G1 | **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right | The enabler for G2–G4; useful alone |
+| G1 | ✅ **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right — Done — `model/gcode/timeModel.ts`, `dwc/machineSnapshot.ts` (`machineLimits`), `model/steps/rewriteTime.ts` | The enabler for G2–G4; useful alone |
 | G2 | **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment | Needs G1 and a lookahead pass |
 | G3 | ✅ **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Done — `model/gcode/features.ts`, `model/steps/fanByFeature.ts` |
 | G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |

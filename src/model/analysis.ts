@@ -9,6 +9,7 @@ import { bareMacroName, detectDialect, type DialectReport } from "./gcode/dialec
 import { normaliseFeature, type Feature } from "./gcode/features";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
 import { advance, createState, type MachineState } from "./gcode/state";
+import { TimeEstimator, type MachineLimits } from "./gcode/timeModel";
 import { findParam, paramNumber, parseParams, tokenise, unquoteString } from "./gcode/tokenise";
 
 export interface Extents {
@@ -74,6 +75,15 @@ export interface FileAnalysis {
 	fanAddressed: boolean;
 	/** True if the file ever disables motors (M18 or M84). */
 	motorsAddressed: boolean;
+	/**
+	 * Where the print-time estimate came from. `"m73"` when the slicer's own `M73 P R` markers were
+	 * found (read from the first one — far more accurate than any model, since the slicer knew the
+	 * real geometry); `"model"` when this machine's own move-time model was used instead, which
+	 * needs `limits` to have been supplied to the constructor; `"none"` when neither was possible.
+	 */
+	timeSource: "m73" | "model" | "none";
+	/** Estimated total print time in seconds, or null when `timeSource` is `"none"`. */
+	estimatedSeconds: number | null;
 	dialect: DialectReport;
 	meta: SlicerMetadata;
 }
@@ -108,9 +118,16 @@ export class Analyser {
 	private motorsAddressed = false;
 	private x: number | null = null;
 	private y: number | null = null;
+	private readonly timeEstimator: TimeEstimator | null;
+	/** True once an M73 with a parseable R has been seen — the file states its own time. */
+	private sawM73 = false;
+	/** Total minutes from the FIRST such M73 — later ones only narrow toward zero as printing
+	 *  progresses, so the first is what states the whole print's length. */
+	private firstM73Minutes: number | null = null;
 
-	constructor(private readonly meta: SlicerMetadata = emptyMetadata()) {
+	constructor(private readonly meta: SlicerMetadata = emptyMetadata(), limits?: MachineLimits) {
 		this.state = createState({ geometricFallback: !meta.hasLayerMarkers });
+		this.timeEstimator = limits !== undefined ? new TimeEstimator(limits) : null;
 	}
 
 	line(raw: string): void {
@@ -119,6 +136,7 @@ export class Analyser {
 
 		const token = tokenise(raw);
 		advance(this.state, token);
+		this.timeEstimator?.line(token, this.state);
 		if (this.state.layer > this.maxLayer) this.maxLayer = this.state.layer;
 		if (this.state.relativeE) this.usesRelativeE = true;
 
@@ -240,6 +258,16 @@ export class Analyser {
 				this.motorsAddressed = true;
 				break;
 			}
+			case "M73": {
+				if (!this.sawM73) {
+					const r = paramNumber(parseParams(body), "R");
+					if (r !== null) {
+						this.sawM73 = true;
+						this.firstM73Minutes = r;
+					}
+				}
+				break;
+			}
 			case "M486": {
 				if (this.state.object !== null) this.objectSet.add(this.state.object);
 				break;
@@ -280,6 +308,15 @@ export class Analyser {
 
 	result(): FileAnalysis {
 		const hasExtents = Number.isFinite(this.minX) || Number.isFinite(this.minZ);
+
+		const modelSeconds = this.timeEstimator?.elapsed ?? 0;
+		const timeSource: FileAnalysis["timeSource"] = this.sawM73
+			? "m73"
+			: (modelSeconds > 0 ? "model" : "none");
+		const estimatedSeconds = this.sawM73
+			? (this.firstM73Minutes as number) * 60
+			: (timeSource === "model" ? modelSeconds : null);
+
 		return {
 			lines: this.lines,
 			bytes: this.bytes,
@@ -317,6 +354,8 @@ export class Analyser {
 			heatersAddressed: this.heatersAddressed,
 			fanAddressed: this.fanAddressed,
 			motorsAddressed: this.motorsAddressed,
+			timeSource,
+			estimatedSeconds,
 			dialect: detectDialect(this.counts),
 			meta: this.meta,
 		};
@@ -324,8 +363,8 @@ export class Analyser {
 }
 
 /** Convenience for tests and small files. */
-export function analyseText(text: string, meta?: SlicerMetadata): FileAnalysis {
-	const analyser = new Analyser(meta);
+export function analyseText(text: string, meta?: SlicerMetadata, limits?: MachineLimits): FileAnalysis {
+	const analyser = new Analyser(meta, limits);
 	for (const rawLine of text.split("\n")) {
 		analyser.line(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
 	}

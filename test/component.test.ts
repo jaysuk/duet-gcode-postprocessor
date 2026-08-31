@@ -169,8 +169,11 @@ describe("the step form", () => {
 			props: { definition, config: defaultConfig(id) },
 		});
 		expect(wrapper.exists()).toBe(true);
-		// Every visible field should render some kind of input
-		expect(wrapper.findAll("input, textarea, select").length).toBeGreaterThan(0);
+		// Every visible field should render some kind of input — a step with no configurable
+		// fields at all (e.g. rewriteTime, which just reads the machine's own limits) has none
+		if (definition.fields.length > 0) {
+			expect(wrapper.findAll("input, textarea, select").length).toBeGreaterThan(0);
+		}
 	});
 
 	it("emits the whole config when a field changes", async () => {

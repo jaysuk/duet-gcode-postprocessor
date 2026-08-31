@@ -133,7 +133,7 @@ import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
 import { checkMacros } from "../dwc/macroCheck";
-import { machineSnapshot } from "../dwc/machineSnapshot";
+import { machineLimits, machineSnapshot } from "../dwc/machineSnapshot";
 import type { FileAnalysis } from "../model/analysis";
 import { runChecks, type CheckResult } from "../model/checks";
 import { featureLabel } from "../model/gcode/features";
@@ -208,7 +208,8 @@ const stats = computed(() => {
 		{ label: "Lines", value: a.lines.toLocaleString() },
 		{ label: "Layers", value: String(a.layers) },
 		{ label: "Layer height", value: m.layerHeight === null ? "—" : `${m.layerHeight} mm` },
-		{ label: "Print time", value: m.printTimeSeconds === null ? "—" : formatDuration(m.printTimeSeconds) },
+		{ label: "Print time (slicer)", value: m.printTimeSeconds === null ? "—" : formatDuration(m.printTimeSeconds) },
+		{ label: "Print time (this machine)", value: estimatedTimeLabel(a) },
 		{ label: "Filament", value: m.filamentMm === null ? "—" : `${(m.filamentMm / 1000).toFixed(2)} m` },
 		{ label: "Tools used", value: a.tools.length === 0 ? "none" : a.tools.map((t) => `T${t}`).join(", ") },
 		{ label: "Hot end", value: a.maxToolTemp === null ? "—" : `${a.maxToolTemp} °C` },
@@ -238,6 +239,16 @@ function describeFlavour(a: FileAnalysis): string {
 	}
 }
 
+function estimatedTimeLabel(a: FileAnalysis): string {
+	if (a.estimatedSeconds === null) return "—";
+	const duration = formatDuration(a.estimatedSeconds);
+	switch (a.timeSource) {
+		case "m73": return `${duration} (from M73 markers)`;
+		case "model": return `${duration} (estimated from this machine's limits)`;
+		default: return duration;
+	}
+}
+
 function formatDuration(seconds: number): string {
 	const h = Math.floor(seconds / 3600);
 	const m = Math.round((seconds % 3600) / 60);
@@ -260,6 +271,7 @@ async function inspect(): Promise<void> {
 			sourcePath: props.path,
 			signal,
 			onProgress: (update: ProgressUpdate) => { progress.value = update.fraction; },
+			limits: machineLimits(machineStore.model),
 		});
 		analysis.value = result.analysis;
 		meta.value = result.meta;

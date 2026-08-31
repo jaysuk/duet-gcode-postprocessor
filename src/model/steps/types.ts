@@ -8,6 +8,7 @@
 
 import type { SlicerMetadata } from "../gcode/metadata";
 import type { MachineState } from "../gcode/state";
+import type { MachineLimits } from "../gcode/timeModel";
 import type { Tokenised } from "../gcode/tokenise";
 
 /** Read-only view of the machine state plus the tokenised source line. */
@@ -85,10 +86,18 @@ export interface StepDefinition<C = Record<string, unknown>> {
 	validate?(config: C): Array<string>;
 }
 
-/** Anything a step needs from outside its own config (currently: script trust). */
+/** Anything a step needs from outside its own config (currently: script trust, and the move-time
+ *  model's inputs for `rewriteTime`). */
 export interface StepFactoryContext {
 	/** True when the user has explicitly approved running scripts for this recipe. */
 	scriptsTrusted: boolean;
+	/** This machine's motion limits, when known. Only `rewriteTime` currently uses this. */
+	machineLimits?: MachineLimits;
+	/** The whole file's estimated time in seconds, from a pre-pass run ahead of the main one.
+	 *  Null when not computed (no step asked for it, or the limits were not known). */
+	totalEstimatedSeconds?: number | null;
+	/** Count of M73 markers found during that same pre-pass. */
+	totalMarkerCount?: number;
 }
 
 export class StepConfigError extends Error {

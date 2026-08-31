@@ -99,6 +99,11 @@ export function usesScripts(recipe: Recipe): boolean {
 	return recipe.steps.some((s) => s.enabled && s.type === "script");
 }
 
+/** True when the recipe contains at least one enabled rewriteTime step. */
+export function usesRewriteTime(recipe: Recipe): boolean {
+	return recipe.steps.some((s) => s.enabled && s.type === "rewriteTime");
+}
+
 /**
  * Instantiate the transforms for a run. Throws {@link StepConfigError} with a message naming the
  * step when one refuses to build (a bad regex, an untrusted script).

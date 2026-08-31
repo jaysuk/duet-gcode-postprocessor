@@ -8,19 +8,21 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 423 tests green and `typecheck` + `verify-build` passing against DWC
+Implemented in v0.1.0, with 470 tests green and `typecheck` + `verify-build` passing against DWC
 `v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass),
-`docs/tasks/02-fan-audit-and-override.md` (§8 phase 10) and `docs/tasks/03-machine-aware-checks.md`
-(§8 phase 12, partially) are all complete.
+`docs/tasks/02-fan-audit-and-override.md` (§8 phase 10), `docs/tasks/03-machine-aware-checks.md`
+(§8 phase 12, partially) and `docs/tasks/04-move-time-model.md` (§8 phase 8) are all complete.
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phase 10, plus most of phase 12 —
+**Built:** phases 0–3 in full, plus most of 4–7, plus phase 8, plus phase 10, plus most of phase 12 —
 the browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
-inspector and its preflight checks, the streaming engine and safe write path, nine step types,
+inspector and its preflight checks, the streaming engine and safe write path, ten step types,
 recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
 self-update, a backup index with a restore/download/delete UI, feature-type normalisation across
 slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro validation, cold-extrusion
 and end-of-file hygiene checks, a `commandMap` condition (`onlyWithParam`) that fixed a real
-mistranslation in the Marlin preset, and the usage guide.
+mistranslation in the Marlin preset, a machine-aware move-time model with an inspector estimate
+alongside the slicer's own, a `rewriteTime` step that recomputes `M73` markers from it, and the
+usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -45,7 +47,7 @@ mistranslation in the Marlin preset, and the usage guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — three more, each
+**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — two more, each
 self-contained enough to hand to an agent with no context. §8 below is the roadmap they implement:
 the machine-aware features that are the actual argument for running a post-processor on the printer
 rather than on a laptop.
@@ -355,7 +357,7 @@ feature tables are in [FEATURES.md](FEATURES.md) §G–H.
 Ordered by dependency, not by appeal. The first two are infrastructure that four later features
 need, and building them late means building the later features twice.
 
-### Phase 8 — the move-time model *(unlocks 11, 12)*
+### Phase 8 — the move-time model *(unlocks 11, 12)* *(done)*
 
 A per-move time estimate using **this machine's** `move.axes[].speed`/`acceleration`/`jerk` and
 `move.printingAcceleration`/`travelAcceleration`, rather than the slicer's profile for a printer it
@@ -366,6 +368,18 @@ Bambu all do), interpolate those instead and skip the modelling — then say whi
 
 **Ships on its own as:** rewriting the `M73` markers with the machine-corrected estimate, so DWC's
 remaining-time is right. That is a reason to install the plugin all by itself.
+
+- ✅ `moveTime`/`TimeEstimator` (`model/gcode/timeModel.ts`), `MachineLimits` narrowed from the
+  object model in `dwc/machineSnapshot.ts` (extruder limits come from `move.extruders[]`, a
+  separate collection from `move.axes[]`; printing/travel acceleration prefer
+  `move.motionSystems[].printingAcceleration`/`.travelAcceleration`, falling back to the deprecated
+  top-level fields of the same name).
+- ✅ `FileAnalysis.timeSource`/`estimatedSeconds`, shown in the inspector next to the slicer's own
+  print-time estimate.
+- ✅ The `rewriteTime` step, rewriting existing `M73` markers in place from the model. A small
+  dedicated pre-pass in `transfer.ts` totals the file's time before the main pass reaches the first
+  marker — phase 9 will fold this into its general second-pass mechanism rather than this staying a
+  one-off.
 
 ### Phase 9 — the analysis pass *(unlocks 11, 14)*
 

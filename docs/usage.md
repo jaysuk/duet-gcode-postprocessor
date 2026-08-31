@@ -135,6 +135,18 @@ Choose whether your speeds are **0–255** or **0–1** — check the Fan speeds
 to see which one this file already uses — and optionally set a first-layer speed, which takes
 priority over any feature override on layer 0.
 
+### Rewrite print time (M73)
+
+A slicer's `M73 P<percent> R<minutes>` markers are computed for the machine it thinks it is
+slicing for — on a Duet with different acceleration, jerk or speed limits, DWC's own progress bar
+and remaining-time (which just reads those markers back) can be badly wrong. This step recomputes
+every existing marker from this machine's own limits (`M201`/`M203`/`M204`/`M566`), so `P` reflects
+percent complete **by time**, not by bytes, and `R` is the real minutes remaining.
+
+It rewrites markers in place only — a file with no `M73` markers at all is left untouched (nothing
+is inserted at a fixed cadence) and the run report notes that nothing was found. No fields to
+configure: it reads the machine's limits automatically at apply time.
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,
@@ -235,7 +247,9 @@ From **⋮ → Add a bundled preset**:
 
 The **Inspect** tab reads the file once, without writing anything, and reports:
 
-- Slicer and version, print time, filament, layer height and count
+- Slicer and version, print time (the slicer's own figure **and** an estimate for this specific
+  machine, computed from its real speed/acceleration/jerk limits, plus which of the two sources it
+  used — see "Rewrite print time" below), filament, layer height and count
 - Line count, size, layer count, tools, temperatures, maximum feedrate, extrusion mode, `M486` objects
 - Motion extents in X, Y and Z
 - Detected **flavour** — RepRapFirmware, Marlin or Klipper — and what the evidence was
