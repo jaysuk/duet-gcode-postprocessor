@@ -55,8 +55,9 @@ import { useRouter } from "vue-router";
 import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
+import { installedPluginVersion } from "../dwc/machineSnapshot";
 import { scriptsTrusted, useRecipes } from "../dwc/recipeStore";
-import { LS_SELECTED_FILE, ROUTE_PATH } from "../model/constants";
+import { LS_SELECTED_FILE, PLUGIN_MANIFEST_ID, ROUTE_PATH } from "../model/constants";
 import { planOutput } from "../model/io/plan";
 import { CancelledError, processFile } from "../model/io/transfer";
 import { usesScripts, validateRecipe } from "../model/recipe";
@@ -119,7 +120,7 @@ async function preview(): Promise<void> {
 			sourcePath: path.value,
 			recipe: recipe.value,
 			plan: planOutput({ sourcePath: path.value, mode: "alongside" }),
-			pluginVersion: "0.0.0",
+			pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
 			scriptsTrusted: scriptsTrusted(recipe.value.id),
 			dryRun: true,
 			onProgress: (update) => { progress.value = update.fraction; },

@@ -2,6 +2,7 @@ import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
 
+import BackupManager from "../src/components/BackupManager.vue";
 import DiffPreview from "../src/components/DiffPreview.vue";
 import FileInspector from "../src/components/FileInspector.vue";
 import GcodeBrowser from "../src/components/GcodeBrowser.vue";
@@ -15,12 +16,14 @@ import { defaultConfig, STEP_DEFINITIONS } from "../src/model/steps/registry";
 
 // The shared test kit's file-listing stub (DwcFile) carries no `size` field, so a real
 // createGateway().sizeOf() can never resolve to a non-null value under it — this mock is the only
-// way to drive the large-file and target-exists warnings end to end
+// way to drive the large-file and target-exists warnings end to end. `download` defaults to
+// rejecting, matching the real gateway's behaviour for a file that does not exist (e.g. no backup
+// index has been written yet) — BackupManager's empty-state path depends on that rejection.
 const sizeOfMock = vi.fn<(path: string) => Promise<number | null>>();
 vi.mock("../src/dwc/gateway", () => ({
 	createGateway: () => ({
 		sizeOf: sizeOfMock,
-		download: vi.fn(),
+		download: vi.fn().mockRejectedValue(new Error("No such file")),
 		upload: vi.fn(),
 		move: vi.fn(),
 		remove: vi.fn(),
@@ -45,6 +48,19 @@ describe("components mount", () => {
 
 	it("mounts the browser", () => {
 		expect(mountInDwc(GcodeBrowser).exists()).toBe(true);
+	});
+
+	it("mounts the backup manager and shows the empty state when there is no index yet", async () => {
+		setConnected(true);
+		const wrapper = mountInDwc(BackupManager);
+		await flushPromises();
+		expect(wrapper.text()).toContain("No backups yet");
+	});
+
+	it("shows a not-connected message rather than the empty state when disconnected", () => {
+		setConnected(false);
+		const wrapper = mountInDwc(BackupManager);
+		expect(wrapper.text()).toContain("Not connected");
 	});
 
 	it("mounts the inspector with nothing selected", () => {

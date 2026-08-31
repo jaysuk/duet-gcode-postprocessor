@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { createRecipe, makeStamp, newUid, type Recipe } from "../model/recipe";
 import {
-	baseName, blocking, checkSafety, dirName, formatBytes, normalisePath, planOutput, samePath,
-	splitExtension, type OutputPlan,
+	backupCandidatePath, baseName, blocking, checkSafety, dirName, formatBytes, normalisePath,
+	planOutput, samePath, splitExtension, type OutputPlan,
 } from "../model/io/plan";
 import { LARGE_FILE_WARN_BYTES } from "../model/constants";
 
@@ -60,8 +60,9 @@ describe("planOutput", () => {
 		const plan = planOutput({ sourcePath: SOURCE, mode: "inPlace", now: NOW });
 		expect(plan.targetPath).toBe(SOURCE);
 		expect(plan.overwritesSource).toBe(true);
-		expect(plan.backupPath).toBe("0:/gcodes/.postproc/backups/benchy.20260830-112233.gcode");
+		expect(plan.backupPath).toBe("0:/postproc/backups/benchy.20260830-112233.gcode");
 		expect(plan.tempPath).toBe(`${SOURCE}.pp.tmp`);
+		expect(plan.backupNaming).toEqual({ stem: "benchy", ts: "20260830-112233", ext: ".gcode" });
 	});
 
 	it("writes alongside without a backup", () => {
@@ -69,6 +70,7 @@ describe("planOutput", () => {
 		expect(plan.targetPath).toBe("0:/gcodes/prints/benchy.pp.gcode");
 		expect(plan.overwritesSource).toBe(false);
 		expect(plan.backupPath).toBeNull();
+		expect(plan.backupNaming).toBeNull();
 	});
 
 	it("honours a custom suffix", () => {
@@ -85,6 +87,27 @@ describe("planOutput", () => {
 		const plan = planOutput({ sourcePath: SOURCE, mode: "folder", folder: "0:/gcodes/prints", now: NOW });
 		expect(plan.overwritesSource).toBe(true);
 		expect(plan.backupPath).not.toBeNull();
+	});
+});
+
+describe("backupCandidatePath", () => {
+	it("uses the plain name for the first attempt", () => {
+		expect(backupCandidatePath("benchy", "20260830-112233", ".gcode", 0))
+			.toBe("0:/postproc/backups/benchy.20260830-112233.gcode");
+	});
+
+	it("appends a numeric suffix for later attempts, so a same-second collision does not overwrite", () => {
+		expect(backupCandidatePath("benchy", "20260830-112233", ".gcode", 1))
+			.toBe("0:/postproc/backups/benchy.20260830-112233-2.gcode");
+		expect(backupCandidatePath("benchy", "20260830-112233", ".gcode", 2))
+			.toBe("0:/postproc/backups/benchy.20260830-112233-3.gcode");
+	});
+
+	it("produces a different candidate for every attempt", () => {
+		const candidates = new Set(
+			Array.from({ length: 10 }, (_, i) => backupCandidatePath("benchy", "20260830-112233", ".gcode", i)),
+		);
+		expect(candidates.size).toBe(10);
 	});
 });
 

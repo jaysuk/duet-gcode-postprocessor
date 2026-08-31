@@ -237,14 +237,15 @@ than no check.
 | --- | --- |
 | **As a new file next to the original** (default) | `benchy.gcode` → `benchy.pp.gcode`. The suffix is editable. |
 | **Into another folder** | Keeps the name, writes into a folder you choose |
-| **Over the original** | Overwrites, after copying the original to `0:/gcodes/.postproc/backups/` with a timestamp |
+| **Over the original** | Overwrites, after copying the original to `0:/postproc/backups/` with a timestamp |
 
 ### What protects you
 
 - **Preview is the default.** Apply is a separate, deliberate action with a confirmation that lists
   every warning.
 - **The printing file is off limits.** Processing it, or writing over it, is blocked outright.
-- **Backups.** Overwriting always copies the original first.
+- **Backups, and you can get them back.** Overwriting always copies the original first, into
+  `0:/postproc/backups/`, and records where it came from in an index — see **Backups** below.
 - **Atomic writes.** The output is uploaded to `<target>.pp.tmp` and then moved into place, so an
   interrupted upload never leaves a half-written print file — the original is untouched and there is
   a stray `.tmp` to delete.
@@ -256,6 +257,25 @@ than no check.
 
 ---
 
+## Backups
+
+The **Backups** tab lists every backup taken when overwriting a file in place: the file it came
+from, when, its size, and which recipe was about to run. Up to 20 are kept; the oldest is dropped
+once a 21st is taken.
+
+Per backup:
+
+- **Restore** — writes it back to the original path, using the same upload-to-a-temp-name-then-move
+  approach as a normal write. Refused outright if that path is the file the printer is currently
+  reading.
+- **Download** — saves a copy through the browser, e.g. to keep one outside the printer entirely.
+- **Delete** — removes the backup and its entry. Cannot be undone.
+
+If restoring fails partway through — the original folder no longer exists, say — the backup file
+itself is never touched; download it and copy it into place by hand instead.
+
+---
+
 ## Large files
 
 Files are read in 4 MB slices through a streaming decoder and the output is flushed as it goes, so
@@ -263,7 +283,8 @@ a 200 MB file is never held in memory as text. Processing yields to the browser 
 which keeps the interface responsive and **Cancel** live throughout.
 
 It is still your browser doing the work. Above 250 MB you get a warning and a suggestion to leave
-the tab open. Cancelling before the write phase leaves the SD card completely untouched.
+the tab open — shown as soon as you select the file, before you press Preview or Apply, not after.
+Cancelling before the write phase leaves the SD card completely untouched.
 
 ---
 

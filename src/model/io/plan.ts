@@ -28,6 +28,12 @@ export interface OutputPlan {
 	/** Where the original is copied before an in-place overwrite, or null when not overwriting. */
 	backupPath: string | null;
 	overwritesSource: boolean;
+	/**
+	 * Components `backupPath` was built from, so the transfer layer can try successive suffixed
+	 * names (see {@link backupCandidatePath}) if this exact one collides with a backup already taken
+	 * in the same second from a different folder. Null when not overwriting.
+	 */
+	backupNaming: { stem: string; ts: string; ext: string } | null;
 }
 
 export function dirName(path: string): string {
@@ -70,17 +76,33 @@ export function planOutput(input: OutputPlanInput): OutputPlan {
 	}
 
 	const overwritesSource = targetPath === input.sourcePath;
+	const backupNaming = overwritesSource ? { stem, ts: timestamp(now), ext } : null;
 	return {
 		targetPath,
+		// Deliberately NOT under WORK_DIR: this has to be on the same volume and in the same
+		// directory as the target so the temp-then-move at write time is a rename, not a copy. It
+		// only exists for the seconds the upload takes.
 		tempPath: `${targetPath}.pp.tmp`,
-		backupPath: overwritesSource ? `${BACKUP_DIR}/${stem}.${timestamp(now)}${ext}` : null,
+		backupPath: backupNaming === null ? null : backupCandidatePath(backupNaming.stem, backupNaming.ts, backupNaming.ext, 0),
 		overwritesSource,
+		backupNaming,
 	};
 }
 
 function timestamp(now: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
 	return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+/**
+ * Backup filename for the nth naming attempt. Attempt 0 is the plain `<stem>.<timestamp><ext>`;
+ * later attempts append `-2`, `-3`, … so two files with the same stem, backed up from different
+ * folders in the same second, do not silently overwrite one another's backup — see
+ * `resolveUniqueBackupPath` in `io/transfer.ts`, which is what actually tries them in order.
+ */
+export function backupCandidatePath(stem: string, ts: string, ext: string, attempt: number): string {
+	const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+	return `${BACKUP_DIR}/${stem}.${ts}${suffix}${ext}`;
 }
 
 // #region Safety

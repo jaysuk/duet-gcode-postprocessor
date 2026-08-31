@@ -16,6 +16,7 @@ interface LooseModel {
 	};
 	job?: { file?: { fileName?: string } };
 	state?: { status?: string };
+	plugins?: Map<string, { version?: string }>;
 }
 
 export function machineSnapshot(model: unknown): MachineSnapshot {
@@ -58,4 +59,13 @@ export function jobFileName(model: unknown): string | null {
 export function machineStatus(model: unknown): string | null {
 	const status = (model as LooseModel)?.state?.status;
 	return typeof status === "string" ? status.toLowerCase() : null;
+}
+
+/**
+ * The version of this plugin as installed on the connected machine, read from the object model's
+ * plugins map. Used to stamp processed files — a version that never existed must never end up in a
+ * stamp, so this is the one place that reads it rather than each caller guessing "0.0.0" on its own.
+ */
+export function installedPluginVersion(model: unknown, manifestId: string): string {
+	return (model as LooseModel)?.plugins?.get(manifestId)?.version ?? "0.0.0";
 }

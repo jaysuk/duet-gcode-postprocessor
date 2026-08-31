@@ -16,13 +16,14 @@
  */
 
 import {
-	METADATA_SCAN_BYTES, OUTPUT_FLUSH_BYTES, READ_CHUNK_BYTES,
+	BACKUP_DIR, BACKUP_INDEX, MAX_BACKUPS, METADATA_SCAN_BYTES, OUTPUT_FLUSH_BYTES, READ_CHUNK_BYTES,
 } from "../constants";
 import { Analyser, type FileAnalysis } from "../analysis";
+import { addEntry, parseIndex, pruneIndex, serialiseIndex, type BackupEntry } from "./backups";
 import { parseMetadata, type SlicerMetadata } from "../gcode/metadata";
 import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
 import { alreadyProcessed, buildTransforms, findStamps, makeStamp, type Recipe, type Stamp } from "../recipe";
-import type { OutputPlan } from "./plan";
+import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
 
 export interface FileGateway {
 	download(path: string, onProgress?: (loaded: number, total: number) => void): Promise<Blob>;
@@ -237,11 +238,27 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	checkCancelled();
 
 	// Backup before anything can overwrite the original
-	if (plan.backupPath !== null) {
+	if (plan.backupNaming !== null) {
 		report({ phase: "finalising", fraction: null, detail: "Backing up the original" });
-		await gateway.makeDirectory(dirOf(plan.backupPath));
-		await gateway.upload(plan.backupPath, blob);
-		result.backupPath = plan.backupPath;
+		const backupPath = await resolveUniqueBackupPath(gateway, plan.backupNaming);
+		await gateway.makeDirectory(dirOf(backupPath));
+		await gateway.upload(backupPath, blob);
+		result.backupPath = backupPath;
+
+		// The backup itself is already safely on the card at this point, so a failure updating the
+		// index (a corrupt read, an upload that drops) must not fail the run — it is recorded as a
+		// warning instead, since the backup still exists even if this run cannot find it later
+		try {
+			await updateBackupIndex(gateway, {
+				file: baseName(backupPath),
+				originalPath: sourcePath,
+				at: (options.now ?? new Date()).toISOString(),
+				bytes: blob.size,
+				recipe: recipe.name,
+			});
+		} catch (e) {
+			result.stats.warnings.push(`Could not update the backup index: ${(e as Error).message}`);
+		}
 	}
 
 	report({ phase: "uploading", fraction: 0 });
@@ -268,6 +285,52 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 function dirOf(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? path : path.slice(0, index);
+}
+
+/**
+ * Try successive suffixed backup names until one is free, so two files with the same stem backed up
+ * from different folders in the same second do not silently overwrite one another — the plain name
+ * alone collides in exactly that case, and losing a backup is the failure this feature exists to
+ * prevent. Capped rather than unbounded, so a gateway that always reports a name as taken cannot
+ * hang a run; falling back to the last candidate tried is still far better than failing the write.
+ */
+async function resolveUniqueBackupPath(
+	gateway: FileGateway,
+	naming: { stem: string; ts: string; ext: string },
+): Promise<string> {
+	const MAX_ATTEMPTS = 1000;
+	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+		const candidate = backupCandidatePath(naming.stem, naming.ts, naming.ext, attempt);
+		const size = await gateway.sizeOf(candidate);
+		if (size === null) return candidate;
+	}
+	return backupCandidatePath(naming.stem, naming.ts, naming.ext, MAX_ATTEMPTS - 1);
+}
+
+/**
+ * Record a new backup in the index, pruning the oldest once there are more than {@link MAX_BACKUPS}.
+ * The new index is uploaded BEFORE any pruned file is deleted — losing the index and the files it
+ * described together is much worse than leaving an orphaned backup file behind.
+ */
+async function updateBackupIndex(gateway: FileGateway, entry: BackupEntry): Promise<void> {
+	let existingText = "";
+	try {
+		existingText = await (await gateway.download(BACKUP_INDEX)).text();
+	} catch {
+		// No index yet — the common case on first use; treat it as empty rather than a failure
+	}
+
+	const index = addEntry(parseIndex(existingText), entry);
+	const { keep, drop } = pruneIndex(index, MAX_BACKUPS);
+	await gateway.upload(BACKUP_INDEX, new Blob([serialiseIndex(keep)], { type: "application/json" }));
+
+	for (const dropped of drop) {
+		try {
+			await gateway.remove(`${BACKUP_DIR}/${dropped.file}`);
+		} catch {
+			// Already gone is not an error
+		}
+	}
 }
 
 /**

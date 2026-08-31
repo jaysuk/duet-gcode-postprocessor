@@ -90,12 +90,13 @@ describe("processFile", () => {
 		expect(result.stats.linesChanged).toBe(3);
 	});
 
-	it("backs up, uploads to a temp name, then moves — in that order", async () => {
+	it("backs up, records it in the index, uploads to a temp name, then moves — in that order", async () => {
 		await run(gateway);
 		const order = gateway.log.filter((l) => !l.startsWith("download"));
 		expect(order).toEqual([
-			"mkdir 0:/gcodes/.postproc/backups",
-			"upload 0:/gcodes/.postproc/backups/benchy.20260830-112233.gcode",
+			"mkdir 0:/postproc/backups",
+			"upload 0:/postproc/backups/benchy.20260830-112233.gcode",
+			"upload 0:/postproc/backups.json",
 			"upload 0:/gcodes/benchy.gcode.pp.tmp",
 			"move 0:/gcodes/benchy.gcode.pp.tmp -> 0:/gcodes/benchy.gcode",
 		]);
@@ -168,6 +169,108 @@ describe("processFile", () => {
 		const result = await run(gateway, { dryRun: true });
 		expect(result.meta.slicer).toBe("PrusaSlicer");
 		expect(result.meta.totalLayers).toBe(3);
+	});
+});
+
+describe("the backup index", () => {
+	let gateway: FakeGateway;
+
+	beforeEach(() => {
+		gateway = new FakeGateway({ [SOURCE]: SAMPLE + "\n" });
+	});
+
+	it("records the backup with the original path, so it can be restored", async () => {
+		await run(gateway);
+		const index = JSON.parse(gateway.files.get("0:/postproc/backups.json")!) as Array<Record<string, unknown>>;
+		expect(index).toHaveLength(1);
+		expect(index[0]).toMatchObject({
+			file: "benchy.20260830-112233.gcode",
+			originalPath: SOURCE,
+			recipe: "Halve the speed",
+		});
+		expect(index[0].bytes).toBe((SAMPLE + "\n").length);
+	});
+
+	it("still completes and keeps the backup file when the index upload fails, and records a warning", async () => {
+		gateway.failUploadOn = "0:/postproc/backups.json";
+		const result = await run(gateway);
+
+		expect(result.backupPath).not.toBeNull();
+		expect(gateway.files.get(result.backupPath!)).toBe(SAMPLE + "\n");
+		expect(gateway.files.has("0:/postproc/backups.json")).toBe(false);
+		expect(result.stats.warnings.some((w) => w.includes("backup index"))).toBe(true);
+		// The main write must not be affected by the index failure
+		expect(gateway.files.get(SOURCE)).toContain("F900");
+	});
+
+	it("gives two same-named files from different folders distinct backups", async () => {
+		const gatewayA = new FakeGateway({ "0:/gcodes/a/benchy.gcode": SAMPLE + "\n" });
+		const gatewayB = gatewayA; // same card — both backups land in the same flat directory
+
+		await processFile({
+			gateway: gatewayB,
+			sourcePath: "0:/gcodes/a/benchy.gcode",
+			recipe: recipe(),
+			plan: planOutput({ sourcePath: "0:/gcodes/a/benchy.gcode", mode: "inPlace", now: new Date("2026-08-30T11:22:33") }),
+			pluginVersion: "0.1.0",
+			scriptsTrusted: false,
+			dryRun: false,
+		});
+		gatewayB.files.set("0:/gcodes/b/benchy.gcode", SAMPLE + "\n");
+		const second = await processFile({
+			gateway: gatewayB,
+			sourcePath: "0:/gcodes/b/benchy.gcode",
+			recipe: recipe(),
+			plan: planOutput({ sourcePath: "0:/gcodes/b/benchy.gcode", mode: "inPlace", now: new Date("2026-08-30T11:22:33") }),
+			pluginVersion: "0.1.0",
+			scriptsTrusted: false,
+			dryRun: false,
+		});
+
+		expect(second.backupPath).toBe("0:/postproc/backups/benchy.20260830-112233-2.gcode");
+		const index = JSON.parse(gatewayB.files.get("0:/postproc/backups.json")!) as Array<{ originalPath: string }>;
+		expect(index.map((e) => e.originalPath).sort()).toEqual(["0:/gcodes/a/benchy.gcode", "0:/gcodes/b/benchy.gcode"]);
+	});
+
+	it("prunes the oldest backups past the limit, and only deletes them after the index write succeeds", async () => {
+		// Seed an index with MAX_BACKUPS (20) existing entries, each with a real file on the card
+		const existing: Array<Record<string, unknown>> = [];
+		for (let i = 0; i < 20; i++) {
+			const file = `old${i}.gcode`;
+			gateway.files.set(`0:/postproc/backups/${file}`, "old content");
+			existing.push({
+				file, originalPath: `0:/gcodes/old${i}.gcode`, at: `2026-01-01T00:00:0${i % 10}.000Z`,
+				bytes: 11, recipe: "Old",
+			});
+		}
+		gateway.files.set("0:/postproc/backups.json", JSON.stringify(existing));
+
+		await run(gateway);
+
+		const index = JSON.parse(gateway.files.get("0:/postproc/backups.json")!) as Array<{ file: string }>;
+		expect(index).toHaveLength(20);
+		expect(index[0].file).toBe("benchy.20260830-112233.gcode"); // the new one, newest first
+		// The oldest of the 20 pre-existing entries (last in the newest-first list) was dropped
+		expect(index.map((e) => e.file)).not.toContain("old19.gcode");
+		expect(gateway.files.has("0:/postproc/backups/old19.gcode")).toBe(false);
+	});
+
+	it("does not delete a pruned file when the index write itself fails", async () => {
+		gateway.failUploadOn = "0:/postproc/backups.json";
+		const existing: Array<Record<string, unknown>> = [];
+		for (let i = 0; i < 20; i++) {
+			const file = `old${i}.gcode`;
+			gateway.files.set(`0:/postproc/backups/${file}`, "old content");
+			existing.push({ file, originalPath: `0:/gcodes/old${i}.gcode`, at: "2026-01-01T00:00:00.000Z", bytes: 11, recipe: "Old" });
+		}
+		gateway.files.set("0:/postproc/backups.json", JSON.stringify(existing));
+
+		await run(gateway);
+
+		// The write failed, so pruning must not have happened — every old backup file is still there
+		for (let i = 0; i < 20; i++) {
+			expect(gateway.files.has(`0:/postproc/backups/old${i}.gcode`)).toBe(true);
+		}
 	});
 });
 

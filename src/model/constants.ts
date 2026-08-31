@@ -19,9 +19,16 @@ export const REPO_OWNER = "jaysuk";
 export const REPO_NAME = "duet-gcode-postprocessor";
 export const DOCS_URL = "https://github.com/jaysuk/duet-gcode-postprocessor/blob/main/docs/usage.md";
 
-/** Where the plugin keeps its own files on the SD card. */
-export const WORK_DIR = "0:/gcodes/.postproc";
+/**
+ * Where the plugin keeps its own files on the SD card. A top-level directory rather than somewhere
+ * under 0:/gcodes, so backups do not appear in DWC's Jobs list, and rather than under 0:/sys, which
+ * belongs to the machine configuration rather than to a plugin's working files.
+ */
+export const WORK_DIR = "0:/postproc";
 export const BACKUP_DIR = `${WORK_DIR}/backups`;
+export const BACKUP_INDEX = `${WORK_DIR}/backups.json`;
+/** Oldest backups are pruned once there are more than this many. */
+export const MAX_BACKUPS = 20;
 
 /** localStorage keys (namespaced under the camelCase plugin id). */
 export const LS_SELECTED_FILE = "gCodePostProcessor.selectedFile";

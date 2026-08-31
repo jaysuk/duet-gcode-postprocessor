@@ -8,14 +8,14 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 294 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`.
+Implemented in v0.1.0, with 323 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass) is complete.
 
 **Built:** phases 0–3 in full, plus most of 4–7 —
 the browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
 inspector and its preflight checks, the streaming engine and safe write path, all eight step types,
 recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
-self-update, and the usage guide.
+self-update, a backup index with a restore/download/delete UI, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -36,13 +36,13 @@ self-update, and the usage guide.
 4. **i18n is scaffolded, not applied.** The nav caption and widget strings go through
    `registerPluginMessages`; the rest of the UI is literal English.
 
-**Not built yet:** auto-run on upload (D5), batch processing (D6), a backup browser (backups are
-written and named in the result, but there is no restore UI yet, D7), automatic recipe selection by
-filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8).
+**Not built yet:** auto-run on upload (D5), batch processing (D6), automatic recipe selection by
+filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
+(backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** [`docs/tasks/`](docs/tasks/) holds the work orders — six written, each self-contained
-enough to hand to an agent with no context. §8 below is the roadmap they implement: the
-machine-aware features that are the actual argument for running a post-processor on the printer
+**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — five more, each
+self-contained enough to hand to an agent with no context. §8 below is the roadmap they implement:
+the machine-aware features that are the actual argument for running a post-processor on the printer
 rather than on a laptop.
 
 ---
@@ -93,39 +93,54 @@ the core job.
 ```
 src/
 ├── index.ts                     route + embeddable registration, error capture, update check
-├── components/
-│   ├── PostProcessorPage.vue    the page: browser | inspector | recipe | preview
-│   ├── GcodeBrowser.vue         FileList wrapper + fallback list
-│   ├── FileInspector.vue        metadata, stats, dialect, thumbnail
-│   ├── RecipeEditor.vue         ordered step list, drag to reorder, per-step form
-│   ├── StepForms/*.vue          one small form per step type (schema-driven)
-│   ├── DiffPreview.vue          unified diff, per-rule hit counts, jump-to-change
-│   └── RunReport.vue            what changed, timings, warnings, download log
-├── model/                       ← ALL logic here, pure, unit-tested, no Vue, no DWC imports
+├── components/                  render + delegate; no transformation logic lives here
+│   ├── PostProcessorPage.vue    the page: browser | recipe | inspect | preview | backups tabs
+│   ├── PostProcessorWidget.vue  compact Flexible-Layouts tile (preview only, no Apply)
+│   ├── GcodeBrowser.vue         DWC FileList wrapper, with a self-contained fallback list
+│   ├── FileInspector.vue        metadata, stats, dialect, preflight checks
+│   ├── RecipeEditor.vue         ordered step list, reorder, import/export, bundled presets
+│   ├── StepFields.vue           ONE schema-driven form that renders every step type
+│   ├── DiffPreview.vue          the diff, per-step hit counts, run statistics
+│   └── BackupManager.vue        lists, restores, downloads and deletes backups
+├── dwc/                         the only layer that may import from @/stores/* — everything here
+│   │                            narrows DWC's loosely-typed world into what model/ consumes
+│   ├── gateway.ts               FileGateway implementation over the machine store
+│   ├── machineSnapshot.ts       object-model narrowing: preflight snapshot, job file, plugin version
+│   └── recipeStore.ts           recipe persistence — board settings, localStorage fallback
+├── model/                       ← ALL transformation logic here, pure, unit-tested, no Vue/DWC imports
 │   ├── constants.ts
+│   ├── analysis.ts              single-pass file analysis feeding the inspector + preflight checks
+│   ├── checks.ts                the preflight rules, pure (takes a plain machine snapshot)
+│   ├── pipeline.ts              compose steps, drive lines through, collect stats + diff
+│   ├── recipe.ts                recipe type, (de)serialise, validate, the identity stamp
+│   ├── presets.ts               bundled recipes
+│   ├── updateCheck.ts           self-update — the one model/ module that does talk to DWC directly
 │   ├── gcode/
-│   │   ├── tokenise.ts          line → { command, params:Map, comment, raw }
+│   │   ├── tokenise.ts          line → { command, params, comment, raw } — quote- and escape-aware
 │   │   ├── state.ts             running machine state: layer, Z, tool, feed, abs/rel E, M486 object
 │   │   ├── metadata.ts          slicer header/footer parser (Prusa, Super, Orca, Cura, S3D, ideaMaker)
 │   │   └── dialect.ts           detect Marlin / Klipper / RRF flavour from command usage
 │   ├── steps/                   one module per step type, all implementing Transform
-│   │   ├── types.ts             the Transform interface + StepSchema
-│   │   ├── findReplace.ts  commandMap.ts  insertAt.ts  deleteLines.ts
-│   │   ├── paramRewrite.ts  rangeVary.ts  script.ts  checks.ts
-│   │   └── registry.ts          id → { schema, factory } — drives the UI and a self-maintaining test
-│   ├── pipeline.ts              compose steps, drive lines through, collect stats + diff
-│   ├── recipe.ts                recipe type, (de)serialise, validate, migrate
+│   │   ├── types.ts             the Transform interface + the field-schema StepDefinition
+│   │   ├── findReplace.ts  commandMap.ts  insertAt.ts  deleteLines.ts  paramRewrite.ts
+│   │   ├── rangeVary.ts  rules.ts  script.ts
+│   │   ├── scriptApi.ts         the tokeniser-backed helpers handed to a script (gcode.parse/set/…)
+│   │   └── registry.ts          id → StepDefinition — drives the UI and a self-maintaining test
 │   └── io/
-│       ├── plan.ts              output naming, backup path, collision + safety rules (pure)
-│       └── transfer.ts          the only impure module: download → worker → upload
-├── worker/processor.ts          inline-Blob worker: owns the pipeline + the script sandbox
+│       ├── plan.ts              output naming, backup naming, collision + safety rules (pure)
+│       ├── backups.ts           the backup index: parse/add/prune/serialise (pure)
+│       └── transfer.ts          the only impure model/ module: chunked download → transform → upload
 └── i18n/en.json
 ```
 
 The hard rule from the template guide applies with force here: **`model/` is pure and
-exhaustively unit-tested**; `.vue` files only render and call into it. A post-processor that
-silently corrupts a 40-hour print file is unacceptable, and the only defence that scales is a
-golden-file test suite over real slicer output.
+exhaustively unit-tested**; `.vue` files only render and call into it; `dwc/` is the sole seam
+between the two. A post-processor that silently corrupts a 40-hour print file is unacceptable, and
+the only defence that scales is a golden-file test suite over real slicer output.
+
+There is no `worker/` directory and no per-step form components — see the Status section above for
+why (no Web Worker; `StepFields.vue` is schema-driven rather than one file per step) and
+`docs/tasks/05-analysis-pass.md` for the two-pass design a future worker would sit inside.
 
 ### 3.1 The pipeline
 
@@ -175,8 +190,10 @@ The failure mode that matters is a half-written or wrong file replacing a good o
 - **Dry run is the default.** Apply is a second, explicit action, off the back of a diff you have seen.
 - **Never touch the file currently printing** — checked against `model.job.file.fileName`, and
   against the machine state being `processing` or `simulating`.
-- **Backup before in-place overwrite** into `0:/gcodes/.postproc/backups/`, with a retention
-  setting and a restore button.
+- **Backup before in-place overwrite** into `0:/postproc/backups/`, indexed in
+  `0:/postproc/backups.json` (original path, timestamp, size, recipe) so it can be restored to where
+  it came from — see `model/io/backups.ts` and `components/BackupManager.vue`. Pruned to the newest
+  `MAX_BACKUPS` (20).
 - **Atomic-ish write**: upload to `<target>.pp.tmp`, then `machineStore.move(tmp, target, true)`.
   An interrupted upload leaves the original intact and a `.tmp` to clean up.
 - **Verify after write**: re-list the target directory and compare the byte size against what was

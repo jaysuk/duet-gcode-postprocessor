@@ -71,6 +71,7 @@
 						Preview
 						<v-badge v-if="lastRun !== null" inline :content="lastRun.diff.length" color="primary" />
 					</v-tab>
+					<v-tab value="backups">Backups</v-tab>
 				</v-tabs>
 				<v-divider />
 
@@ -94,6 +95,8 @@
 								 :diff="lastRun?.diff ?? []"
 								 :recipe="recipe"
 								 :source-name="selectedPath ?? ''" />
+
+					<BackupManager v-if="tab === 'backups'" />
 				</div>
 			</v-card>
 		</div>
@@ -209,12 +212,13 @@ import { AboutDialog } from "dwc-plugin-runtime";
 import { useMachineStore } from "@/stores/machine";
 import { LogLevel, useUiStore } from "@/stores/ui";
 
+import BackupManager from "./BackupManager.vue";
 import DiffPreview from "./DiffPreview.vue";
 import FileInspector from "./FileInspector.vue";
 import GcodeBrowser from "./GcodeBrowser.vue";
 import RecipeEditor from "./RecipeEditor.vue";
 import { createGateway } from "../dwc/gateway";
-import { jobFileName, machineStatus } from "../dwc/machineSnapshot";
+import { installedPluginVersion, jobFileName, machineStatus } from "../dwc/machineSnapshot";
 import { scriptsTrusted, setScriptsTrusted, trustedRecipes, useRecipes } from "../dwc/recipeStore";
 import { DOCS_URL, LS_SELECTED_FILE, PLUGIN_MANIFEST_ID } from "../model/constants";
 import { blocking, checkSafety, planOutput, type OutputMode, type SafetyIssue } from "../model/io/plan";
@@ -422,7 +426,7 @@ async function run(dryRun: boolean): Promise<void> {
 			sourcePath: selectedPath.value,
 			recipe: recipe.value,
 			plan: plan.value,
-			pluginVersion: installedVersion(),
+			pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
 			scriptsTrusted: scriptsTrusted(recipe.value.id),
 			dryRun,
 			signal,
@@ -448,11 +452,6 @@ async function run(dryRun: boolean): Promise<void> {
 		busy.value = false;
 		progress.value = null;
 	}
-}
-
-function installedVersion(): string {
-	const plugins = (machineStore.model as { plugins?: Map<string, { version?: string }> }).plugins;
-	return plugins?.get(PLUGIN_MANIFEST_ID)?.version ?? "0.0.0";
 }
 
 function checkUpdate(): void {
