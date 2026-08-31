@@ -105,6 +105,29 @@ Give it a command containing `{value}` (for example `M572 D0 S{value}`), a range
 number of bands or "every layer". Optionally it also emits a message per band so the finished part
 can be read off against the values.
 
+### Fan speed by feature
+
+Overrides the part-cooling fan speed for chosen features — bridges, overhangs, external
+perimeters, and so on — without the slicer's own fan commands undoing it two lines later. This is
+more than a find-and-replace: while an override is in force, the slicer's own `M106`/`M107` lines
+for that region are suppressed (commented out by default, or deleted), and the speed that was in
+force before the override is restored explicitly once the region ends — either at the next feature
+or at a layer change, whichever comes first.
+
+List overrides one per line (or comma-separated) as `feature=speed`:
+
+```
+bridge=255
+overhang=255
+externalPerimeter=180
+```
+
+The recognised features are `externalPerimeter`, `internalPerimeter`, `overhang`, `bridge`,
+`solidInfill`, `topSolidInfill`, `sparseInfill`, `support`, `skirtBrim`, `ironing` and `custom`.
+Choose whether your speeds are **0–255** or **0–1** — check the Fan speeds table on the Inspect tab
+to see which one this file already uses — and optionally set a first-layer speed, which takes
+priority over any feature override on layer 0.
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,
@@ -197,6 +220,7 @@ From **⋮ → Add a bundled preset**:
 | Slow the first layers | Halves the feedrate for layers 0–1 |
 | Strip thumbnails and comments | Can halve the file size, which matters on a slow SD card |
 | Hand the start sequence to the printer | Calls your own `print_start.g` at the first layer change |
+| Boost bridge cooling | Runs bridges and overhangs at full fan speed; everything else untouched |
 
 ---
 
@@ -209,6 +233,8 @@ The **Inspect** tab reads the file once, without writing anything, and reports:
 - Motion extents in X, Y and Z
 - Detected **flavour** — RepRapFirmware, Marlin or Klipper — and what the evidence was
 - A **command histogram**: every G/M code and how often it appears
+- A **fan speeds table**: every distinct fan speed used, how often, and under which features —
+  including which scale (0–255 or 0–1) the file uses, so a "Fan speed by feature" step can match it
 - Every slicer setting found in the header and footer
 - Whether the file has already been post-processed, by which recipe and when
 

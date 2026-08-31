@@ -41,7 +41,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | B10 | **Absolute ↔ relative extrusion conversion** | 3 |
 | B11 | **Strip** — thumbnails, comments, line numbers and checksums; big file-size reductions for slow SD writes | 3 |
 | B12 | **Object labelling** — add or normalise `M486` markers, converting Cura/Orca object comments so cancel-object works | 3 |
-| B13 | **Cooling / fan overrides by layer range** | 3 |
+| B13 | **Cooling / fan overrides by layer range** — superseded by the more useful by-*feature* override, done in phase 10 (`fanByFeature` step) | 3 |
 | B14 | **Marlin-to-RRF preset** — a curated, documented mapping bundle for the ~20 commands that actually differ (explicitly not a general translator) | 3 |
 | B15 | **Z-offset / mesh injection** — insert or replace `G31`, `G29 S1`, baby-stepping at the top of a file | 3 |
 | B16 | **Arc welding / unwelding** (G1 runs ↔ G2/G3) | Later |
@@ -114,7 +114,7 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | --- | --- | --- |
 | G1 | **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right | The enabler for G2–G4; useful alone |
 | G2 | **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment | Needs G1 and a lookahead pass |
-| G3 | **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Needs slicer feature-name normalisation |
+| G3 | ✅ **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Done — `model/gcode/features.ts`, `model/steps/fanByFeature.ts` |
 | G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |
 | G5 | **Validate `M98` macro references** against the SD card | Trivial, catches a print-stopping typo |
 | G6 | **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt | |

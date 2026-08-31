@@ -8,14 +8,16 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 323 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass) is complete.
+Implemented in v0.1.0, with 378 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass) and
+`docs/tasks/02-fan-audit-and-override.md` (§8 phase 10) are both complete.
 
-**Built:** phases 0–3 in full, plus most of 4–7 —
+**Built:** phases 0–3 in full, plus most of 4–7, plus phase 10 —
 the browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
-inspector and its preflight checks, the streaming engine and safe write path, all eight step types,
+inspector and its preflight checks, the streaming engine and safe write path, nine step types,
 recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
-self-update, a backup index with a restore/download/delete UI, and the usage guide.
+self-update, a backup index with a restore/download/delete UI, feature-type normalisation across
+slicers, a fan-speed audit, a fan-by-feature override step, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -40,7 +42,7 @@ self-update, a backup index with a restore/download/delete UI, and the usage gui
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — five more, each
+**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — four more, each
 self-contained enough to hand to an agent with no context. §8 below is the roadmap they implement:
 the machine-aware features that are the actual argument for running a post-processor on the printer
 rather than on a laptop.
@@ -376,7 +378,7 @@ transform pass consumes by index.
 Do this once and properly. Retro-fitting lookahead one feature at a time is how a clean pipeline
 turns into a pile of special cases.
 
-### Phase 10 — fan audit and per-feature override
+### Phase 10 — fan audit and per-feature override *(done)*
 
 An audit listing every fan speed in the file by feature type, and a step that overrides fan speed
 per feature — bridges, overhangs, external perimeters, first layer.

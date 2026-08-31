@@ -80,6 +80,37 @@
 						</v-expansion-panel-text>
 					</v-expansion-panel>
 
+					<v-expansion-panel title="Fan speeds">
+						<v-expansion-panel-text>
+							<div v-if="fanRows.length === 0" class="text-medium-emphasis">
+								No fan commands in this file.
+							</div>
+							<template v-else>
+								<div v-if="mixedFanScale" class="text-caption text-warning mb-2">
+									This file mixes 0–255 and 0–1 fan speed values — shown exactly as written.
+								</div>
+								<v-table density="compact">
+									<thead>
+										<tr>
+											<th>Fan</th>
+											<th>Speed</th>
+											<th>Count</th>
+											<th>Features</th>
+										</tr>
+									</thead>
+									<tbody>
+										<tr v-for="row in fanRows" :key="`${row.fan}-${row.speed}`">
+											<td>P{{ row.fan }}</td>
+											<td>S{{ row.speed }}</td>
+											<td>{{ row.count.toLocaleString() }}</td>
+											<td>{{ row.featureLabel }}</td>
+										</tr>
+									</tbody>
+								</v-table>
+							</template>
+						</v-expansion-panel-text>
+					</v-expansion-panel>
+
 					<v-expansion-panel title="Slicer settings found">
 						<v-expansion-panel-text>
 							<div v-if="metaEntries.length === 0" class="text-medium-emphasis">
@@ -104,6 +135,7 @@ import { createGateway } from "../dwc/gateway";
 import { machineSnapshot } from "../dwc/machineSnapshot";
 import type { FileAnalysis } from "../model/analysis";
 import { runChecks, type CheckResult } from "../model/checks";
+import { featureLabel } from "../model/gcode/features";
 import type { SlicerMetadata } from "../model/gcode/metadata";
 import { formatBytes } from "../model/io/plan";
 import { CancelledError, inspectFile, type ProgressUpdate } from "../model/io/transfer";
@@ -139,6 +171,20 @@ const checks = computed<Array<CheckResult>>(() => (
 ));
 
 const commandList = computed(() => (analysis.value === null ? [] : [...analysis.value.commandCounts.entries()]));
+
+// A file mixing 0-255 and 0-1 fan speeds is unusual enough to be worth flagging rather than
+// silently rendering "S0.5" next to "S255" with no explanation of why they look so different
+const mixedFanScale = computed(() => {
+	const settings = analysis.value?.fanSettings ?? [];
+	return settings.some((s) => s.speed > 1) && settings.some((s) => s.speed > 0 && s.speed <= 1);
+});
+
+const fanRows = computed(() => (analysis.value?.fanSettings ?? []).map((s) => ({
+	fan: s.fan,
+	speed: s.speed,
+	count: s.count,
+	featureLabel: s.features.map((f) => `${featureLabel(f.feature)} (${f.count})`).join(", "),
+})));
 
 const metaEntries = computed(() => (meta.value === null ? [] : [...meta.value.values.entries()].slice(0, 200)));
 

@@ -8,6 +8,7 @@
 
 import { commandMapStep } from "./commandMap";
 import { deleteLinesStep } from "./deleteLines";
+import { fanByFeatureStep } from "./fanByFeature";
 import { findReplaceStep } from "./findReplace";
 import { insertAtStep } from "./insertAt";
 import { paramRewriteStep } from "./paramRewrite";
@@ -23,6 +24,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	deleteLinesStep,
 	paramRewriteStep,
 	rangeVaryStep,
+	fanByFeatureStep,
 	rulesStep,
 	scriptStep,
 ] as unknown as Array<StepDefinition<never>>);

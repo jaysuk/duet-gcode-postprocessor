@@ -48,6 +48,67 @@ describe("analyseText", () => {
 		expect(analysis.extents?.maxX).toBe(20);
 	});
 
+	describe("fanSettings", () => {
+		it("aggregates repeated settings and counts them", () => {
+			const analysis = analyseText("M106 P0 S255\nG1 X1\nM106 P0 S255\nM106 P0 S128");
+			const s255 = analysis.fanSettings.find((s) => s.speed === 255);
+			expect(s255?.count).toBe(2);
+			const s128 = analysis.fanSettings.find((s) => s.speed === 128);
+			expect(s128?.count).toBe(1);
+		});
+
+		it("records M107 as speed 0", () => {
+			const analysis = analyseText("M106 P0 S255\nM107 P0");
+			const off = analysis.fanSettings.find((s) => s.speed === 0 && s.fan === 0);
+			expect(off?.count).toBe(1);
+		});
+
+		it("defaults the fan index to 0 when P is omitted", () => {
+			const analysis = analyseText("M106 S255");
+			expect(analysis.fanSettings).toEqual([{ fan: 0, speed: 255, count: 1, features: [{ feature: "unknown", count: 1 }] }]);
+		});
+
+		it("lists the features a setting was seen under, most frequent first", () => {
+			const analysis = analyseText([
+				";TYPE:Bridge infill",
+				"M106 P0 S255",
+				"G1 X1",
+				";TYPE:Solid infill",
+				"M106 P0 S255",
+				"G1 X1",
+				";TYPE:Bridge infill",
+				"M106 P0 S255",
+			].join("\n"));
+			const setting = analysis.fanSettings.find((s) => s.speed === 255);
+			expect(setting?.features).toEqual([
+				{ feature: "bridge", count: 2 },
+				{ feature: "solidInfill", count: 1 },
+			]);
+		});
+
+		it("keeps 0-255 and 0-1 scales distinct rather than normalising between them", () => {
+			// Guessing wrong here turns "half speed" into "off" — the two must never be conflated
+			const analysis = analyseText("M106 P0 S128\nM106 P0 S0.5");
+			expect(analysis.fanSettings.find((s) => s.speed === 128)).toBeDefined();
+			expect(analysis.fanSettings.find((s) => s.speed === 0.5)).toBeDefined();
+			expect(analysis.fanSettings).toHaveLength(2);
+		});
+
+		it("distinguishes settings by fan index", () => {
+			const analysis = analyseText("M106 P0 S255\nM106 P1 S255");
+			expect(analysis.fanSettings).toHaveLength(2);
+		});
+
+		it("is empty for a file with no fan commands", () => {
+			expect(analyseText("G28\nG1 X1").fanSettings).toEqual([]);
+		});
+
+		it("sorts settings most-frequent first", () => {
+			const analysis = analyseText("M106 P0 S64\nM106 P0 S255\nM106 P0 S255\nM106 P0 S255");
+			expect(analysis.fanSettings[0].speed).toBe(255);
+		});
+	});
+
 	it("counts Klipper macros that are not G-code commands", () => {
 		const analysis = analyseText("SET_PRESSURE_ADVANCE ADVANCE=0.05\nG28");
 		expect(analysis.commandCounts.get("SET_PRESSURE_ADVANCE")).toBe(1);

@@ -173,6 +173,25 @@ export const PRESETS: ReadonlyArray<Preset> = Object.freeze([
 			};
 		},
 	},
+	{
+		key: "boostBridgeCooling",
+		name: "Boost bridge cooling",
+		description: "Runs bridges and overhangs at full fan speed, without the slicer's own setting undoing it, leaving every other feature untouched.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Boost bridge cooling",
+				version: RECIPE_VERSION,
+				steps: [
+					step("fanByFeature", {
+						overrides: "bridge=255\noverhang=255",
+						scale: "0-255", firstLayerEnabled: false, firstLayerSpeed: 0,
+						action: "comment", note: "suppressed by fan override",
+					}, "Adjust the scale to 0-1 first if the Inspect tab shows this file uses fractional fan speeds"),
+				],
+			};
+		},
+	},
 ]);
 
 export function findPreset(key: string): Preset | null {
