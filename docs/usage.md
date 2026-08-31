@@ -147,6 +147,33 @@ It rewrites markers in place only — a file with no `M73` markers at all is lef
 is inserted at a fixed cadence) and the run report notes that nothing was found. No fields to
 configure: it reads the machine's limits automatically at apply time.
 
+### Predictive pre-heat
+
+On a toolchanger, an idle tool sits at its standby temperature and only starts heating to its active
+temperature when it is selected — so either the print waits for it, or nothing waits and the first
+extrusion comes out cold. This step estimates how long each tool's heaters actually take to make that
+climb, using the machine's own tuned `M307` model (the same numbers `M303` auto-tuning measured), and
+inserts `M568 P<n> A2` that far ahead of each tool change so the tool is already at temperature when
+it is needed.
+
+Reads two things it cannot get from the file itself:
+
+- **Room temperature** — the object model has no live ambient reading, so this is a step setting
+  (default 20°C). Get it roughly right; the estimate is not sensitive to being a few degrees off.
+- **This machine's motion limits and tool/heater configuration** — read automatically from the
+  connected machine at apply time, the same way the move-time model (above) does.
+
+**Return the previous tool to standby** (on by default) also inserts `M568 P<m> A1` for the tool
+being left, once its replacement is on its way, so it stops holding filament at printing temperature
+for the rest of the job.
+
+A tool with no heater (a laser, a pen) is skipped silently. A tool with no standby temperature set
+below its active one, or whose heater has no tuned `M307` model, has nothing pre-heated for it and is
+named in the run report instead. A change too close to the start of the file to fit the full lead
+time gets its pre-heat clamped to the very start of the file rather than skipped, also named in the
+report. A profile that already emits its own early `M568 A2` for a tool is left alone rather than
+getting a second, redundant one. A file that only ever uses one tool is left untouched entirely.
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,

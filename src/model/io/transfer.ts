@@ -24,6 +24,7 @@ import { addEntry, parseIndex, pruneIndex, serialiseIndex, type BackupEntry } fr
 import type { MachineLimits } from "../gcode/timeModel";
 import { parseMetadata, type SlicerMetadata } from "../gcode/metadata";
 import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
+import type { ToolConfig } from "../preheat";
 import { alreadyProcessed, buildTransforms, collectorsFor, findStamps, makeStamp, type Recipe, type Stamp } from "../recipe";
 import type { StepFactoryContext } from "../steps/types";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
@@ -141,6 +142,9 @@ export interface ProcessOptions {
 	/** This machine's motion limits. Only consulted when the recipe enables `rewriteTime`, which
 	 *  cannot recompute M73 markers without them. */
 	limits?: MachineLimits;
+	/** Per-tool heater configuration. Only consulted by `preheat`, which cannot estimate a heat-up
+	 *  time without each tool's active/standby temperatures and tuned `M307` model. */
+	toolHeaters?: Array<ToolConfig>;
 	onProgress?: (update: ProgressUpdate) => void;
 	signal?: AbortSignalLike;
 	/** Injected for tests. */
@@ -206,7 +210,11 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	const { head, meta } = await prescan(blob);
 	const existingStamp = alreadyProcessed(head, recipe);
 
-	const factoryCtx: StepFactoryContext = { scriptsTrusted: options.scriptsTrusted, machineLimits: options.limits };
+	const factoryCtx: StepFactoryContext = {
+		scriptsTrusted: options.scriptsTrusted,
+		machineLimits: options.limits,
+		toolHeaters: options.toolHeaters,
+	};
 
 	// A second pass over the same already-downloaded blob, for any step that needs to see a fact
 	// about the whole file before the transform pass reaches the line that needs it — skipped

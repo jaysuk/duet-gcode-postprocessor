@@ -8,15 +8,15 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 480 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass),
-`docs/tasks/02-fan-audit-and-override.md` (§8 phase 10), `docs/tasks/03-machine-aware-checks.md`
-(§8 phase 12, partially), `docs/tasks/04-move-time-model.md` (§8 phase 8) and
-`docs/tasks/05-analysis-pass.md` (§8 phase 9) are all complete.
+Implemented in v0.1.0, with 513 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. All six work orders in `docs/tasks/` are complete: `01-defects.md`,
+`02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
+`04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9) and `06-preheat.md`
+(§8 phase 11).
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–9, plus phase 10, plus most of
+**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–9 and 11, plus phase 10, plus most of
 phase 12 — the browser (reusing DWC's own `FileList` where available, with a self-contained
-fallback), the inspector and its preflight checks, the streaming engine and safe write path, ten
+fallback), the inspector and its preflight checks, the streaming engine and safe write path, eleven
 step types, recipes with import/export and board-backed storage, the diff preview, the
 Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
 normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
@@ -24,7 +24,8 @@ validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condit
 (`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a machine-aware move-time
 model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
 `M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
-whole-file fact before the transform pass reaches it, and the usage guide.
+whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
+`M307` heater model, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -49,10 +50,9 @@ whole-file fact before the transform pass reaches it, and the usage guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — one more (task 06, predictive
-pre-heat, which carries its own firmware-verification stop point). §8 below is the roadmap it
-implements: the machine-aware features that are the actual argument for running a post-processor on
-the printer rather than on a laptop.
+**Next:** every work order in [`docs/tasks/`](docs/tasks/) is done. §8 below records what each phase
+delivered; anything still unbuilt there (phases 13–15) is deliberately unspecified — see the
+work-order queue's own note on why.
 
 ---
 
@@ -430,7 +430,7 @@ marker, which the existing single forward pass already sees. So this is the best
 self-contained, immediately useful, no infrastructure required, and it forces the feature
 normalisation that phase 11's reporting wants anyway.
 
-### Phase 11 — predictive pre-heat before a tool change
+### Phase 11 — predictive pre-heat before a tool change *(done)*
 
 Estimate heat-up time from the machine's own `M307` model (`heat.heaters[h].model.heatingRate`,
 `deadTime`, `coolingRate`, `coolingExp`) between `tools[n].standby[]` and `tools[n].active[]`, walk
@@ -442,6 +442,23 @@ filament.
 that are easy to misread), and the `M568` A parameter, against `Duet3D/wiki-content` and RRF source.
 The most distinctive feature on this roadmap, and the one where a wrong constant produces a cold
 extrusion rather than a visible error.
+
+- ✅ **Verified, not guessed**: `coolingRate`/`coolingExp` are per 100°C above ambient (confirmed in
+  `HeaterModel::GetBasicCoolingRate`, RepRapFirmware source, and word-for-word in the wiki's M307
+  section); `M568 A0/A1/A2` = off/standby/active and does not select the tool or wait for it
+  (confirmed in `GCodes::SetOrReportOffsets`, shared with G10, and in the wiki's M568 section). Full
+  citations in `model/preheat.ts`'s module comment.
+- ✅ `heatUpSeconds` (`model/preheat.ts`) — numerically integrates RRF's own first-order model rather
+  than a generic cooling approximation; a missing/untuned heater returns `null` rather than a guess,
+  an unreachable target is capped rather than looping forever.
+- ✅ `toolHeaterConfigs` (`dwc/machineSnapshot.ts`) — per-tool active/standby temperatures and tuned
+  model, narrowed from `tools[]`/`heat.heaters[]`.
+- ✅ The `preheat` step (`model/steps/preheat.ts`) — a `PreheatCollector` (this task's first real use
+  of the phase-9 analysis pass) gathers every tool change and its position on the time axis ahead of
+  the transform pass; `planPreheats` (pure, independently tested) turns that into an ordered list of
+  `M568 A2`/`A1` insertions, handling every edge case the task specified: clamping to file start,
+  never contradicting a pending pre-heat with a standby command, skipping a change the file already
+  pre-heats, and reporting a heater with no standby gap, no tuned model, or an unreachable target.
 
 ### Phase 12 — machine-aware checks and rewrites *(partly done)*
 

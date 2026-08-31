@@ -6,6 +6,7 @@
 
 import { emptySnapshot, type MachineSnapshot } from "../model/checks";
 import type { MachineLimits } from "../model/gcode/timeModel";
+import type { HeaterModel, ToolConfig, ToolHeaterConfig } from "../model/preheat";
 
 interface LooseModel {
 	move?: {
@@ -29,10 +30,20 @@ interface LooseModel {
 		/** @deprecated kept as the fallback — see motionSystems above. */
 		travelAcceleration?: number;
 	};
-	tools?: Array<{ number?: number; heaters?: Array<number> } | null>;
+	tools?: Array<{
+		number?: number;
+		heaters?: Array<number>;
+		active?: Array<number>;
+		standby?: Array<number>;
+	} | null>;
 	fans?: Array<unknown>;
 	heat?: {
-		heaters?: Array<{ max?: number } | null>;
+		heaters?: Array<{
+			max?: number;
+			model?: {
+				heatingRate?: number; deadTime?: number; coolingRate?: number; coolingExp?: number;
+			};
+		} | null>;
 		bedHeaters?: Array<number>;
 	};
 	job?: { file?: { fileName?: string } };
@@ -107,6 +118,49 @@ export function machineLimits(model: unknown): MachineLimits {
 		printAccel: typeof printAccel === "number" ? printAccel : null,
 		travelAccel: typeof travelAccel === "number" ? travelAccel : null,
 	};
+}
+
+/**
+ * Per-tool heater configuration for predictive pre-heat: which heaters each tool drives, their
+ * active/standby temperatures, and each heater's tuned `M307` model. One entry per tool; a tool with
+ * no heaters at all (a laser, a pen) gets an empty `heaters` array rather than being omitted, so the
+ * step can still report "this tool has no heater" instead of silently skipping it.
+ */
+export function toolHeaterConfigs(model: unknown): Array<ToolConfig> {
+	const m = (model ?? {}) as LooseModel;
+	const heaters = m.heat?.heaters ?? [];
+	const tools = m.tools ?? [];
+
+	const result: Array<ToolConfig> = [];
+	for (let i = 0; i < tools.length; i++) {
+		const tool = tools[i];
+		if (tool === null || tool === undefined) continue;
+		const toolNumber = typeof tool.number === "number" ? tool.number : i;
+		const heaterIndices = Array.isArray(tool.heaters) ? tool.heaters : [];
+
+		const toolHeaters: Array<ToolHeaterConfig> = heaterIndices.map((heaterIndex, slot) => {
+			const heater = heaters[heaterIndex];
+			const hm = heater?.model;
+			const heaterModel: HeaterModel | null = hm !== undefined
+				&& typeof hm.heatingRate === "number" && hm.heatingRate > 0
+				? {
+					heatingRate: hm.heatingRate,
+					deadTime: typeof hm.deadTime === "number" ? hm.deadTime : 0,
+					coolingRate: typeof hm.coolingRate === "number" ? hm.coolingRate : 0,
+					coolingExp: typeof hm.coolingExp === "number" ? hm.coolingExp : 1.35,
+				}
+				: null;
+			return {
+				heaterIndex,
+				active: Array.isArray(tool.active) && typeof tool.active[slot] === "number" ? tool.active[slot] : 0,
+				standby: Array.isArray(tool.standby) && typeof tool.standby[slot] === "number" ? tool.standby[slot] : 0,
+				model: heaterModel,
+			};
+		});
+
+		result.push({ toolNumber, heaters: toolHeaters });
+	}
+	return result;
 }
 
 /** The file the machine is currently printing, or null. */

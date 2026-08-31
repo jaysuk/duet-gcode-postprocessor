@@ -12,6 +12,7 @@ import { fanByFeatureStep } from "./fanByFeature";
 import { findReplaceStep } from "./findReplace";
 import { insertAtStep } from "./insertAt";
 import { paramRewriteStep } from "./paramRewrite";
+import { preheatStep } from "./preheat";
 import { rangeVaryStep } from "./rangeVary";
 import { rewriteTimeStep } from "./rewriteTime";
 import { rulesStep } from "./rules";
@@ -27,6 +28,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	rangeVaryStep,
 	fanByFeatureStep,
 	rewriteTimeStep,
+	preheatStep,
 	rulesStep,
 	scriptStep,
 ] as unknown as Array<StepDefinition<never>>);

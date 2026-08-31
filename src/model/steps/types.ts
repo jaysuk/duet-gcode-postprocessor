@@ -11,6 +11,7 @@ import type { SlicerMetadata } from "../gcode/metadata";
 import type { MachineState } from "../gcode/state";
 import type { MachineLimits } from "../gcode/timeModel";
 import type { Tokenised } from "../gcode/tokenise";
+import type { ToolConfig } from "../preheat";
 
 /** Read-only view of the machine state plus the tokenised source line. */
 export interface LineContext extends Readonly<MachineState> {
@@ -109,6 +110,9 @@ export interface StepFactoryContext {
 	scriptsTrusted: boolean;
 	/** This machine's motion limits, when known. Only `rewriteTime` currently uses this. */
 	machineLimits?: MachineLimits;
+	/** Per-tool heater configuration (active/standby temperatures, tuned M307 model), when known.
+	 *  Only `preheat` currently uses this. */
+	toolHeaters?: Array<ToolConfig>;
 }
 
 export class StepConfigError extends Error {

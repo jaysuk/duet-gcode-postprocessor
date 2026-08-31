@@ -222,7 +222,7 @@ import FileInspector from "./FileInspector.vue";
 import GcodeBrowser from "./GcodeBrowser.vue";
 import RecipeEditor from "./RecipeEditor.vue";
 import { createGateway } from "../dwc/gateway";
-import { installedPluginVersion, jobFileName, machineLimits, machineStatus } from "../dwc/machineSnapshot";
+import { installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs } from "../dwc/machineSnapshot";
 import { scriptsTrusted, setScriptsTrusted, trustedRecipes, useRecipes } from "../dwc/recipeStore";
 import { DOCS_URL, LS_SELECTED_FILE, PLUGIN_MANIFEST_ID } from "../model/constants";
 import { blocking, checkSafety, planOutput, type OutputMode, type SafetyIssue } from "../model/io/plan";
@@ -436,6 +436,7 @@ async function run(dryRun: boolean): Promise<void> {
 			dryRun,
 			signal,
 			limits: machineLimits(machineStore.model),
+			toolHeaters: toolHeaterConfigs(machineStore.model),
 			onProgress: (update) => { progress.value = update; },
 		});
 		lastRun.value = result;

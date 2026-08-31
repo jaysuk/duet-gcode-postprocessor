@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { installedPluginVersion, jobFileName, machineLimits, machineStatus } from "../dwc/machineSnapshot";
+import { installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs } from "../dwc/machineSnapshot";
 
 describe("installedPluginVersion", () => {
 	it("returns 0.0.0 when the model has no plugins map at all", () => {
@@ -109,5 +109,58 @@ describe("machineLimits", () => {
 		const limits = machineLimits({ move: {} });
 		expect(limits.printAccel).toBeNull();
 		expect(limits.travelAccel).toBeNull();
+	});
+});
+
+describe("toolHeaterConfigs", () => {
+	it("returns each tool's heaters with their temperatures and tuned model", () => {
+		const model = {
+			tools: [{ number: 0, heaters: [1], active: [200], standby: [140] }],
+			heat: { heaters: [
+				{ max: 120 },
+				{ max: 285, model: { heatingRate: 2.43, deadTime: 5.5, coolingRate: 0.56, coolingExp: 1.35 } },
+			] },
+		};
+		const configs = toolHeaterConfigs(model);
+		expect(configs).toEqual([
+			{
+				toolNumber: 0,
+				heaters: [{
+					heaterIndex: 1, active: 200, standby: 140,
+					model: { heatingRate: 2.43, deadTime: 5.5, coolingRate: 0.56, coolingExp: 1.35 },
+				}],
+			},
+		]);
+	});
+
+	it("gives a tool with no heaters an empty heaters array rather than omitting it", () => {
+		const model = { tools: [{ number: 3, heaters: [] }], heat: { heaters: [] } };
+		expect(toolHeaterConfigs(model)).toEqual([{ toolNumber: 3, heaters: [] }]);
+	});
+
+	it("returns a null model for an untuned heater rather than guessing a heating rate", () => {
+		const model = {
+			tools: [{ number: 0, heaters: [0], active: [200], standby: [140] }],
+			heat: { heaters: [{ max: 285 }] },
+		};
+		expect(toolHeaterConfigs(model)[0].heaters[0].model).toBeNull();
+	});
+
+	it("treats a zero or missing heatingRate as untuned", () => {
+		const model = {
+			tools: [{ number: 0, heaters: [0], active: [200], standby: [140] }],
+			heat: { heaters: [{ model: { heatingRate: 0, deadTime: 5, coolingRate: 1, coolingExp: 1.35 } }] },
+		};
+		expect(toolHeaterConfigs(model)[0].heaters[0].model).toBeNull();
+	});
+
+	it("defaults missing temperatures to 0 and skips a null tool slot", () => {
+		const model = { tools: [null, { number: 1, heaters: [0] }], heat: { heaters: [{}] } };
+		const configs = toolHeaterConfigs(model);
+		expect(configs).toEqual([{ toolNumber: 1, heaters: [{ heaterIndex: 0, active: 0, standby: 0, model: null }] }]);
+	});
+
+	it("returns an empty array for a model with no tools", () => {
+		expect(toolHeaterConfigs({})).toEqual([]);
 	});
 });
