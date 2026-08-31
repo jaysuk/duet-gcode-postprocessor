@@ -258,7 +258,7 @@ export class Analyser {
 	private recordFanSetting(fan: number, speed: number): void {
 		// A plain number pair isn't a safe Map key on its own (0 and -0, or ordering ambiguity), so
 		// key on their string form instead — cheap, and never wrong
-		const key = `${fan} ${speed}`;
+		const key = `${fan} ${speed}`;
 		let entry = this.fanSettingsMap.get(key);
 		if (entry === undefined) {
 			entry = { fan, speed, count: 0, featureCounts: new Map<Feature, number>() };

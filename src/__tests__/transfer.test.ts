@@ -268,6 +268,6 @@ describe("chunk boundaries", () => {
 function createNoopRecipe(): Recipe {
 	return {
 		...createRecipe("No-op"),
-		steps: [{ uid: newUid(), type: "findReplace", enabled: true, config: { find: " never matches" } }],
+		steps: [{ uid: newUid(), type: "findReplace", enabled: true, config: { find: " never matches" } }],
 	};
 }
