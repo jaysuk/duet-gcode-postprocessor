@@ -28,6 +28,86 @@ import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
 import { alreadyProcessed, buildTransforms, findStamps, makeStamp, usesRewriteTime, type Recipe, type Stamp } from "../recipe";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
 
+export interface AbortSignalLike {
+	aborted: boolean;
+}
+
+export class CancelledError extends Error {
+	constructor() {
+		super("Cancelled");
+		this.name = "CancelledError";
+	}
+}
+
+/** How long the pipeline may run before handing the event loop back (roughly one frame). */
+const YIELD_INTERVAL_MS = 16;
+
+/**
+ * Walk a Blob in decoded-line chunks: the one chunked-read loop every pass over a downloaded file
+ * shares — `processFile`'s transform pass, the analysis pass, `inspectFile`, and the `rewriteTime`
+ * pre-pass all drive this instead of copying it. It existed three times before this extraction and a
+ * bug (the trailing-newline handling, the `stream: !lastChunk` decode flag) had already been fixed in
+ * two of them and not the third — the reason this exists at all.
+ *
+ * `byteOffset` handed to `onLine` is the byte position of the *chunk* a line came from, not the
+ * line's own exact position (a line that started inside the previous chunk's carried-over partial
+ * text is still attributed to the current chunk's start) — good enough for the `percent` insertion
+ * anchor's progress fraction, which is all that has ever consumed it; do not rely on it for anything
+ * needing byte-exact positions.
+ */
+export async function forEachLine(
+	blob: Blob,
+	onLine: (line: string, byteOffset: number) => void,
+	options: { chunkBytes?: number; signal?: AbortSignalLike; onProgress?: (fraction: number | null) => void } = {},
+): Promise<void> {
+	const checkCancelled = () => {
+		if (options.signal?.aborted === true) throw new CancelledError();
+	};
+	const reportProgress = options.onProgress ?? (() => { });
+
+	const decoder = new TextDecoder("utf-8");
+	const chunkBytes = Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES);
+	let carry = "";
+	let offset = 0;
+	let lastYield = Date.now();
+
+	while (offset < blob.size) {
+		checkCancelled();
+		const end = Math.min(offset + chunkBytes, blob.size);
+		const lastChunk = end >= blob.size;
+		// stream:true keeps a multi-byte character that straddles the slice boundary intact
+		const text = carry + decoder.decode(await blob.slice(offset, end).arrayBuffer(), { stream: !lastChunk });
+		const lines = text.split("\n");
+		// The last element is a partial line unless this was the final chunk
+		carry = lastChunk ? "" : (lines.pop() ?? "");
+		// On the final chunk a trailing newline leaves an empty last element that is an artefact of
+		// the separator rather than a line of the file. Emitting it would add a blank line on every
+		// run — exactly the kind of silent drift that makes repeated processing untrustworthy
+		if (lastChunk && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+		let lineOffset = offset;
+		for (const rawLine of lines) {
+			const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+			onLine(line, lineOffset);
+			lineOffset += rawLine.length + 1;
+		}
+
+		offset = end;
+		reportProgress(blob.size > 0 ? offset / blob.size : null);
+		// Yield on a time budget rather than once per chunk: with production-sized chunks that is
+		// every chunk anyway, but it stops a small-chunk run (or a tiny file) spending all its time
+		// bouncing off the event loop
+		if (Date.now() - lastYield >= YIELD_INTERVAL_MS) {
+			await yieldToUi();
+			lastYield = Date.now();
+		}
+	}
+
+	if (carry !== "") {
+		onLine(carry.endsWith("\r") ? carry.slice(0, -1) : carry, offset);
+	}
+}
+
 export interface FileGateway {
 	download(path: string, onProgress?: (loaded: number, total: number) => void): Promise<Blob>;
 	upload(path: string, content: Blob, onProgress?: (loaded: number, total: number) => void): Promise<void>;
@@ -38,9 +118,6 @@ export interface FileGateway {
 	sizeOf(path: string): Promise<number | null>;
 }
 
-/** How long the pipeline may run before handing the event loop back (roughly one frame). */
-const YIELD_INTERVAL_MS = 16;
-
 export type Phase = "downloading" | "scanning" | "processing" | "uploading" | "finalising" | "done";
 
 export interface ProgressUpdate {
@@ -48,10 +125,6 @@ export interface ProgressUpdate {
 	/** 0..1 within the current phase, or null when indeterminate. */
 	fraction: number | null;
 	detail?: string;
-}
-
-export interface AbortSignalLike {
-	aborted: boolean;
 }
 
 export interface ProcessOptions {
@@ -93,13 +166,6 @@ export interface ProcessResult {
 	cancelled: boolean;
 }
 
-export class CancelledError extends Error {
-	constructor() {
-		super("Cancelled");
-		this.name = "CancelledError";
-	}
-}
-
 /** Read just enough of a file to identify the slicer and spot an existing stamp. */
 export async function prescan(blob: Blob): Promise<{ head: string; tail: string; meta: SlicerMetadata }> {
 	const head = await blob.slice(0, Math.min(METADATA_SCAN_BYTES, blob.size)).text();
@@ -113,50 +179,23 @@ export async function prescan(blob: Blob): Promise<{ head: string; tail: string;
  * A dedicated forward walk over the already-downloaded blob to total the model's time estimate and
  * count the M73 markers, *before* the main transform pass reaches the first one — `rewriteTime`
  * cannot give its first marker a percentage without knowing the whole file's total first.
- *
- * This duplicates the chunked-read loop below rather than sharing it; task 05 generalises this exact
- * problem (a step needing a first look at the whole file) into a proper collector-based second pass
- * and this will be one of the things it folds in, not a pattern to extend for a second consumer.
  */
 async function estimateRewriteTimeTotals(
 	blob: Blob,
 	limits: MachineLimits,
 	chunkBytes: number,
-	checkCancelled: () => void,
+	signal: AbortSignalLike | undefined,
 ): Promise<{ totalSeconds: number; markerCount: number }> {
 	const state = createState();
 	const estimator = new TimeEstimator(limits);
 	let markerCount = 0;
 
-	const decoder = new TextDecoder("utf-8");
-	let carry = "";
-	let offset = 0;
-	let lastYield = Date.now();
-
-	const consume = (rawLine: string): void => {
-		const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+	await forEachLine(blob, (line) => {
 		const token = tokenise(line);
 		advance(state, token);
 		estimator.line(token, state);
 		if (token.letter === "M" && token.code === "M73") markerCount++;
-	};
-
-	while (offset < blob.size) {
-		checkCancelled();
-		const end = Math.min(offset + chunkBytes, blob.size);
-		const lastChunk = end >= blob.size;
-		const text = carry + decoder.decode(await blob.slice(offset, end).arrayBuffer(), { stream: !lastChunk });
-		const lines = text.split("\n");
-		carry = lastChunk ? "" : (lines.pop() ?? "");
-		if (lastChunk && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-		for (const rawLine of lines) consume(rawLine);
-		offset = end;
-		if (Date.now() - lastYield >= YIELD_INTERVAL_MS) {
-			await yieldToUi();
-			lastYield = Date.now();
-		}
-	}
-	if (carry !== "") consume(carry);
+	}, { chunkBytes, signal });
 
 	return { totalSeconds: estimator.elapsed, markerCount };
 }
@@ -192,7 +231,7 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	if (usesRewriteTime(recipe) && options.limits !== undefined) {
 		report({ phase: "scanning", fraction: 0 });
 		rewriteTimeTotals = await estimateRewriteTimeTotals(
-			blob, options.limits, Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES), checkCancelled,
+			blob, options.limits, Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES), signal,
 		);
 		checkCancelled();
 	}
@@ -231,58 +270,18 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	for (const line of pipeline.begin()) emit(line);
 
 	report({ phase: "processing", fraction: 0 });
-	const decoder = new TextDecoder("utf-8");
-	const chunkBytes = Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES);
-	let carry = "";
-	let offset = 0;
-	let lastYield = Date.now();
-
-	while (offset < blob.size) {
-		checkCancelled();
-		const end = Math.min(offset + chunkBytes, blob.size);
-		const buf = await blob.slice(offset, end).arrayBuffer();
-		const lastChunk = end >= blob.size;
-		// stream:true keeps a multi-byte character that straddles the slice boundary intact
-		const text = carry + decoder.decode(buf, { stream: !lastChunk });
-		const lines = text.split("\n");
-		// The last element is a partial line unless this was the final chunk
-		carry = lastChunk ? "" : (lines.pop() ?? "");
-		// On the final chunk a trailing newline leaves an empty last element that is an artefact of
-		// the separator rather than a line of the file. Emitting it would add a blank line on every
-		// run — exactly the kind of silent drift that makes repeated processing untrustworthy
-		if (lastChunk && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-
-		let lineOffset = offset;
-		for (const rawLine of lines) {
-			const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-			analyser?.line(line);
-			const result = pipeline.line(line, lineOffset);
-			lineOffset += rawLine.length + 1;
-			if (result === null) continue;
-			if (typeof result === "string") emit(result);
-			else for (const l of result) emit(l);
-		}
-
-		offset = end;
-		report({ phase: "processing", fraction: blob.size > 0 ? offset / blob.size : null });
-		// Yield on a time budget rather than once per chunk: with production-sized chunks that is
-		// every chunk anyway, but it stops a small-chunk run (or a tiny file) spending all its time
-		// bouncing off the event loop
-		if (Date.now() - lastYield >= YIELD_INTERVAL_MS) {
-			await yieldToUi();
-			lastYield = Date.now();
-		}
-	}
-
-	if (carry !== "") {
-		const line = carry.endsWith("\r") ? carry.slice(0, -1) : carry;
+	await forEachLine(blob, (line, lineOffset) => {
 		analyser?.line(line);
-		const result = pipeline.line(line, offset);
-		if (result !== null) {
-			if (typeof result === "string") emit(result);
-			else for (const l of result) emit(l);
-		}
-	}
+		const result = pipeline.line(line, lineOffset);
+		if (result === null) return;
+		if (typeof result === "string") emit(result);
+		else for (const l of result) emit(l);
+	}, {
+		chunkBytes: options.chunkBytes,
+		signal,
+		onProgress: (fraction) => { report({ phase: "processing", fraction }); },
+	});
+
 	for (const line of pipeline.end()) emit(line);
 	if (buffer.length > 0) parts.push(buffer.join("\n") + "\n");
 
@@ -444,31 +443,11 @@ export async function inspectFile(options: {
 	const { head, meta } = await prescan(blob);
 	const analyser = new Analyser(meta, options.limits);
 
-	const decoder = new TextDecoder("utf-8");
-	const chunkBytes = Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES);
-	let carry = "";
-	let offset = 0;
-	let lastYield = Date.now();
-
-	while (offset < blob.size) {
-		checkCancelled();
-		const end = Math.min(offset + chunkBytes, blob.size);
-		const lastChunk = end >= blob.size;
-		const text = carry + decoder.decode(await blob.slice(offset, end).arrayBuffer(), { stream: !lastChunk });
-		const lines = text.split("\n");
-		carry = lastChunk ? "" : (lines.pop() ?? "");
-		if (lastChunk && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-		for (const rawLine of lines) {
-			analyser.line(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
-		}
-		offset = end;
-		report({ phase: "processing", fraction: blob.size > 0 ? offset / blob.size : null });
-		if (Date.now() - lastYield >= YIELD_INTERVAL_MS) {
-			await yieldToUi();
-			lastYield = Date.now();
-		}
-	}
-	if (carry !== "") analyser.line(carry.endsWith("\r") ? carry.slice(0, -1) : carry);
+	await forEachLine(blob, (line) => { analyser.line(line); }, {
+		chunkBytes: options.chunkBytes,
+		signal: options.signal,
+		onProgress: (fraction) => { report({ phase: "processing", fraction }); },
+	});
 
 	report({ phase: "done", fraction: 1 });
 	return { analysis: analyser.result(), meta, stamps: findStamps(head), head, bytes: blob.size };
