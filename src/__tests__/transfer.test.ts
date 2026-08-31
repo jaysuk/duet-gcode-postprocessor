@@ -1,11 +1,27 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { MachineLimits } from "../model/gcode/timeModel";
 import { planOutput } from "../model/io/plan";
 import { CancelledError, processFile } from "../model/io/transfer";
 import { createRecipe, newUid, type Recipe } from "../model/recipe";
 import { FakeGateway, SAMPLE } from "./helpers";
 
 const SOURCE = "0:/gcodes/benchy.gcode";
+
+const LIMITS: MachineLimits = {
+	maxSpeed: { X: 200, Y: 200, Z: 20, E: 50 },
+	maxAccel: { X: 1500, Y: 1500, Z: 100, E: 1000 },
+	jerk: { X: 15, Y: 15, Z: 2, E: 5 },
+	printAccel: 1000,
+	travelAccel: 1500,
+};
+
+function rewriteTimeRecipe(): Recipe {
+	return {
+		...createRecipe("Rewrite time"),
+		steps: [{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} }],
+	};
+}
 
 function recipe(config: Record<string, unknown> = { find: "F1800", replace: "F900" }): Recipe {
 	return {
@@ -115,6 +131,51 @@ describe("processFile", () => {
 		const result = await run(gateway, { dryRun: true, analyse: true });
 		expect(result.analysis?.layers).toBe(3);
 		expect(result.analysis?.tools).toEqual([0]);
+	});
+
+	it("does not report an analysing phase for a recipe with no lookahead steps", async () => {
+		const phases: Array<string> = [];
+		const result = await run(gateway, { onProgress: (u: { phase: string }) => phases.push(u.phase) });
+		expect(phases).not.toContain("analysing");
+		expect(result.analysisMs).toBeNull();
+	});
+
+	it("times the analysis pass separately from the transform pass when one ran", async () => {
+		const result = await run(gateway, { recipe: rewriteTimeRecipe(), limits: LIMITS });
+		expect(result.analysisMs).not.toBeNull();
+		expect(result.analysisMs!).toBeGreaterThanOrEqual(0);
+		expect(result.transformMs).toBeGreaterThanOrEqual(0);
+	});
+
+	it("runs a separate analysing phase for a step that declares a collector", async () => {
+		const phases: Array<string> = [];
+		await run(gateway, {
+			recipe: rewriteTimeRecipe(),
+			limits: LIMITS,
+			onProgress: (u: { phase: string }) => phases.push(u.phase),
+		});
+		expect(phases).toContain("analysing");
+		expect(phases).toContain("processing");
+	});
+
+	it("rewrites M73 markers using a total from the analysis pass, end to end", async () => {
+		await run(gateway, { recipe: rewriteTimeRecipe(), limits: LIMITS });
+		const written = gateway.files.get(SOURCE)!;
+		expect(written).toContain("P100 R0");
+	});
+
+	it("cancels during the analysis pass before any transform work or writing happens", async () => {
+		const signal = { aborted: false };
+		const promise = run(gateway, {
+			recipe: rewriteTimeRecipe(),
+			limits: LIMITS,
+			chunkBytes: 3,
+			signal,
+			onProgress: (u: { phase: string }) => { if (u.phase === "analysing") signal.aborted = true; },
+		});
+		await expect(promise).rejects.toBeInstanceOf(CancelledError);
+		expect(gateway.files.get(SOURCE)).toBe(SAMPLE + "\n");
+		expect(gateway.log.some((l) => l.startsWith("upload"))).toBe(false);
 	});
 
 	it("identifies the slicer from the pre-scan", async () => {

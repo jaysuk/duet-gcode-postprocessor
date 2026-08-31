@@ -1,3 +1,4 @@
+import { AnalysisRunner, type AnalysisCollector } from "../model/analysisPass";
 import { emptyMetadata, type SlicerMetadata } from "../model/gcode/metadata";
 import type { FileGateway } from "../model/io/transfer";
 import { runToString } from "../model/pipeline";
@@ -29,6 +30,43 @@ export function runSteps(
 	meta: SlicerMetadata = emptyMetadata(),
 ): ReturnType<typeof runToString> {
 	return runToString({ transforms: steps, meta }, input);
+}
+
+/**
+ * Run every collector over a block of text and return their results, the way `processFile`'s
+ * analysis pass would (see `analysisPass.ts`) — for testing a step's `analysis()` collector without
+ * going through the chunked I/O layer.
+ */
+export function collectAnalysis(
+	collectors: Array<AnalysisCollector>,
+	input: string,
+	meta: SlicerMetadata = emptyMetadata(),
+): ReadonlyMap<string, unknown> {
+	const runner = new AnalysisRunner({ collectors, meta, totalBytes: input.length });
+	let offset = 0;
+	const lines = input.split("\n");
+	const hasTrailingNewline = lines.length > 0 && lines[lines.length - 1] === "";
+	if (hasTrailingNewline) lines.pop();
+	for (const rawLine of lines) {
+		const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+		runner.line(line, offset);
+		offset += rawLine.length + 1;
+	}
+	return runner.result();
+}
+
+/**
+ * Run the analysis pass then the transform pass over the same text, exactly as `processFile` does —
+ * for testing a step end to end against its own `analysis()` collector.
+ */
+export function runStepsWithAnalysis(
+	steps: Array<Transform>,
+	collectors: Array<AnalysisCollector>,
+	input: string,
+	meta: SlicerMetadata = emptyMetadata(),
+): ReturnType<typeof runToString> {
+	const analysisResults = collectAnalysis(collectors, input, meta);
+	return runToString({ transforms: steps, meta, analysisResults }, input);
 }
 
 /** A small, realistic PrusaSlicer-shaped file used across the step tests. */

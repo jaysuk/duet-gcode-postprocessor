@@ -8,21 +8,23 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 470 tests green and `typecheck` + `verify-build` passing against DWC
+Implemented in v0.1.0, with 480 tests green and `typecheck` + `verify-build` passing against DWC
 `v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass),
 `docs/tasks/02-fan-audit-and-override.md` (§8 phase 10), `docs/tasks/03-machine-aware-checks.md`
-(§8 phase 12, partially) and `docs/tasks/04-move-time-model.md` (§8 phase 8) are all complete.
+(§8 phase 12, partially), `docs/tasks/04-move-time-model.md` (§8 phase 8) and
+`docs/tasks/05-analysis-pass.md` (§8 phase 9) are all complete.
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phase 8, plus phase 10, plus most of phase 12 —
-the browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
-inspector and its preflight checks, the streaming engine and safe write path, ten step types,
-recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
-self-update, a backup index with a restore/download/delete UI, feature-type normalisation across
-slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro validation, cold-extrusion
-and end-of-file hygiene checks, a `commandMap` condition (`onlyWithParam`) that fixed a real
-mistranslation in the Marlin preset, a machine-aware move-time model with an inspector estimate
-alongside the slicer's own, a `rewriteTime` step that recomputes `M73` markers from it, and the
-usage guide.
+**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–9, plus phase 10, plus most of
+phase 12 — the browser (reusing DWC's own `FileList` where available, with a self-contained
+fallback), the inspector and its preflight checks, the streaming engine and safe write path, ten
+step types, recipes with import/export and board-backed storage, the diff preview, the
+Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
+normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
+validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
+(`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a machine-aware move-time
+model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
+`M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
+whole-file fact before the transform pass reaches it, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -47,10 +49,10 @@ usage guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — two more, each
-self-contained enough to hand to an agent with no context. §8 below is the roadmap they implement:
-the machine-aware features that are the actual argument for running a post-processor on the printer
-rather than on a laptop.
+**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — one more (task 06, predictive
+pre-heat, which carries its own firmware-verification stop point). §8 below is the roadmap it
+implements: the machine-aware features that are the actual argument for running a post-processor on
+the printer rather than on a laptop.
 
 ---
 
@@ -381,7 +383,7 @@ remaining-time is right. That is a reason to install the plugin all by itself.
   marker — phase 9 will fold this into its general second-pass mechanism rather than this staying a
   one-off.
 
-### Phase 9 — the analysis pass *(unlocks 11, 14)*
+### Phase 9 — the analysis pass *(unlocks 11, 14)* *(done)*
 
 The architectural change. Everything involving lookahead — pre-heating before a tool change,
 restoring a fan speed when a region ends, anchoring to "90 seconds before X" — is impossible in the
@@ -394,6 +396,23 @@ transform pass consumes by index.
 
 Do this once and properly. Retro-fitting lookahead one feature at a time is how a clean pipeline
 turns into a pile of special cases.
+
+- ✅ `model/analysisPass.ts` — `AnalysisCollector`/`AnalysisRunner`, built on the same `LineContext`
+  the transform pass uses (via `createLineContext`/`syncLineContext`, factored out of
+  `pipeline.ts` so both passes build it identically).
+- ✅ `StepDefinition.analysis(config, ctx)` — a step declares the collectors it needs; the extra
+  `ctx` parameter (beyond the task's own sketch) is there because `rewriteTime`'s collector needs
+  this machine's motion limits, which a user does not configure on the step.
+- ✅ `RunContext.analysis` — a step reads its collector's result back in `onStart`. Always present
+  (an empty map when no pass ran), so a step degrades to doing less rather than throwing.
+- ✅ `recipe.ts`'s `collectorsFor` and the opt-in pass in `processFile`, reporting its own
+  `"analysing"` phase and its own timing (`ProcessResult.analysisMs`/`transformMs`) so a two-pass
+  recipe's extra cost is visible rather than folded silently into one number.
+- ✅ The chunked blob-walk (`processFile`'s transform pass, `inspectFile`, and now the analysis
+  pass) was extracted into one shared `forEachLine` (`io/transfer.ts`) first, per the task's own
+  instruction — it had already drifted to three near-identical copies once.
+- ✅ `rewriteTime` (phase 8) migrated onto this seam as its first real consumer, replacing the
+  one-off pre-pass task 04 had built and explicitly flagged as temporary.
 
 ### Phase 10 — fan audit and per-feature override *(done)*
 

@@ -6,6 +6,7 @@
  * component, no new i18n block, and the registry-driven smoke test picks it up automatically.
  */
 
+import type { AnalysisCollector } from "../analysisPass";
 import type { SlicerMetadata } from "../gcode/metadata";
 import type { MachineState } from "../gcode/state";
 import type { MachineLimits } from "../gcode/timeModel";
@@ -27,6 +28,10 @@ export interface RunContext {
 	readonly meta: SlicerMetadata;
 	readonly sourcePath: string;
 	readonly totalLayers: number | null;
+	/** Results from the analysis pass, keyed by collector id. Empty when no enabled step declared
+	 *  one (the common case, and the reason that pass is skipped entirely rather than always run). A
+	 *  step must behave sensibly — do less, not throw — when the id it looks for is not here. */
+	readonly analysis: ReadonlyMap<string, unknown>;
 	/** Recorded by a step to surface a non-fatal problem in the run report. */
 	warn(message: string): void;
 }
@@ -82,22 +87,28 @@ export interface StepDefinition<C = Record<string, unknown>> {
 	fields: Array<StepField>;
 	/** Build the transform. Throws a {@link StepConfigError} when the config is unusable. */
 	create(config: C, ctx: StepFactoryContext): Transform;
+	/**
+	 * Collectors this step needs run over the file before it can be built — for anything that needs
+	 * a fact about the whole file before the transform pass reaches the line that needs it (a total
+	 * to compute a percentage against, a change that has not happened yet). No enabled step declaring
+	 * one is the common case and must cost nothing: `processFile` skips the pass entirely.
+	 *
+	 * Takes {@link StepFactoryContext} as well as `config`, unlike the task-05 sketch this was built
+	 * from — `rewriteTime`'s collector needs this machine's motion limits, which are not something a
+	 * user configures on the step and so were never going to arrive through `config` alone.
+	 */
+	analysis?(config: C, ctx: StepFactoryContext): Array<AnalysisCollector>;
 	/** Optional extra validation beyond required/min/max; returns error messages. */
 	validate?(config: C): Array<string>;
 }
 
-/** Anything a step needs from outside its own config (currently: script trust, and the move-time
- *  model's inputs for `rewriteTime`). */
+/** Anything a step needs from outside its own config (currently: script trust, and this machine's
+ *  motion limits for `rewriteTime`). */
 export interface StepFactoryContext {
 	/** True when the user has explicitly approved running scripts for this recipe. */
 	scriptsTrusted: boolean;
 	/** This machine's motion limits, when known. Only `rewriteTime` currently uses this. */
 	machineLimits?: MachineLimits;
-	/** The whole file's estimated time in seconds, from a pre-pass run ahead of the main one.
-	 *  Null when not computed (no step asked for it, or the limits were not known). */
-	totalEstimatedSeconds?: number | null;
-	/** Count of M73 markers found during that same pre-pass. */
-	totalMarkerCount?: number;
 }
 
 export class StepConfigError extends Error {

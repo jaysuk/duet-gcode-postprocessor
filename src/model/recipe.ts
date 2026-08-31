@@ -8,6 +8,7 @@
  * applying the same 20% speed reduction three times.
  */
 
+import type { AnalysisCollector } from "./analysisPass";
 import { getStepDefinition } from "./steps/registry";
 import {
 	StepConfigError, validateStep, withDefaults,
@@ -99,9 +100,19 @@ export function usesScripts(recipe: Recipe): boolean {
 	return recipe.steps.some((s) => s.enabled && s.type === "script");
 }
 
-/** True when the recipe contains at least one enabled rewriteTime step. */
-export function usesRewriteTime(recipe: Recipe): boolean {
-	return recipe.steps.some((s) => s.enabled && s.type === "rewriteTime");
+/**
+ * Every collector the recipe's enabled steps need run over the file before the transform pass can
+ * start. Empty when none do — the common case, and the reason `processFile` can skip the whole
+ * analysis pass rather than always paying for it.
+ */
+export function collectorsFor(recipe: Recipe, ctx: StepFactoryContext): Array<AnalysisCollector> {
+	const collectors: Array<AnalysisCollector> = [];
+	for (const step of effectiveSteps(recipe)) {
+		const def = getStepDefinition(step.type);
+		if (def === null || def.analysis === undefined) continue;
+		collectors.push(...def.analysis(step.config as never, ctx));
+	}
+	return collectors;
 }
 
 /**

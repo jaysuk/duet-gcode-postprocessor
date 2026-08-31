@@ -113,7 +113,11 @@
 				{{ applied.stats.linesChanged.toLocaleString() }} changed,
 				{{ applied.stats.linesAdded.toLocaleString() }} added,
 				{{ applied.stats.linesRemoved.toLocaleString() }} removed in
-				{{ (applied.durationMs / 1000).toFixed(1) }} s.
+				{{ (applied.durationMs / 1000).toFixed(1) }} s
+				<template v-if="applied.analysisMs !== null">
+					({{ (applied.analysisMs / 1000).toFixed(1) }} s analysing this file first,
+					{{ (applied.transformMs / 1000).toFixed(1) }} s applying the recipe)
+				</template>.
 				<template v-if="applied.backupPath !== null">
 					The original is backed up at <code>{{ applied.backupPath }}</code>.
 				</template>
@@ -218,7 +222,7 @@ import FileInspector from "./FileInspector.vue";
 import GcodeBrowser from "./GcodeBrowser.vue";
 import RecipeEditor from "./RecipeEditor.vue";
 import { createGateway } from "../dwc/gateway";
-import { installedPluginVersion, jobFileName, machineStatus } from "../dwc/machineSnapshot";
+import { installedPluginVersion, jobFileName, machineLimits, machineStatus } from "../dwc/machineSnapshot";
 import { scriptsTrusted, setScriptsTrusted, trustedRecipes, useRecipes } from "../dwc/recipeStore";
 import { DOCS_URL, LS_SELECTED_FILE, PLUGIN_MANIFEST_ID } from "../model/constants";
 import { blocking, checkSafety, planOutput, type OutputMode, type SafetyIssue } from "../model/io/plan";
@@ -315,6 +319,7 @@ const phaseLabel = computed(() => {
 	switch (progress.value?.phase) {
 		case "downloading": return "Downloading";
 		case "scanning": return "Reading the header";
+		case "analysing": return "Analysing";
 		case "processing": return "Processing";
 		case "uploading": return "Uploading";
 		case "finalising": return "Finishing up";
@@ -430,6 +435,7 @@ async function run(dryRun: boolean): Promise<void> {
 			scriptsTrusted: scriptsTrusted(recipe.value.id),
 			dryRun,
 			signal,
+			limits: machineLimits(machineStore.model),
 			onProgress: (update) => { progress.value = update; },
 		});
 		lastRun.value = result;

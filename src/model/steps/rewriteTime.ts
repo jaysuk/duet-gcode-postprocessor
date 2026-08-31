@@ -4,18 +4,44 @@
  * (see `gcode/timeModel.ts`), applied while the file is being written.
  *
  * `P` needs the file's total estimated time before its very first marker can be given a percentage,
- * which a single forward pass cannot know about itself. The transfer layer runs a small pre-pass
- * ahead of the main one whenever a recipe enables this step (see `estimateRewriteTimeTotals` in
- * `io/transfer.ts`) and hands the result in through {@link StepFactoryContext} rather than through
- * step config — a machine-derived, per-run number is not something a user configures.
+ * which a single forward pass cannot know about itself. `RewriteTimeCollector` (below) runs ahead of
+ * the transform pass as this step's `analysis()` collector (see `analysisPass.ts`); the transform
+ * itself reads the result back out of `RunContext.analysis` in `onStart`.
  *
  * Never inserts a marker where none existed — see the module's own task notes for why that is out of
  * scope. A file with no `M73` markers is passed through unchanged, with a warning.
  */
 
 import { formatNumber, setParam, withBody } from "../gcode/tokenise";
-import { TimeEstimator } from "../gcode/timeModel";
+import { TimeEstimator, type MachineLimits } from "../gcode/timeModel";
+import type { AnalysisCollector } from "../analysisPass";
 import type { LineContext, RunContext, StepDefinition, StepFactoryContext, Transform } from "./types";
+
+export interface RewriteTimeTotals {
+	totalSeconds: number;
+	markerCount: number;
+}
+
+const COLLECTOR_ID = "rewriteTime";
+
+class RewriteTimeCollector implements AnalysisCollector<RewriteTimeTotals> {
+	readonly id = COLLECTOR_ID;
+	private readonly estimator: TimeEstimator;
+	private markerCount = 0;
+
+	constructor(limits: MachineLimits) {
+		this.estimator = new TimeEstimator(limits);
+	}
+
+	onLine(ctx: LineContext): void {
+		this.estimator.line(ctx.token, ctx);
+		if (ctx.token.letter === "M" && ctx.token.code === "M73") this.markerCount++;
+	}
+
+	result(): RewriteTimeTotals {
+		return { totalSeconds: this.estimator.elapsed, markerCount: this.markerCount };
+	}
+}
 
 export const rewriteTimeStep: StepDefinition<Record<string, never>> = {
 	id: "rewriteTime",
@@ -24,32 +50,42 @@ export const rewriteTimeStep: StepDefinition<Record<string, never>> = {
 	icon: "mdi-progress-clock",
 	fields: [],
 
+	analysis(_config: Record<string, never>, ctx: StepFactoryContext): Array<AnalysisCollector> {
+		if (ctx.machineLimits === undefined) return [];
+		return [new RewriteTimeCollector(ctx.machineLimits)];
+	},
+
 	create(_config: Record<string, never>, ctx: StepFactoryContext): Transform {
 		const limits = ctx.machineLimits;
-		const totalSeconds = ctx.totalEstimatedSeconds ?? null;
-		const totalMarkers = ctx.totalMarkerCount ?? 0;
 		const estimator = limits !== undefined ? new TimeEstimator(limits) : null;
-		const usable = estimator !== null && totalSeconds !== null && totalSeconds > 0 && totalMarkers > 0;
 
+		let totals: RewriteTimeTotals | null = null;
 		let seen = 0;
 		let sawMarker = false;
 
 		return {
 			id: "rewriteTime",
 
-			onLine(lineCtx: LineContext, line: string): string | undefined {
+			onStart(runCtx: RunContext): void {
+				totals = (runCtx.analysis.get(COLLECTOR_ID) as RewriteTimeTotals | undefined) ?? null;
+			},
+
+			onLine(lineCtx: LineContext): string | undefined {
 				estimator?.line(lineCtx.token, lineCtx);
 
 				const token = lineCtx.token;
 				if (token.letter !== "M" || token.code !== "M73") return undefined;
 				sawMarker = true;
+
+				const usable = estimator !== null && totals !== null && totals.totalSeconds > 0 && totals.markerCount > 0;
 				if (!usable) return undefined;
+				const known = totals as RewriteTimeTotals;
 
 				seen++;
-				const last = seen >= totalMarkers;
+				const last = seen >= known.markerCount;
 				const elapsed = (estimator as TimeEstimator).elapsed;
-				const percent = last ? 100 : Math.min(100, Math.round((elapsed / (totalSeconds as number)) * 100));
-				const minutesLeft = last ? 0 : Math.max(0, Math.round(((totalSeconds as number) - elapsed) / 60));
+				const percent = last ? 100 : Math.min(100, Math.round((elapsed / known.totalSeconds) * 100));
+				const minutesLeft = last ? 0 : Math.max(0, Math.round((known.totalSeconds - elapsed) / 60));
 
 				let body = setParam(token.body, "P", formatNumber(percent, 0));
 				body = setParam(body, "R", formatNumber(minutesLeft, 0));
@@ -59,7 +95,7 @@ export const rewriteTimeStep: StepDefinition<Record<string, never>> = {
 			onEnd(runCtx: RunContext): void {
 				if (!sawMarker) {
 					runCtx.warn("No M73 markers found in the file — rewriteTime does not insert new ones.");
-				} else if (!usable) {
+				} else if (totals === null || totals.totalSeconds <= 0 || totals.markerCount <= 0) {
 					runCtx.warn("Could not recompute M73 markers: this machine's motion limits were not available.");
 				}
 			},

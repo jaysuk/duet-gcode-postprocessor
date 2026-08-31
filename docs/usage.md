@@ -338,6 +338,14 @@ It is still your browser doing the work. Above 250 MB you get a warning and a su
 the tab open — shown as soon as you select the file, before you press Preview or Apply, not after.
 Cancelling before the write phase leaves the SD card completely untouched.
 
+A recipe that includes a step needing to know something about the whole file before it can act (for
+example, "Rewrite M73 print time" needing the total time before it can give the first marker a
+percentage) reads the file **twice** — once to gather that fact, once to apply the recipe — shown as
+its own "Analysing" phase in the progress bar. A recipe without such a step is never slowed down by
+this: the second read only happens when something actually needs it. Once applied, the run report
+breaks the two out separately so the extra cost of a two-pass recipe is visible rather than folded
+into one number.
+
 ---
 
 ## Troubleshooting

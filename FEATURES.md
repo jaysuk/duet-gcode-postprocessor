@@ -116,7 +116,7 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | # | Feature | Notes |
 | --- | --- | --- |
 | G1 | ✅ **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right — Done — `model/gcode/timeModel.ts`, `dwc/machineSnapshot.ts` (`machineLimits`), `model/steps/rewriteTime.ts` | The enabler for G2–G4; useful alone |
-| G2 | **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment | Needs G1 and a lookahead pass |
+| G2 | **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment | Needs G1 (done) and the lookahead pass (done — `model/analysisPass.ts`) |
 | G3 | ✅ **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Done — `model/gcode/features.ts`, `model/steps/fanByFeature.ts` |
 | G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |
 | G5 | ✅ **Validate `M98` macro references** against the SD card | Done — `dwc/macroCheck.ts` |

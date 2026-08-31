@@ -12,7 +12,7 @@ four non-negotiables there are binding, not background.
 | [02](02-fan-audit-and-override.md) | Fan-speed audit and per-feature override | **Done** | — |
 | [03](03-machine-aware-checks.md) | `M98` macro validation, cold-extrusion and hygiene checks, Marlin tool-scoped temperatures | **Done** | — |
 | [04](04-move-time-model.md) | Move-time model and `M73` rewrite | **Done** | — |
-| [05](05-analysis-pass.md) | Two-pass processing, so a step can see what is coming | **Ready** | 04 (uses it as the first consumer) |
+| [05](05-analysis-pass.md) | Two-pass processing, so a step can see what is coming | **Done** | 04 (uses it as the first consumer) |
 | [06](06-preheat.md) | Predictive pre-heat before a tool change | **Ready, with a stop point** — step 1 is a firmware-behaviour verification that can invalidate the spec | 04, 05 |
 
 **Not yet specified**, and deliberately so — writing them now would be guessing. See

@@ -18,14 +18,14 @@
 import {
 	BACKUP_DIR, BACKUP_INDEX, MAX_BACKUPS, METADATA_SCAN_BYTES, OUTPUT_FLUSH_BYTES, READ_CHUNK_BYTES,
 } from "../constants";
+import { AnalysisRunner } from "../analysisPass";
 import { Analyser, type FileAnalysis } from "../analysis";
 import { addEntry, parseIndex, pruneIndex, serialiseIndex, type BackupEntry } from "./backups";
-import { advance, createState } from "../gcode/state";
-import { TimeEstimator, type MachineLimits } from "../gcode/timeModel";
-import { tokenise } from "../gcode/tokenise";
+import type { MachineLimits } from "../gcode/timeModel";
 import { parseMetadata, type SlicerMetadata } from "../gcode/metadata";
 import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
-import { alreadyProcessed, buildTransforms, findStamps, makeStamp, usesRewriteTime, type Recipe, type Stamp } from "../recipe";
+import { alreadyProcessed, buildTransforms, collectorsFor, findStamps, makeStamp, type Recipe, type Stamp } from "../recipe";
+import type { StepFactoryContext } from "../steps/types";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
 
 export interface AbortSignalLike {
@@ -118,7 +118,7 @@ export interface FileGateway {
 	sizeOf(path: string): Promise<number | null>;
 }
 
-export type Phase = "downloading" | "scanning" | "processing" | "uploading" | "finalising" | "done";
+export type Phase = "downloading" | "scanning" | "analysing" | "processing" | "uploading" | "finalising" | "done";
 
 export interface ProgressUpdate {
 	phase: Phase;
@@ -161,6 +161,12 @@ export interface ProcessResult {
 	bytesIn: number;
 	bytesOut: number;
 	durationMs: number;
+	/** Milliseconds spent in the analysis pass, or null when no enabled step needed one — a two-pass
+	 *  recipe's extra cost should be visible, not folded silently into `durationMs`. */
+	analysisMs: number | null;
+	/** Milliseconds spent walking the file for the transform pass (download, backup and upload are
+	 *  not included). */
+	transformMs: number;
 	dryRun: boolean;
 	/** Set when the run stopped early because the caller cancelled. */
 	cancelled: boolean;
@@ -173,31 +179,6 @@ export async function prescan(blob: Blob): Promise<{ head: string; tail: string;
 		? await blob.slice(Math.max(0, blob.size - METADATA_SCAN_BYTES)).text()
 		: head;
 	return { head, tail, meta: parseMetadata(head, tail) };
-}
-
-/**
- * A dedicated forward walk over the already-downloaded blob to total the model's time estimate and
- * count the M73 markers, *before* the main transform pass reaches the first one — `rewriteTime`
- * cannot give its first marker a percentage without knowing the whole file's total first.
- */
-async function estimateRewriteTimeTotals(
-	blob: Blob,
-	limits: MachineLimits,
-	chunkBytes: number,
-	signal: AbortSignalLike | undefined,
-): Promise<{ totalSeconds: number; markerCount: number }> {
-	const state = createState();
-	const estimator = new TimeEstimator(limits);
-	let markerCount = 0;
-
-	await forEachLine(blob, (line) => {
-		const token = tokenise(line);
-		advance(state, token);
-		estimator.line(token, state);
-		if (token.letter === "M" && token.code === "M73") markerCount++;
-	}, { chunkBytes, signal });
-
-	return { totalSeconds: estimator.elapsed, markerCount };
 }
 
 /**
@@ -225,29 +206,36 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	const { head, meta } = await prescan(blob);
 	const existingStamp = alreadyProcessed(head, recipe);
 
-	// rewriteTime needs the whole file's total time before its first marker — see
-	// estimateRewriteTimeTotals for why this cannot be folded into the main pass below
-	let rewriteTimeTotals: { totalSeconds: number; markerCount: number } | null = null;
-	if (usesRewriteTime(recipe) && options.limits !== undefined) {
-		report({ phase: "scanning", fraction: 0 });
-		rewriteTimeTotals = await estimateRewriteTimeTotals(
-			blob, options.limits, Math.max(1, options.chunkBytes ?? READ_CHUNK_BYTES), signal,
-		);
+	const factoryCtx: StepFactoryContext = { scriptsTrusted: options.scriptsTrusted, machineLimits: options.limits };
+
+	// A second pass over the same already-downloaded blob, for any step that needs to see a fact
+	// about the whole file before the transform pass reaches the line that needs it — skipped
+	// entirely when no enabled step asked for one, so the common recipe pays nothing extra
+	const collectors = collectorsFor(recipe, factoryCtx);
+	let analysisResults: ReadonlyMap<string, unknown> = new Map();
+	let analysisMs: number | null = null;
+	if (collectors.length > 0) {
+		const analysisStarted = Date.now();
+		report({ phase: "analysing", fraction: 0 });
+		const runner = new AnalysisRunner({ collectors, meta, totalBytes: blob.size });
+		await forEachLine(blob, (line, byteOffset) => { runner.line(line, byteOffset); }, {
+			chunkBytes: options.chunkBytes,
+			signal,
+			onProgress: (fraction) => { report({ phase: "analysing", fraction }); },
+		});
 		checkCancelled();
+		analysisResults = runner.result();
+		analysisMs = Date.now() - analysisStarted;
 	}
 
-	const transforms = buildTransforms(recipe, {
-		scriptsTrusted: options.scriptsTrusted,
-		machineLimits: options.limits,
-		totalEstimatedSeconds: rewriteTimeTotals?.totalSeconds ?? null,
-		totalMarkerCount: rewriteTimeTotals?.markerCount ?? 0,
-	});
+	const transforms = buildTransforms(recipe, factoryCtx);
 	const pipeline = new Pipeline({
 		transforms,
 		meta,
 		sourcePath,
 		totalBytes: blob.size,
 		stampLine: options.dryRun ? null : makeStamp(recipe, options.pluginVersion, options.now),
+		analysisResults,
 	});
 	const analyser = options.analyse === true ? new Analyser(meta) : null;
 
@@ -269,6 +257,7 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 
 	for (const line of pipeline.begin()) emit(line);
 
+	const transformStarted = Date.now();
 	report({ phase: "processing", fraction: 0 });
 	await forEachLine(blob, (line, lineOffset) => {
 		analyser?.line(line);
@@ -281,6 +270,7 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 		signal,
 		onProgress: (fraction) => { report({ phase: "processing", fraction }); },
 	});
+	const transformMs = Date.now() - transformStarted;
 
 	for (const line of pipeline.end()) emit(line);
 	if (buffer.length > 0) parts.push(buffer.join("\n") + "\n");
@@ -296,6 +286,8 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 		bytesIn: blob.size,
 		bytesOut: 0,
 		durationMs: Date.now() - started,
+		analysisMs,
+		transformMs,
 		dryRun: options.dryRun,
 		cancelled: false,
 	};

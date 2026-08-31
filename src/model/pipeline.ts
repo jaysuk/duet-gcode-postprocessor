@@ -48,9 +48,13 @@ export interface PipelineOptions {
 	stampLine?: string | null;
 	/** Stop recording individual changes past this many entries. Default 2000. */
 	maxDiffEntries?: number;
+	/** Results from a prior analysis pass (see `analysisPass.ts`), keyed by collector id. Empty when
+	 *  no pass ran. */
+	analysisResults?: ReadonlyMap<string, unknown>;
 }
 
 const DEFAULT_MAX_DIFF = 2000;
+const EMPTY_ANALYSIS: ReadonlyMap<string, unknown> = new Map();
 
 export class Pipeline {
 	readonly stats: RunStats;
@@ -88,6 +92,7 @@ export class Pipeline {
 			meta: this.meta,
 			sourcePath: options.sourcePath ?? "",
 			totalLayers: this.meta.totalLayers,
+			analysis: options.analysisResults ?? EMPTY_ANALYSIS,
 			warn(message: string) {
 				if (!stats.warnings.includes(message)) stats.warnings.push(message);
 			},
@@ -95,12 +100,7 @@ export class Pipeline {
 
 		// One context object, mutated per line. Allocating a fresh one per line would add several
 		// million short-lived objects to a large run for no benefit — steps must not retain it
-		this.lineContext = Object.assign(Object.create(null) as MutableLineContext, this.state, {
-			token: tokenise(""),
-			meta: this.meta,
-			totalLayers: this.meta.totalLayers,
-			progress: null as number | null,
-		});
+		this.lineContext = createLineContext(this.state, this.meta);
 	}
 
 	/** Lines to write before the first source line. */
@@ -156,23 +156,7 @@ export class Pipeline {
 	}
 
 	private syncContext(token: Tokenised, byteOffset: number): void {
-		const ctx = this.lineContext;
-		const state = this.state;
-		ctx.lineNo = state.lineNo;
-		ctx.layer = state.layer;
-		ctx.z = state.z;
-		ctx.tool = state.tool;
-		ctx.feedrate = state.feedrate;
-		ctx.relativeMoves = state.relativeMoves;
-		ctx.relativeE = state.relativeE;
-		ctx.object = state.object;
-		ctx.featureType = state.featureType;
-		ctx.layerChanged = state.layerChanged;
-		ctx.sawLayerMarker = state.sawLayerMarker;
-		ctx.token = token;
-		ctx.progress = this.totalBytes !== null && this.totalBytes > 0
-			? Math.min(1, byteOffset / this.totalBytes)
-			: null;
+		syncLineContext(this.lineContext, this.state, token, this.totalBytes, byteOffset);
 	}
 
 	private record(raw: string, current: string | Array<string> | null): void {
@@ -210,9 +194,46 @@ export class Pipeline {
 }
 
 /** Mutable shape behind the read-only LineContext the steps see. */
-type MutableLineContext = {
+export type MutableLineContext = {
 	-readonly [K in keyof LineContext]: LineContext[K];
 };
+
+/**
+ * A fresh, mutated-in-place `LineContext`. Shared by `Pipeline` and `AnalysisRunner` (in
+ * `analysisPass.ts`) so both passes build the exact same shape from the same `MachineState` and
+ * metadata — a step's `onLine` and a collector's `onLine` must agree about what "this line" means.
+ */
+export function createLineContext(state: MachineState, meta: SlicerMetadata): MutableLineContext {
+	return Object.assign(Object.create(null) as MutableLineContext, state, {
+		token: tokenise(""),
+		meta,
+		totalLayers: meta.totalLayers,
+		progress: null as number | null,
+	});
+}
+
+/** Update a `LineContext` (built by {@link createLineContext}) for one newly-advanced line. */
+export function syncLineContext(
+	ctx: MutableLineContext,
+	state: MachineState,
+	token: Tokenised,
+	totalBytes: number | null,
+	byteOffset: number,
+): void {
+	ctx.lineNo = state.lineNo;
+	ctx.layer = state.layer;
+	ctx.z = state.z;
+	ctx.tool = state.tool;
+	ctx.feedrate = state.feedrate;
+	ctx.relativeMoves = state.relativeMoves;
+	ctx.relativeE = state.relativeE;
+	ctx.object = state.object;
+	ctx.featureType = state.featureType;
+	ctx.layerChanged = state.layerChanged;
+	ctx.sawLayerMarker = state.sawLayerMarker;
+	ctx.token = token;
+	ctx.progress = totalBytes !== null && totalBytes > 0 ? Math.min(1, byteOffset / totalBytes) : null;
+}
 
 /**
  * Run one transform over the current value, which may already be several lines because an earlier
