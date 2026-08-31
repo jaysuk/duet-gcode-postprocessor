@@ -122,6 +122,11 @@
 				{{ phaseLabel }}<template v-if="progress?.detail"> — {{ progress.detail }}</template>
 			</div>
 
+			<v-alert v-for="issue in warnings" :key="issue.code" type="warning" variant="tonal"
+					 density="compact" class="mb-2">
+				{{ issue.message }}
+			</v-alert>
+
 			<div class="d-flex align-center flex-wrap ga-2">
 				<v-select v-model="outputMode" :items="outputModes" item-title="label" item-value="value"
 						  density="compact" hide-details variant="outlined" label="Write the result"
@@ -236,6 +241,7 @@ const folder = ref("0:/gcodes/postprocessed");
 
 const busy = ref(false);
 const targetExists = ref(false);
+const sourceSize = ref<number | null>(null);
 const progress = ref<ProgressUpdate | null>(null);
 const runError = ref<string | null>(null);
 const lastRun = ref<ProcessResult | null>(null);
@@ -269,7 +275,7 @@ const safety = computed<Array<SafetyIssue>>(() => {
 		plan: plan.value,
 		jobFileName: jobFileName(machineStore.model),
 		status: machineStatus(machineStore.model),
-		sizeBytes: lastRun.value?.bytesIn ?? null,
+		sizeBytes: lastRun.value?.bytesIn ?? sourceSize.value,
 		existingStamp: lastRun.value?.existingStamp ?? null,
 		targetExists: targetExists.value,
 		recipe: recipe.value,
@@ -343,6 +349,19 @@ watch([plannedTarget, selectedPath], async ([target]) => {
 		if (plannedTarget.value === target) targetExists.value = size !== null;
 	} catch {
 		// A failed listing is not evidence either way; leave the warning off
+	}
+}, { immediate: true });
+
+// The large-file warning only helps before the run it is warning about, so the source size is
+// looked up as soon as a file is selected rather than waiting for a run to report it
+watch(selectedPath, async (path) => {
+	sourceSize.value = null;
+	if (path === null || !machineStore.isConnected) return;
+	try {
+		const size = await createGateway().sizeOf(path);
+		if (selectedPath.value === path) sourceSize.value = size;
+	} catch {
+		// A failed listing is not evidence of anything; leave the size unknown
 	}
 }, { immediate: true });
 

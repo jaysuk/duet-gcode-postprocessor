@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { mountInDwc, resetDwc } from "dwc-plugin-test-kit";
+import { flushPromises } from "@vue/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
 
 import DiffPreview from "../src/components/DiffPreview.vue";
 import FileInspector from "../src/components/FileInspector.vue";
@@ -8,11 +9,31 @@ import PostProcessorPage from "../src/components/PostProcessorPage.vue";
 import PostProcessorWidget from "../src/components/PostProcessorWidget.vue";
 import RecipeEditor from "../src/components/RecipeEditor.vue";
 import StepFields from "../src/components/StepFields.vue";
+import { LARGE_FILE_WARN_BYTES } from "../src/model/constants";
 import { createRecipe, newUid } from "../src/model/recipe";
 import { defaultConfig, STEP_DEFINITIONS } from "../src/model/steps/registry";
 
+// The shared test kit's file-listing stub (DwcFile) carries no `size` field, so a real
+// createGateway().sizeOf() can never resolve to a non-null value under it — this mock is the only
+// way to drive the large-file and target-exists warnings end to end
+const sizeOfMock = vi.fn<(path: string) => Promise<number | null>>();
+vi.mock("../src/dwc/gateway", () => ({
+	createGateway: () => ({
+		sizeOf: sizeOfMock,
+		download: vi.fn(),
+		upload: vi.fn(),
+		move: vi.fn(),
+		remove: vi.fn(),
+		makeDirectory: vi.fn(),
+	}),
+}));
+
 describe("components mount", () => {
-	beforeEach(() => resetDwc());
+	beforeEach(() => {
+		resetDwc();
+		sizeOfMock.mockReset();
+		sizeOfMock.mockResolvedValue(null);
+	});
 
 	it("mounts the page", () => {
 		expect(mountInDwc(PostProcessorPage).exists()).toBe(true);
@@ -65,6 +86,61 @@ describe("components mount", () => {
 			props: { recipe, recipes: [recipe], scriptsTrusted: false },
 		});
 		expect(wrapper.text()).toContain("Trust scripts in this recipe");
+	});
+});
+
+describe("PostProcessorPage safety warnings", () => {
+	// This Node/happy-dom combination's global `localStorage` is a non-functional stub (confirmed:
+	// `localStorage.setItem` is `undefined`), which is exactly why every real localStorage access in
+	// this codebase is wrapped in try/catch. So file selection here is driven through GcodeBrowser's
+	// v-model — the same path a real file pick takes — rather than by seeding LS_SELECTED_FILE.
+	beforeEach(() => {
+		resetDwc();
+		sizeOfMock.mockReset();
+		sizeOfMock.mockResolvedValue(null);
+	});
+
+	async function selectFile(wrapper: ReturnType<typeof mountInDwc>, path: string): Promise<void> {
+		await wrapper.findComponent(GcodeBrowser).vm.$emit("update:modelValue", path);
+		await flushPromises();
+	}
+
+	// A defect this guards against: the large-file warning previously only appeared after a full
+	// run had already paid the cost it was meant to warn about — see docs/tasks/01-defects.md
+	it("shows the large-file warning as soon as a big file is selected, before either button is pressed", async () => {
+		sizeOfMock.mockResolvedValue(LARGE_FILE_WARN_BYTES + 1);
+		setConnected(true);
+
+		const wrapper = mountInDwc(PostProcessorPage);
+		await selectFile(wrapper, "0:/gcodes/big.gcode");
+
+		expect(sizeOfMock).toHaveBeenCalledWith("0:/gcodes/big.gcode");
+		expect(wrapper.text()).toMatch(/will take a while|leave the tab open|MiB|GiB/i);
+	});
+
+	it("shows no size warning for a small file", async () => {
+		sizeOfMock.mockResolvedValue(1024);
+		setConnected(true);
+
+		const wrapper = mountInDwc(PostProcessorPage);
+		await selectFile(wrapper, "0:/gcodes/small.gcode");
+
+		expect(wrapper.text()).not.toMatch(/leave the tab open/i);
+	});
+
+	it("does not carry one file's warning over to a different selection", async () => {
+		sizeOfMock.mockImplementation(async (path: string) => (
+			path === "0:/gcodes/big.gcode" ? LARGE_FILE_WARN_BYTES + 1 : 1024
+		));
+		setConnected(true);
+
+		const wrapper = mountInDwc(PostProcessorPage);
+		await selectFile(wrapper, "0:/gcodes/big.gcode");
+		expect(wrapper.text()).toMatch(/leave the tab open/i);
+
+		// Switching to the small file must clear the warning, not just add a second one
+		await selectFile(wrapper, "0:/gcodes/small.gcode");
+		expect(wrapper.text()).not.toMatch(/leave the tab open/i);
 	});
 });
 
