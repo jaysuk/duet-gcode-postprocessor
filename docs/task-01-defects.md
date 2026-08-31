@@ -70,8 +70,8 @@ Do not make warnings block anything. `blocking()` issues already gate Apply; war
 
 ### Tests
 
-In `src/__tests__/plan.test.ts` (`checkSafety` describe block) — the safety rules themselves are
-already covered, so the new coverage belongs on the wiring:
+The safety rules themselves are already covered in `src/__tests__/plan.test.ts`, so the new coverage
+belongs on the wiring, not on `checkSafety`:
 
 - Extend `test/component.test.ts`: mount `PostProcessorPage` and assert that a warn-level safety
   issue is rendered in the page body, not only behind the dialog. The test kit's `setFiles` helper
@@ -121,7 +121,18 @@ is where someone would go looking for it. Create it on demand — `makeDirectory
 before the first backup upload and already tolerates "exists".
 
 **Do not migrate existing backups** — anyone who has a `0:/gcodes/.postproc` from a dev build can
-move or delete it themselves. Note the change in `docs/usage.md`.
+move or delete it themselves.
+
+The path is referenced in six places. Change all of them, and note that two are assertions:
+
+| File | What it is |
+| --- | --- |
+| `src/model/constants.ts:23–24` | the constants themselves |
+| `src/__tests__/plan.test.ts:63` | **a hard-coded expected path** — update the expectation, do not weaken the assertion |
+| `src/__tests__/transfer.test.ts` | the expected operation order includes the backup path |
+| `docs/usage.md:240` | the "where the output goes" table |
+| `PLAN.md:177` | §3.3's description of the safety layer |
+| `docs/task-01-defects.md` | this file, once it is done |
 
 Leave `tempPath` where it is (`<target>.pp.tmp`, next to the target). It has to be on the same
 volume and directory for the temp-then-move to be a rename rather than a copy, and it exists for
@@ -159,6 +170,16 @@ Pure functions, all unit-tested directly:
   `export const MAX_BACKUPS = 20;` to `constants.ts`.
 - `serialiseIndex(index): string`.
 
+**Backup names must be unique.** `planOutput` currently names a backup `<stem>.<timestamp><ext>`
+with a one-second timestamp, and the backup directory is flat — so `0:/gcodes/a/benchy.gcode` and
+`0:/gcodes/b/benchy.gcode` backed up in the same second collide, and the second silently overwrites
+the first while the index gains two entries pointing at one file. Losing a backup is precisely the
+failure this whole feature exists to prevent.
+
+Fix it where the name is chosen, not in the UI: before uploading, ask the gateway whether the name
+is taken (`sizeOf` returns `null` when it is not) and add a `-2`, `-3` … suffix until it is free.
+Unit-test the pure naming helper for the collision case.
+
 **c. Write the index when a backup is taken (impure, in `transfer.ts`).**
 
 At [transfer.ts:240–244](../src/model/io/transfer.ts), where the backup is currently uploaded:
@@ -192,6 +213,10 @@ entry:
 Restore uses the same temp-then-move discipline as `processFile`: upload to `<target>.pp.tmp`, then
 `move` onto the target. Do not shortcut it because the payload came from a backup.
 
+**If the original directory no longer exists** — the user reorganised, or deleted the folder —
+`makeDirectory` it first, and if that fails, say so plainly and offer the Download action instead.
+Do not silently drop the file somewhere else.
+
 If the index is empty or missing, say so plainly ("No backups yet — one is taken automatically
 whenever you overwrite a file in place"), not with an error.
 
@@ -207,6 +232,12 @@ whenever you overwrite a file in place"), not with an error.
     (make the fake fail the index upload and assert nothing was deleted).
 - `test/component.test.ts` — `BackupManager` mounts with an empty index and shows the empty state.
 
+### Documentation
+
+`docs/usage.md` needs the new **Backups** tab documented alongside the path change — what is kept,
+how many, how to restore one, and that restoring is refused for the file currently printing. A
+safety feature nobody knows how to use is not much of a safety feature.
+
 ### Acceptance
 
 - Nothing the plugin creates appears in the Jobs list.
@@ -214,6 +245,8 @@ whenever you overwrite a file in place"), not with an error.
 - The Backups tab lists them and Restore puts one back to where it came from.
 - Restoring over the file currently printing is refused.
 - After 21 in-place runs there are 20 backups and 20 index entries.
+- Two same-named files from different folders, backed up in the same second, produce two distinct
+  backup files and two index entries.
 
 ---
 
