@@ -1,4 +1,5 @@
 import { emptyMetadata, type SlicerMetadata } from "../model/gcode/metadata";
+import type { FileGateway } from "../model/io/transfer";
 import { runToString } from "../model/pipeline";
 import { getStepDefinition } from "../model/steps/registry";
 import { withDefaults, type Transform } from "../model/steps/types";
@@ -59,3 +60,55 @@ export const SAMPLE = [
 	"M140 S0",
 	"; filament used [mm] = 1234.5",
 ].join("\n");
+
+/**
+ * In-memory SD card, implementing the full FileGateway interface. Records the order of operations
+ * so a write sequence can be asserted, and can be told to fail a specific upload or to corrupt the
+ * reported size of the target, for the safety-path tests.
+ */
+export class FakeGateway implements FileGateway {
+	files = new Map<string, string>();
+	log: Array<string> = [];
+	failUploadOn: string | null = null;
+	corruptTargetSize = false;
+
+	constructor(initial: Record<string, string> = {}) {
+		for (const [path, content] of Object.entries(initial)) this.files.set(path, content);
+	}
+
+	async download(path: string): Promise<Blob> {
+		this.log.push(`download ${path}`);
+		const content = this.files.get(path);
+		if (content === undefined) throw new Error(`No such file: ${path}`);
+		return new Blob([content], { type: "text/plain" });
+	}
+
+	async upload(path: string, content: Blob): Promise<void> {
+		this.log.push(`upload ${path}`);
+		if (this.failUploadOn === path) throw new Error("network died");
+		this.files.set(path, await content.text());
+	}
+
+	async move(from: string, to: string): Promise<void> {
+		this.log.push(`move ${from} -> ${to}`);
+		const content = this.files.get(from);
+		if (content === undefined) throw new Error(`No such file: ${from}`);
+		this.files.delete(from);
+		this.files.set(to, content);
+	}
+
+	async remove(path: string): Promise<void> {
+		this.log.push(`remove ${path}`);
+		this.files.delete(path);
+	}
+
+	async makeDirectory(path: string): Promise<void> {
+		this.log.push(`mkdir ${path}`);
+	}
+
+	async sizeOf(path: string): Promise<number | null> {
+		const content = this.files.get(path);
+		if (content === undefined) return null;
+		return this.corruptTargetSize ? 1 : new Blob([content]).size;
+	}
+}

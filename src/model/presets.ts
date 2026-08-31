@@ -33,16 +33,24 @@ export const PRESETS: ReadonlyArray<Preset> = Object.freeze([
 				steps: [
 					step("commandMap", {
 						from: "M900", to: "M572", paramMap: "K=S", addParams: "D0", dropParams: "T",
-						keepOriginal: true, layerFrom: -1, layerTo: -1,
+						onlyWithParam: "", keepOriginal: true, layerFrom: -1, layerTo: -1,
 					}, "Linear advance to pressure advance"),
 					step("commandMap", {
 						from: "M205", to: "M566", paramMap: "", addParams: "", dropParams: "J,S,T",
-						keepOriginal: true, layerFrom: -1, layerTo: -1,
+						onlyWithParam: "", keepOriginal: true, layerFrom: -1, layerTo: -1,
 					}, "Jerk — note M566 is mm/min, M205 is mm/s: check the numbers"),
 					step("commandMap", {
 						from: "M420", to: "G29", paramMap: "", addParams: "S1", dropParams: "L,V,Z",
-						keepOriginal: true, layerFrom: -1, layerTo: -1,
+						onlyWithParam: "", keepOriginal: true, layerFrom: -1, layerTo: -1,
 					}, "Load the height map"),
+					step("commandMap", {
+						from: "M104", to: "M568", paramMap: "T=P", addParams: "", dropParams: "",
+						onlyWithParam: "T", keepOriginal: true, layerFrom: -1, layerTo: -1,
+					}, "Tool-scoped temperature — a bare M104 (no T) already means the current tool in both firmwares and is left alone"),
+					step("commandMap", {
+						from: "M109", to: "M568", paramMap: "T=P", addParams: "", dropParams: "",
+						onlyWithParam: "T", keepOriginal: true, layerFrom: -1, layerTo: -1,
+					}, "Tool-scoped temperature with a wait — M568 does not wait like M109 did; add an M116 after it if this print relied on that wait"),
 					step("deleteLines", {
 						pattern: "^M(501|502|851)\\b", regex: true, caseSensitive: true,
 						action: "comment", note: "no RepRapFirmware equivalent — settings live in config.g",

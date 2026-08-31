@@ -67,7 +67,14 @@ plain find and replace would produce something that *looks* right and does not r
 | Rename parameters | `K=S` (comma-separate several: `K=S, T=P`) |
 | Add parameters | `D0` |
 | Drop parameters | `T` |
+| Only when this parameter is present | `T` — lines without it are left completely alone |
 | Keep the original as a comment | Appends `; was: M900 K0.05` so the change is auditable in the file |
+
+"Only when this parameter is present" matters for commands whose meaning changes depending on
+whether a parameter is there at all. In Marlin, `M104 S200 T1` sets *tool 1's* temperature, but a
+bare `M104 S200` means the current tool — the same as in RepRapFirmware. Mapping every `M104`
+unconditionally would give a bare one a `P` parameter it never needed; setting this to `T` maps
+only the tool-scoped form (to `M568 P1 S200`) and leaves the rest untouched.
 
 ### Insert G-code
 
@@ -213,7 +220,7 @@ From **⋮ → Add a bundled preset**:
 
 | Recipe | What it does |
 | --- | --- |
-| Marlin to RepRapFirmware | Maps `M900`→`M572`, `M205`→`M566`, `M420`→`G29 S1`, and comments out `M501`/`M502`/`M851`. Curated, not a general translator — check the result. |
+| Marlin to RepRapFirmware | Maps `M900`→`M572`, `M205`→`M566`, `M420`→`G29 S1`, tool-scoped `M104`/`M109 …T`→`M568`, and comments out `M501`/`M502`/`M851`. Curated, not a general translator — check the result. |
 | Pause at a layer | `M400` + `M25` before a chosen layer, for an insert or a colour change |
 | Timelapse trigger every layer | Calls a macro at each layer change |
 | Pressure advance tower | Sweeps `M572` up the Z height in bands |
@@ -240,7 +247,7 @@ The **Inspect** tab reads the file once, without writing anything, and reports:
 
 ### Preflight checks
 
-Run against the machine's live object model:
+Most run against the machine's live object model:
 
 | Check | Level |
 | --- | --- |
@@ -248,12 +255,17 @@ Run against the machine's live object model:
 | Moves outside the axis limits from `M208` | Error |
 | Tools the file selects that are not configured | Error |
 | Temperatures above the `M143` heater limits | Error |
+| A macro the file calls (`M98`) that is not on the SD card | Error |
+| Extrusion before anything waits for the hot end to reach temperature | Error, or Warning if some heating command exists |
 | Fans the file drives that do not exist | Warning |
 | No homing command anywhere in the file | Warning |
+| Heaters, the part fan or the motors never turned off at the end | Information |
 | No tool selected, no layer markers, slicer not recognised | Information |
 
 Nothing machine-specific is checked while disconnected — a check that invents failures is worse
-than no check.
+than no check. The macro and cold-extrusion checks do not depend on the machine at all, so they
+still run offline; the macro check specifically needs the SD card, so it appears a moment after the
+rest of the inspection rather than holding it up.
 
 ---
 

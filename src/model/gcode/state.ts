@@ -12,7 +12,7 @@
  * (`;LAYER:n`). The fallback only runs when no marker has ever been seen in the file.
  */
 
-import { paramNumber, parseParams, type Tokenised } from "./tokenise";
+import { paramNumber, parseParams, unquoteString, type Tokenised } from "./tokenise";
 
 export interface MachineState {
 	/** 1-based line number in the source file. */
@@ -204,18 +204,11 @@ function applyM(state: MachineState, token: Tokenised): void {
 			// RRF/Orca also carry a human label: M486 S3 A"handle"
 			for (const p of params) {
 				if (p.letter === "A") {
-					state.object = stripQuotes(p.value);
+					state.object = unquoteString(p.value);
 					break;
 				}
 			}
 			break;
 		}
 	}
-}
-
-function stripQuotes(value: string): string {
-	if (value.length >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
-		return value.slice(1, -1).replace(/""/g, "\"");
-	}
-	return value;
 }

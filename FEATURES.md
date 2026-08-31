@@ -5,9 +5,12 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 
 > **v0.1.0 delivers every item tagged v1**, plus the rules tier (C1), the script tier (C2–C4), the
 > calibration-tower step (B6), the range of insertion anchors (B3), the preflight checks (E8–E12),
-> the Flexible-Layouts widget (F1), and the backup manager with restore/download/delete (D7). Still
-> outstanding: auto-run on upload (D5), batch processing (D6), automatic recipe selection (D4), run
-> history (D8), and the "Later" items.
+> the Flexible-Layouts widget (F1), the backup manager with restore/download/delete (D7), the fan
+> audit and per-feature override (G3), `M98` macro validation (G5), cold-extrusion and end-of-file
+> hygiene checks (G8), and the Marlin tool-scoped temperature fix (H8). Still outstanding: auto-run
+> on upload (D5), batch processing (D6), automatic recipe selection (D4), run history (D8), the
+> volumetric flow-rate audit and feedrate clamping (G6–G7, need the move-time model first), and the
+> "Later" items.
 > See [PLAN.md](PLAN.md#status) for the deviations.
 
 ---
@@ -116,10 +119,10 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | G2 | **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment | Needs G1 and a lookahead pass |
 | G3 | ✅ **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Done — `model/gcode/features.ts`, `model/steps/fanByFeature.ts` |
 | G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |
-| G5 | **Validate `M98` macro references** against the SD card | Trivial, catches a print-stopping typo |
+| G5 | ✅ **Validate `M98` macro references** against the SD card | Done — `dwc/macroCheck.ts` |
 | G6 | **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt | |
 | G7 | **Feedrate and acceleration clamping** to the machine's real limits | |
-| G8 | **Cold-extrusion and end-of-file hygiene checks** | |
+| G8 | ✅ **Cold-extrusion and end-of-file hygiene checks** | Done — `model/checks.ts` |
 | G9 | **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Makes DWC cancel-object work on more files |
 | G10 | **`M37` simulation round-trip** — the firmware's own time estimate, written back into `M73` | |
 | G11 | **Extract or split a layer range** into a standalone file | |
@@ -140,7 +143,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 | H5 | ^ **G-code command palette with click-to-insert** in the insert and rules editors | Cheapest route may be the upstream Monaco ask |
 | H6 | ^ **Geometric warp-risk notes** - large flat first layers, tall thin features, high-shrinkage material | Information-level only; no pretence of prediction |
 | H7 | **Pressure advance (and other parameters) per filament**, from the file's own metadata | A table keyed on `filament_type` |
-| H8 | **Marlin tool-scoped temperatures** - `M104 S200 T1` becomes `M568 P1 S200` | A real gap in the current Marlin preset |
+| H8 | ✅ **Marlin tool-scoped temperatures** - `M104 S200 T1` becomes `M568 P1 S200` | Done — `commandMap`'s `onlyWithParam` |
 | H9 | **Tool renumbering** - remap T0 to T2 without mangling comments and `M568 P0` | |
 | H10 | **Z-hop injection** on travels above a length threshold | |
 | H11 | **Ooze control** - retract or drop temperature before long travels | |

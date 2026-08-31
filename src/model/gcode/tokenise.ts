@@ -237,6 +237,18 @@ export function withBody(token: Tokenised, body: string): string {
 	return token.commentIndex === -1 ? body : body + ";" + (token.comment ?? "");
 }
 
+/**
+ * Strip the surrounding quotes from a string-parameter value (as returned by {@link parseParams},
+ * quotes and all) and un-escape RRF's `""` doubling. Returns the value unchanged when it was not
+ * quoted to begin with — an expression like `{var.name}` or a bare number, say.
+ */
+export function unquoteString(value: string): string {
+	if (value.length >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+		return value.slice(1, -1).replace(/""/g, "\"");
+	}
+	return value;
+}
+
 function isSpace(code: number): boolean {
 	return code === 32 || code === 9 || code === 13;
 }

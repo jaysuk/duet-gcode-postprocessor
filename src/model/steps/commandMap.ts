@@ -16,6 +16,8 @@ export interface CommandMapConfig {
 	paramMap: string;
 	addParams: string;
 	dropParams: string;
+	/** Only map a line that carries this parameter. Empty means map every occurrence. */
+	onlyWithParam: string;
 	keepOriginal: boolean;
 	layerFrom: number;
 	layerTo: number;
@@ -52,7 +54,10 @@ export function parseLetters(text: string): Array<string> {
 
 /**
  * Rewrite a single line according to a mapping. Exported for testing and reused by the preset
- * recipes; returns null when the line's command does not match.
+ * recipes; returns null when the line's command does not match — including when `onlyWithParam` is
+ * set and this line does not carry it, which is what lets `M104 S200 T1` (Marlin: tool 1's
+ * temperature) be rewritten to `M568 P1 S200` while a bare `M104 S200` (targets the current tool in
+ * both firmwares) is correctly left alone rather than gaining a `P` it never had.
  */
 export function mapCommand(
 	line: string,
@@ -62,6 +67,7 @@ export function mapCommand(
 		renames: Array<{ from: string; to: string }>;
 		adds: Array<{ letter: string; value: string }>;
 		drops: Array<string>;
+		onlyWithParam: string;
 		keepOriginal: boolean;
 	},
 ): string | null {
@@ -69,6 +75,8 @@ export function mapCommand(
 	if (token.code === null || token.code.toUpperCase() !== spec.from) return null;
 
 	const params = parseParams(token.body);
+	if (spec.onlyWithParam !== "" && !params.some((p) => p.letter === spec.onlyWithParam)) return null;
+
 	// Rebuild rather than patch: renaming K to S in place would leave the parameters in an order
 	// that reads oddly, and appending is what makes the result look hand-written
 	const kept: Array<{ letter: string; value: string }> = [];
@@ -121,6 +129,11 @@ export const commandMapStep: StepDefinition<CommandMapConfig> = {
 			help: "Comma-separated letters to remove, e.g. \"T, P\".",
 		},
 		{
+			key: "onlyWithParam", label: "Only when this parameter is present", type: "text", default: "",
+			placeholder: "T",
+			help: "A single letter. Lines without it are left completely alone, instead of gaining a parameter they never had. Empty maps every occurrence. Default: empty.",
+		},
+		{
 			key: "keepOriginal", label: "Keep the original as a comment", type: "boolean", default: true,
 			help: "Appends \"; was: …\" so the change is auditable in the file itself. Default: on.",
 		},
@@ -141,6 +154,7 @@ export const commandMapStep: StepDefinition<CommandMapConfig> = {
 			renames: parseParamMap(config.paramMap),
 			adds: parseAddParams(config.addParams),
 			drops: parseLetters(config.dropParams),
+			onlyWithParam: config.onlyWithParam.trim().toUpperCase(),
 			keepOriginal: config.keepOriginal,
 		};
 		const { layerFrom, layerTo } = config;
@@ -159,6 +173,9 @@ export const commandMapStep: StepDefinition<CommandMapConfig> = {
 		const errors: Array<string> = [];
 		if (!/^[GMT]\d+(\.\d+)?$/i.test(config.from.trim())) errors.push("'Replace command' should look like M900, G29 or T1");
 		if (!/^[GMT]\d+(\.\d+)?$/i.test(config.to.trim())) errors.push("'With command' should look like M572, G32 or T0");
+		if (config.onlyWithParam.trim() !== "" && !/^[A-Za-z]$/.test(config.onlyWithParam.trim())) {
+			errors.push("'Only when this parameter is present' must be a single letter");
+		}
 		return errors;
 	},
 };

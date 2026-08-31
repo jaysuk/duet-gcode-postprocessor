@@ -202,5 +202,77 @@ function checkStructure(analysis: FileAnalysis): Array<CheckResult> {
 			detail: "No slicer signature was found in the header or footer, so metadata-based fields (layer count, print time) are unavailable.",
 		});
 	}
+	results.push(...checkColdExtrusion(analysis));
+	results.push(...checkEndOfFileHygiene(analysis));
 	return results;
+}
+
+/**
+ * Whether the file leaves heaters on, the part fan running, or the motors energised. Kept at
+ * `info`: plenty of setups deliberately leave the bed warm or hand shutdown to an end macro this
+ * analysis cannot see into, and a check that is usually wrong gets ignored along with the times it
+ * is right.
+ */
+function checkEndOfFileHygiene(analysis: FileAnalysis): Array<CheckResult> {
+	const results: Array<CheckResult> = [];
+
+	if (analysis.maxToolTemp !== null && !analysis.heatersAddressed) {
+		results.push({
+			level: "info",
+			code: "structure:heatersLeftOn",
+			title: "Heaters are never turned off",
+			detail: "No M104/M140 S0, M568 to standby, or M0/M2 appears anywhere. Fine if an end macro handles shutdown.",
+		});
+	}
+	if (analysis.fans.length > 0 && !analysis.fanAddressed) {
+		results.push({
+			level: "info",
+			code: "structure:fanLeftRunning",
+			title: "The part fan is never turned off",
+			detail: "No M107 or M106 S0 appears anywhere. Fine if an end macro handles shutdown.",
+		});
+	}
+	if ((analysis.commandCounts.get("G1") ?? 0) > 0 && !analysis.motorsAddressed) {
+		results.push({
+			level: "info",
+			code: "structure:motorsLeftEnergised",
+			title: "Motors are never disabled",
+			detail: "No M18 or M84 appears anywhere. Fine if an end macro or config.g handles shutdown.",
+		});
+	}
+	return results;
+}
+
+/**
+ * Extrusion before anything has waited for the hot end jams the nozzle, and is easy to introduce by
+ * hand-assembling a file or an over-enthusiastic find-and-replace on the start block. Downgraded to
+ * a warning rather than an error when *some* heating command exists (even without an explicit
+ * wait) — plenty of good files heat via a macro this analysis cannot see into, and a check that is
+ * usually wrong gets ignored along with the times it is right.
+ */
+function checkColdExtrusion(analysis: FileAnalysis): Array<CheckResult> {
+	if (analysis.firstExtrusionLine === null) return [];
+	if (analysis.firstHeatWaitLine !== null && analysis.firstHeatWaitLine < analysis.firstExtrusionLine) return [];
+
+	const hasAnyHeatingCommand = analysis.maxToolTemp !== null || analysis.firstHeatWaitLine !== null;
+	if (analysis.firstHeatWaitLine === null) {
+		return [{
+			level: hasAnyHeatingCommand ? "warning" : "error",
+			code: "structure:coldExtrusionNoWait",
+			title: hasAnyHeatingCommand
+				? "Extrusion begins with no explicit wait for temperature"
+				: "Extrusion begins with no heating command anywhere in the file",
+			detail: `The first extruding move is at line ${analysis.firstExtrusionLine}, but the file never waits `
+				+ "for the hot end to reach temperature (M109 or M116). This is fine if a start macro handles "
+				+ "heating — otherwise the first layer will print cold.",
+		}];
+	}
+	return [{
+		level: "warning",
+		code: "structure:coldExtrusion",
+		title: "Extrusion begins before the hot end is told to wait for temperature",
+		detail: `The first extruding move is at line ${analysis.firstExtrusionLine}, before the wait for `
+			+ `temperature at line ${analysis.firstHeatWaitLine}. This is fine if a start macro handles `
+			+ "heating earlier — otherwise the first layer may print cold.",
+	}];
 }

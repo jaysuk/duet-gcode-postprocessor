@@ -1,59 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { planOutput } from "../model/io/plan";
-import { CancelledError, processFile, type FileGateway } from "../model/io/transfer";
+import { CancelledError, processFile } from "../model/io/transfer";
 import { createRecipe, newUid, type Recipe } from "../model/recipe";
-import { SAMPLE } from "./helpers";
+import { FakeGateway, SAMPLE } from "./helpers";
 
 const SOURCE = "0:/gcodes/benchy.gcode";
-
-/** In-memory SD card. Records the order of operations so the write sequence can be asserted. */
-class FakeGateway implements FileGateway {
-	files = new Map<string, string>();
-	log: Array<string> = [];
-	failUploadOn: string | null = null;
-	corruptTargetSize = false;
-
-	constructor(initial: Record<string, string> = {}) {
-		for (const [path, content] of Object.entries(initial)) this.files.set(path, content);
-	}
-
-	async download(path: string): Promise<Blob> {
-		this.log.push(`download ${path}`);
-		const content = this.files.get(path);
-		if (content === undefined) throw new Error(`No such file: ${path}`);
-		return new Blob([content], { type: "text/plain" });
-	}
-
-	async upload(path: string, content: Blob): Promise<void> {
-		this.log.push(`upload ${path}`);
-		if (this.failUploadOn === path) throw new Error("network died");
-		this.files.set(path, await content.text());
-	}
-
-	async move(from: string, to: string): Promise<void> {
-		this.log.push(`move ${from} -> ${to}`);
-		const content = this.files.get(from);
-		if (content === undefined) throw new Error(`No such file: ${from}`);
-		this.files.delete(from);
-		this.files.set(to, content);
-	}
-
-	async remove(path: string): Promise<void> {
-		this.log.push(`remove ${path}`);
-		this.files.delete(path);
-	}
-
-	async makeDirectory(path: string): Promise<void> {
-		this.log.push(`mkdir ${path}`);
-	}
-
-	async sizeOf(path: string): Promise<number | null> {
-		const content = this.files.get(path);
-		if (content === undefined) return null;
-		return this.corruptTargetSize ? 1 : new Blob([content]).size;
-	}
-}
 
 function recipe(config: Record<string, unknown> = { find: "F1800", replace: "F900" }): Recipe {
 	return {

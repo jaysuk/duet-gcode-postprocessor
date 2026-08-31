@@ -72,43 +72,53 @@ describe("commandMap", () => {
 		const out = mapCommand("M900 K0.05", {
 			from: "M900", to: "M572",
 			renames: [{ from: "K", to: "S" }], adds: [{ letter: "D", value: "0" }], drops: [],
-			keepOriginal: false,
+			onlyWithParam: "", keepOriginal: false,
 		});
 		expect(out).toBe("M572 S0.05 D0");
 	});
 
 	it("keeps the original as a comment when asked", () => {
 		const out = mapCommand("M900 K0.05", {
-			from: "M900", to: "M572", renames: [], adds: [], drops: [], keepOriginal: true,
+			from: "M900", to: "M572", renames: [], adds: [], drops: [], onlyWithParam: "", keepOriginal: true,
 		});
 		expect(out).toBe("M572 K0.05 ; was: M900 K0.05");
 	});
 
 	it("drops unwanted parameters", () => {
 		const out = mapCommand("M205 X8 Y8 J0.02", {
-			from: "M205", to: "M566", renames: [], adds: [], drops: ["J"], keepOriginal: false,
+			from: "M205", to: "M566", renames: [], adds: [], drops: ["J"], onlyWithParam: "", keepOriginal: false,
 		});
 		expect(out).toBe("M566 X8 Y8");
 	});
 
 	it("preserves an existing comment", () => {
 		const out = mapCommand("M900 K0.05 ; linear advance", {
-			from: "M900", to: "M572", renames: [], adds: [], drops: [], keepOriginal: false,
+			from: "M900", to: "M572", renames: [], adds: [], drops: [], onlyWithParam: "", keepOriginal: false,
 		});
 		expect(out).toBe("M572 K0.05 ; linear advance");
 	});
 
 	it("returns null for a different command", () => {
 		expect(mapCommand("M104 S200", {
-			from: "M900", to: "M572", renames: [], adds: [], drops: [], keepOriginal: false,
+			from: "M900", to: "M572", renames: [], adds: [], drops: [], onlyWithParam: "", keepOriginal: false,
 		})).toBeNull();
 	});
 
 	it("does not add a parameter that is already present", () => {
 		const out = mapCommand("M900 D1 K0.05", {
-			from: "M900", to: "M572", renames: [], adds: [{ letter: "D", value: "0" }], drops: [], keepOriginal: false,
+			from: "M900", to: "M572", renames: [], adds: [{ letter: "D", value: "0" }], drops: [],
+			onlyWithParam: "", keepOriginal: false,
 		});
 		expect(out).toBe("M572 D1 K0.05");
+	});
+
+	it("only maps a line that carries onlyWithParam, leaving others untouched", () => {
+		const spec = {
+			from: "M104", to: "M568", renames: [{ from: "T", to: "P" }], adds: [], drops: [],
+			onlyWithParam: "T", keepOriginal: false,
+		};
+		expect(mapCommand("M104 S200 T1", spec)).toBe("M568 S200 P1");
+		expect(mapCommand("M104 S200", spec)).toBeNull();
 	});
 });
 

@@ -132,6 +132,7 @@ import { computed, ref, watch } from "vue";
 import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
+import { checkMacros } from "../dwc/macroCheck";
 import { machineSnapshot } from "../dwc/machineSnapshot";
 import type { FileAnalysis } from "../model/analysis";
 import { runChecks, type CheckResult } from "../model/checks";
@@ -162,13 +163,22 @@ watch(() => props.path, () => {
 	meta.value = null;
 	stamps.value = [];
 	error.value = null;
+	macroResults.value = [];
 });
 
 const progressPercent = computed(() => (progress.value === null ? 0 : progress.value * 100));
 
-const checks = computed<Array<CheckResult>>(() => (
-	analysis.value === null ? [] : runChecks(analysis.value, machineSnapshot(machineStore.model))
-));
+/** Checking macros needs a file listing, so it runs after the (synchronous) preflight checks and
+ *  its results are merged in once they arrive — see the watcher in inspect(). */
+const macroResults = ref<Array<CheckResult>>([]);
+
+const CHECK_ORDER: Record<CheckResult["level"], number> = { error: 0, warning: 1, info: 2 };
+
+const checks = computed<Array<CheckResult>>(() => {
+	if (analysis.value === null) return [];
+	const combined = [...runChecks(analysis.value, machineSnapshot(machineStore.model)), ...macroResults.value];
+	return combined.sort((a, b) => CHECK_ORDER[a.level] - CHECK_ORDER[b.level]);
+});
 
 const commandList = computed(() => (analysis.value === null ? [] : [...analysis.value.commandCounts.entries()]));
 
@@ -255,6 +265,13 @@ async function inspect(): Promise<void> {
 		meta.value = result.meta;
 		stamps.value = result.stamps;
 		emit("analysed", result.analysis);
+		if (result.analysis.macroRefs.length > 0) {
+			// Runs after the rest of the inspection has already reported; a slow or failed macro
+			// lookup should never hold up everything else the user is waiting to see
+			checkMacros(createGateway(), result.analysis.macroRefs)
+				.then((results) => { macroResults.value = results; })
+				.catch(() => { /* a failed check reports nothing rather than a false positive */ });
+		}
 	} catch (e) {
 		if (!(e instanceof CancelledError)) error.value = (e as Error).message;
 	} finally {

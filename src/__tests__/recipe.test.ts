@@ -5,7 +5,8 @@ import {
 	hashString, importRecipe, makeStamp, matchesFilter, newUid, recipeHash, usesScripts,
 	validateRecipe, type Recipe,
 } from "../model/recipe";
-import { PRESETS } from "../model/presets";
+import { findPreset, PRESETS } from "../model/presets";
+import { runToString } from "../model/pipeline";
 import { StepConfigError } from "../model/steps/types";
 
 function recipeWith(steps: Array<{ type: string; config?: Record<string, unknown>; enabled?: boolean }>): Recipe {
@@ -190,5 +191,20 @@ describe("the bundled presets", () => {
 
 	it("contains no script steps, so nothing bundled needs trust", () => {
 		for (const preset of PRESETS) expect(usesScripts(preset.build())).toBe(false);
+	});
+
+	// None of the three golden-file fixtures happen to carry a tool-scoped M104/M109 (they are all
+	// single-extruder), so this integration case would otherwise have no coverage at all beyond the
+	// mapCommand unit tests — verifying it through the preset itself, not just the underlying
+	// function, is what actually confirms the two new steps are wired in correctly
+	it("marlinToRrf converts a tool-scoped temperature but leaves a bare one alone", () => {
+		const recipe = findPreset("marlinToRrf")!.build();
+		const transforms = buildTransforms(recipe, { scriptsTrusted: false });
+		const { output } = runToString({ transforms }, ["M104 S200 T1", "M104 S210", "M109 S200 T0"].join("\n"));
+		const lines = output.split("\n");
+		// Parameter order is preserved from the source line (S came before T), not re-sorted
+		expect(lines[0]).toBe("M568 S200 P1 ; was: M104 S200 T1");
+		expect(lines[1]).toBe("M104 S210");
+		expect(lines[2]).toBe("M568 S200 P0 ; was: M109 S200 T0");
 	});
 });

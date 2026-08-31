@@ -8,16 +8,19 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 378 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass) and
-`docs/tasks/02-fan-audit-and-override.md` (§8 phase 10) are both complete.
+Implemented in v0.1.0, with 423 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. `docs/tasks/01-defects.md` (the pre-hardware defect pass),
+`docs/tasks/02-fan-audit-and-override.md` (§8 phase 10) and `docs/tasks/03-machine-aware-checks.md`
+(§8 phase 12, partially) are all complete.
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phase 10 —
+**Built:** phases 0–3 in full, plus most of 4–7, plus phase 10, plus most of phase 12 —
 the browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
 inspector and its preflight checks, the streaming engine and safe write path, nine step types,
 recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
 self-update, a backup index with a restore/download/delete UI, feature-type normalisation across
-slicers, a fan-speed audit, a fan-by-feature override step, and the usage guide.
+slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro validation, cold-extrusion
+and end-of-file hygiene checks, a `commandMap` condition (`onlyWithParam`) that fixed a real
+mistranslation in the Marlin preset, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -42,7 +45,7 @@ slicers, a fan-speed audit, a fan-by-feature override step, and the usage guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — four more, each
+**Next:** [`docs/tasks/`](docs/tasks/) holds the remaining work orders — three more, each
 self-contained enough to hand to an agent with no context. §8 below is the roadmap they implement:
 the machine-aware features that are the actual argument for running a post-processor on the printer
 rather than on a laptop.
@@ -407,18 +410,20 @@ that are easy to misread), and the `M568` A parameter, against `Duet3D/wiki-cont
 The most distinctive feature on this roadmap, and the one where a wrong constant produces a cold
 extrusion rather than a visible error.
 
-### Phase 12 — machine-aware checks and rewrites
+### Phase 12 — machine-aware checks and rewrites *(partly done)*
 
 Individually small, collectively the thing that stops failed prints:
 
-- **Validate `M98` macro references** against the SD card — catches a typo that would otherwise stop
-  the print at layer 40, and this plugin's own insert steps add macro calls.
-- **Volumetric flow-rate audit** — mm³/s demanded versus what the hot end can melt.
+- ✅ **Validate `M98` macro references** against the SD card — catches a typo that would otherwise
+  stop the print at layer 40, and this plugin's own insert steps add macro calls.
+- **Volumetric flow-rate audit** — mm³/s demanded versus what the hot end can melt. *(Not done — needs
+  the move-time model from phase 8 to say anything useful about time.)*
 - **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how
   much time that adds. RRF clamps silently today, so prints simply take longer than promised.
-- **Cold-extrusion detection** and end-of-file hygiene (heaters left on, fan running, motors live).
-- **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
-  `M568 P1 S200`. A real gap in the current Marlin preset, and a silent mistranslation today.
+  *(Not done, same dependency.)*
+- ✅ **Cold-extrusion detection** and end-of-file hygiene (heaters left on, fan running, motors live).
+- ✅ **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
+  `M568 P1 S200`. Was a real gap in the Marlin preset, and a silent mistranslation.
 
 ### Phase 13 — print recovery and surgery
 
