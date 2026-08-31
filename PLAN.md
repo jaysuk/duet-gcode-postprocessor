@@ -40,6 +40,10 @@ self-update, and the usage guide.
 written and named in the result, but there is no restore UI yet, D7), automatic recipe selection by
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8).
 
+**Next:** `docs/task-01-defects.md` is a ready work order for the pre-hardware defect pass. §8 below
+is the roadmap after that — the machine-aware features that are the actual argument for running a
+post-processor on the printer rather than on a laptop.
+
 ---
 
 ## 1. What it is
@@ -315,3 +319,118 @@ workflow mirroring the other plugins in this family.
 | A future DWC CSP killing `new Function` | Tier-1 rules need no eval; Tier 2 sits behind one `ScriptEngine` interface that can report "unavailable" |
 | Hostile or broken user script | Network APIs deleted from the worker global before user code runs; explicit trust prompt for imported scripts; per-line time watchdog |
 | Upload interrupted mid-write | Temp file plus move; original untouched; orphaned `.tmp` cleaned up on the next run |
+
+---
+
+## 8. Roadmap beyond v1
+
+Phases 0–7 delivered the post-processor itself. What follows is what makes it worth having *on the
+printer* rather than as a desktop script — the features that need the machine's own knowledge of
+itself. Design detail for every item is in [docs/feature-ideas.md](docs/feature-ideas.md); the
+feature tables are in [FEATURES.md](FEATURES.md) §G–H.
+
+Ordered by dependency, not by appeal. The first two are infrastructure that four later features
+need, and building them late means building the later features twice.
+
+### Phase 8 — the move-time model *(unlocks 9, 10, 12)*
+
+A per-move time estimate using **this machine's** `move.axes[].speed`/`acceleration`/`jerk` and
+`move.printingAcceleration`/`travelAcceleration`, rather than the slicer's profile for a printer it
+guessed at. Trapezoidal per move, clamped by axis limits and by jerk at direction changes.
+
+Where the slicer has emitted `M73 P<percent> R<minutes>` markers (PrusaSlicer, SuperSlicer, Orca,
+Bambu all do), interpolate those instead and skip the modelling — then say which source was used.
+
+**Ships on its own as:** rewriting the `M73` markers with the machine-corrected estimate, so DWC's
+remaining-time is right. That is a reason to install the plugin all by itself.
+
+### Phase 9 — the analysis pass *(unlocks 10, 11, 13)*
+
+The architectural change. Everything involving lookahead — pre-heating before a tool change,
+restoring a fan speed when a region ends, anchoring to "90 seconds before X" — is impossible in the
+current single forward pass.
+
+`processFile` gains an optional analysis pass over the same already-downloaded Blob, before the
+transform pass: no second download, no unbounded buffering, the same chunked reader. It collects
+events (tool changes, feature regions, layer boundaries, cumulative time) into a compact array the
+transform pass consumes by index.
+
+Do this once and properly. Retro-fitting lookahead one feature at a time is how a clean pipeline
+turns into a pile of special cases.
+
+### Phase 10 — fan audit and per-feature override
+
+An audit listing every fan speed in the file by feature type, and a step that overrides fan speed
+per feature — bridges, overhangs, external perimeters, first layer.
+
+Two pieces of real work: normalising slicer-specific `;TYPE:` names onto a canonical feature set
+(`model/gcode/features.ts`, pure and tested), and suppressing the slicer's own `M106` inside an
+overridden region so it cannot undo the override on the next line. Same machinery then gives fan
+scaling, a minimum non-zero speed clamp, and a spin-up kick.
+
+The better first real feature: self-contained, immediately useful, and it forces the feature
+normalisation that Phase 11's reporting wants anyway.
+
+### Phase 11 — predictive pre-heat before a tool change
+
+Estimate heat-up time from the machine's own `M307` model (`heat.heaters[h].model.heatingRate`,
+`deadTime`, `coolingRate`, `coolingExp`) between `tools[n].standby[]` and `tools[n].active[]`, walk
+back that far along the time axis, and insert `M568 P<n> A2` so the tool arrives at temperature
+exactly when it is needed. Optionally return a deselected tool to standby so it stops cooking
+filament.
+
+**Verify before implementing:** the normalisation of `coolingRate`/`coolingExp` (documented in units
+that are easy to misread), and the `M568` A parameter, against `Duet3D/wiki-content` and RRF source.
+The most distinctive feature on this roadmap, and the one where a wrong constant produces a cold
+extrusion rather than a visible error.
+
+### Phase 12 — machine-aware checks and rewrites
+
+Individually small, collectively the thing that stops failed prints:
+
+- **Validate `M98` macro references** against the SD card — catches a typo that would otherwise stop
+  the print at layer 40, and this plugin's own insert steps add macro calls.
+- **Volumetric flow-rate audit** — mm³/s demanded versus what the hot end can melt.
+- **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how
+  much time that adds. RRF clamps silently today, so prints simply take longer than promised.
+- **Cold-extrusion detection** and end-of-file hygiene (heaters left on, fan running, motors live).
+- **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
+  `M568 P1 S200`. A real gap in the current Marlin preset, and a silent mistranslation today.
+
+### Phase 13 — print recovery and surgery
+
+- **Restart from layer N** — rebuild a runnable file after a failure. The care is in reconstructing
+  state at the cut: temperatures, fan, tool, extrusion mode, absolute E, and whether to re-home Z
+  against a part already on the bed.
+- **Extract a layer range** into a standalone file, for debugging one bad region without re-slicing.
+- **Split at a layer**, for multi-day prints or a filament budget.
+
+### Phase 14 — geometry-aware analysis
+
+- **Hole detection with insert pauses** *(prompted by G-Code Modifier)* — find voids that get roofed
+  over, report each one's depth, and offer a pause at the closing layer so an insert can be dropped
+  in. Presented as candidates to tick; the plugin cannot tell an insert boss from a lightening
+  pocket.
+- **Per-feature and layer-time statistics** — time and filament by feature, tool and object.
+- **Minimum layer time enforcement** — slow, or dwell away from the part, on layers too fast to cool.
+- **`M486` object labelling**, including converting Klipper `EXCLUDE_OBJECT` markers, so DWC's
+  cancel-object works on files that did not ship with it.
+
+### Phase 15 — closing the loop, and the long tail
+
+- **`M37` simulation round-trip** — apply, let the firmware simulate, report its own estimate and
+  optionally write it back into `M73`. No slicer can offer this.
+- **Metadata-driven parameters** — pressure advance, retraction and temperature offsets from a table
+  keyed on the file's own `filament_type`.
+- **Conditional steps** — run a step only when a condition on the file holds.
+- **Compare two files**, **plain-English file summary**, **apply and start the job**, and the
+  remaining long tail in FEATURES.md §H.
+
+### Not scheduled
+
+Deliberately excluded rather than forgotten: a 3D viewer with heatmap overlays, in-viewport
+editing, and warp prediction with material-aware failure modelling. DWC already has a G-code viewer
+plugin — the right move is to *integrate* with it, jumping it to a layer this plugin is discussing,
+not to build a second, worse 3D engine inside a post-processor. Warp prediction is beyond what can
+be validated here; the modest version (flagging the geometry that correlates with lifting) belongs
+in Phase 12's checks as information, with no pretence of prediction.

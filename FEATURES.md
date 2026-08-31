@@ -125,6 +125,31 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | G11 | **Extract or split a layer range** into a standalone file | |
 | G12 | **Per-feature and layer-time statistics** | |
 
+## H. Longer-term candidates
+
+Designed in [docs/feature-ideas.md](docs/feature-ideas.md) sections 7-8. Items marked with a caret
+were prompted by [G-Code Modifier](https://github.com/little-did-I-know/Gcode) (MIT, (c) 2026
+little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/attribution.md).
+
+| # | Feature | Notes |
+| --- | --- | --- |
+| H1 | ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite |
+| H2 | ^ **Minimum layer time enforcement** on a thermal basis - slow or dwell on layers too fast to cool | Their heatmap idea, turned into an action |
+| H3 | ^ **Eject sequence preset** for print farms | A preset, not machinery |
+| H4 | ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | `paramRewrite` already does the work |
+| H5 | ^ **G-code command palette with click-to-insert** in the insert and rules editors | Cheapest route may be the upstream Monaco ask |
+| H6 | ^ **Geometric warp-risk notes** - large flat first layers, tall thin features, high-shrinkage material | Information-level only; no pretence of prediction |
+| H7 | **Pressure advance (and other parameters) per filament**, from the file's own metadata | A table keyed on `filament_type` |
+| H8 | **Marlin tool-scoped temperatures** - `M104 S200 T1` becomes `M568 P1 S200` | A real gap in the current Marlin preset |
+| H9 | **Tool renumbering** - remap T0 to T2 without mangling comments and `M568 P0` | |
+| H10 | **Z-hop injection** on travels above a length threshold | |
+| H11 | **Ooze control** - retract or drop temperature before long travels | |
+| H12 | **Bed-temperature ramp** after the first N layers | |
+| H13 | **`M291` confirmation gates** at chosen points | Print-farm workflows |
+| H14 | **Timelapse trigger on each object's top layer only** | Needs `M486` tracking |
+| H15 | **Plain-English file summary** generated from the analysis | |
+| H16 | **Integrate with DWC's G-code viewer** - jump it to the layer under discussion | Rather than building a second 3D engine |
+
 ## Proposed v1 scope
 
 Everything tagged **v1** above: browse, inspect, find/replace, the core step library, the rules

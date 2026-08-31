@@ -218,3 +218,110 @@ height below 0.15, more than one tool used. Keeps one recipe useful across a mix
 4. **Pre-heat before tool change** (§1) — the most distinctive feature on this list.
 5. **`M98` validation and the flow-rate audit** (§3) — cheap, and they prevent failed prints.
 6. **Restart from layer N** (§4) — highest effort, highest gratitude.
+
+---
+
+## 7. Prompted by G-Code Modifier
+
+[github.com/little-did-I-know/Gcode](https://github.com/little-did-I-know/Gcode) is a browser-based
+G-code visualiser, analyser and modifier (MIT, © 2026 little-did-I-know). **Ideas only — no code has
+been taken; see [attribution.md](attribution.md).** The two projects are shaped very differently:
+theirs is a standalone visual editor you upload a file into, ours is a headless transformation
+pipeline sitting on the printer. That difference decides what is worth borrowing and what is not.
+
+### Worth taking
+
+**Hole detection with automatic pauses, and insert-depth calculation.** The standout idea, and
+squarely a post-processing feature rather than a visualisation one: scan the layers for holes that
+get roofed over later, work out the layer at which each becomes enclosed, and offer to insert a
+pause there — so a heat-set insert, nut or magnet can be dropped in and buried.
+
+Doing it by hand means scrubbing a preview and counting layers. Doing it here means the plugin
+already knows the geometry and can write the pause itself.
+
+The full version needs per-layer geometry: extract extrusion paths, find closed loops, detect an
+enclosed void, then find the layer where solid infill first covers it. A worthwhile MVP is much
+smaller — find XY regions that are empty on layer *n* and extruded on layer *n+1*, cluster them, and
+report each as "a void closing at layer *n+1*, Z = …, roughly *w* × *d* mm". That alone gets someone
+to the right layer number. It also gives the insert depth for free: the void's own height in
+millimetres.
+
+Present it as a **list of candidates with a checkbox each**, not an automatic rewrite. The user
+knows which hole is for an insert and which is a lightening pocket; the plugin does not.
+
+**A recovery / resume-from-layer generator.** Already on our list at §4; worth noting that they
+built it too, which is decent evidence the demand is real rather than assumed.
+
+**Eject sequences.** An end-of-print part-ejection routine, as a preset. Niche, but print farms want
+it and it costs a preset rather than a feature.
+
+**Per-layer Z-offset adjustment.** Nudging Z at a chosen layer — first-layer squish after the fact,
+or a correction partway up a long print. Our `paramRewrite` step can already offset Z over a layer
+range; what is missing is the *preset* and a sensible UI for it, not the machinery.
+
+**A G-code reference with click-to-insert.** Their reference covers 40+ commands with
+firmware-specific notes. The transferable part is the interaction: when someone is typing into an
+"insert G-code" or rules field, a searchable palette that inserts the right RepRapFirmware command —
+with its parameters — is a real improvement over alt-tabbing to the Duet documentation. Note DWC
+already ships Monaco with G-code language support and a "search G-code" action, so the cheapest
+route may be upstream (see the Monaco ask in `scripting-engines.md`) rather than building our own.
+
+**Thermal analysis feeding a decision, not a picture.** Their thermal simulation drives a heatmap.
+The same underlying idea is more useful to us as an *action*: identify layers that print too fast to
+cool, and offer to enforce a minimum layer time (slow the layer, or dwell away from the part). That
+is §5's layer-time analysis with a physical basis rather than a stopwatch.
+
+**Motion-kinematics analysis** — independent confirmation that the move-time model in §0 is the
+right foundation, and that an accel-aware estimate is worth the effort over a naive
+distance-over-feedrate sum.
+
+### Deliberately not taking
+
+**The WebGL viewer, the 12 heatmap overlays, and in-viewport editing.** DWC already has a G-code
+viewer plugin. Building a second, worse 3D engine inside a post-processor would be scope creep of
+the least defensible kind. If a visual layer is wanted, the right move is to *integrate* — jump the
+existing viewer to a layer this plugin is talking about — not to rebuild it.
+
+**Warp prediction with material-aware failure modelling.** Genuinely ambitious, and well outside
+what we can validate. A modest version fits our checks, though: flag the geometric conditions that
+correlate with lifting — a large flat first layer, tall thin towers, sharp corners on a
+high-shrinkage material named in the slicer metadata — as an information-level preflight note, with
+no pretence of prediction.
+
+---
+
+## 8. Further ideas
+
+**Pressure advance per filament, from the file's own metadata.** The slicer already records
+`; filament_type = PETG` and often the filament name. Keyed on that, inject the right `M572` for
+that material automatically. One recipe then does the right thing across a mixed library, and it
+generalises: any per-material parameter — retraction, temperature offsets, fan limits — can come
+from a small table keyed on metadata.
+
+**Marlin tool-scoped temperatures.** `M104 S200 T1` sets tool 1's temperature in Marlin; in
+RepRapFirmware the T parameter means something different, and the correct translation is
+`M568 P1 S200`. Our Marlin-to-RRF preset does not currently handle it, and it is exactly the kind of
+silent mistranslation that heats the wrong hot end.
+
+**Tool renumbering.** Remap `T0`→`T2` and friends for a file sliced against a different tool
+assignment. Trivial to implement, regularly needed on a toolchanger, and currently a find-and-replace
+that catches `T0` inside comments and `M568 P0`.
+
+**Z-hop injection.** Add a hop to travels longer than a threshold, for a file sliced without it that
+is knocking over a part.
+
+**Ooze control on long travels.** Insert a small retraction and/or a brief temperature drop before
+travels above a length threshold.
+
+**Bed-temperature ramp.** Drop the bed by a few degrees after the first *n* layers — common practice
+for reducing elephant foot, and for not heating a bed at 100 °C for nine hours unnecessarily.
+
+**Confirmation gates.** Insert `M291` prompts at chosen points ("bed clear?", "insert magnets now")
+for print-farm and multi-stage workflows.
+
+**Timelapse trigger on the top layer of each object only.** With `M486` object tracking, avoid
+firing the trigger once per object per layer on a plate of twenty parts.
+
+**A plain-English summary of the file.** One paragraph generated from the analysis — what it prints,
+how long, how much filament, which tools, anything unusual. Cheap to produce once the analysis
+exists, and it is the thing someone actually wants when they open a file they did not slice.
