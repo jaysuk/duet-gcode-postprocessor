@@ -137,6 +137,11 @@ priority over any feature override on layer 0.
 
 ### Rewrite print time (M73)
 
+> ⚠️ **Known defect — do not rely on this yet.** The step measures the file as it was *before* the
+> rest of the recipe ran, so if any earlier step changes how fast the print goes, the markers it
+> writes will be wrong while looking authoritative. Use it only as the sole step in a recipe until
+> this is fixed. *(Remove this note when `docs/tasks/07-audit-defects.md` lands.)*
+
 A slicer's `M73 P<percent> R<minutes>` markers are computed for the machine it thinks it is
 slicing for — on a Duet with different acceleration, jerk or speed limits, DWC's own progress bar
 and remaining-time (which just reads those markers back) can be badly wrong. This step recomputes
@@ -148,6 +153,12 @@ is inserted at a fixed cadence) and the run report notes that nothing was found.
 configure: it reads the machine's limits automatically at apply time.
 
 ### Predictive pre-heat
+
+> ⚠️ **Known defect — do not rely on this yet.** Where a tool change comes up sooner than the tool
+> can heat, the step can emit a standby command that cancels its own pre-heat, and still report the
+> pre-heat as successful. It does not damage the print — RepRapFirmware brings the tool to
+> temperature on selection either way — but it may quietly achieve nothing.
+> *(Remove this note when `docs/tasks/07-audit-defects.md` lands.)*
 
 On a toolchanger, an idle tool sits at its standby temperature and only starts heating to its active
 temperature when it is selected — so either the print waits for it, or nothing waits and the first

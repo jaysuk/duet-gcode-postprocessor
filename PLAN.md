@@ -27,6 +27,11 @@ model with an inspector estimate alongside the slicer's own, a `rewriteTime` ste
 whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
 `M307` heater model, and the usage guide.
 
+⚠️ **`rewriteTime` and `preheat` are built but not yet trustworthy.** Both read the file as it was
+before the recipe ran, and `preheat` can cancel its own work while reporting success. Neither should
+be recommended to a user until [task 07](docs/tasks/07-audit-defects.md) lands. Details and
+reproductions are in that work order.
+
 **Deviations from the plan, and why:**
 
 1. **No Web Worker.** §3.2 called for one; the pipeline instead runs on the main thread over the
