@@ -67,6 +67,45 @@ describe("arcWeld", () => {
 		expect(welded).toBeCloseTo(circle.totalE, 3);
 	});
 
+	// Regression test for a real defect: `closeRun()` passed a hardcoded `relativeE: false` into
+	// `buildArcCommand`, so a relative-mode (M83) arc was emitted with the ABSOLUTE running E total
+	// instead of the run's own small delta. The test above ("preserves total extruded filament")
+	// could not have caught this — it extrudes nothing before the welded run, so the absolute total
+	// and the relative delta are numerically identical (both start from zero) and the bug is
+	// invisible. This one extrudes a substantial amount *before* the circle starts, so a file that
+	// regresses to the absolute value produces an E three orders of magnitude too large — exactly
+	// what a real multi-thousand-line print does, and exactly what turned one welded arc into a
+	// request for 861mm of filament in a single move on a real file.
+	it("emits the run's own small E delta, not the absolute running total, in relative extrusion mode", () => {
+		// A large amount of *unrelated* prior extrusion (a different rate and direction, so it can
+		// never itself join the circle's run) pushes the absolute running E total far away from zero
+		// — exactly the situation a real, multi-thousand-line print is always in by the time it
+		// reaches a curve, and exactly what the test above ("preserves total extruded filament")
+		// cannot exercise, since it extrudes nothing before the circle and so never lets "the run's
+		// own delta" and "the absolute total so far" diverge.
+		const priorE = 861.17;
+		const priming = `G1 X0 Y-5 E${priorE.toFixed(5)} F1800`;
+		const circle = circleMoves(0, 0, 20, ANGLES);
+		const input = ["G28", "G90", "M83", travelTo(20, 0), priming, ...circle.lines].join("\n");
+		const output = runStep("arcWeld", {}, input);
+
+		const arcs = arcLines(output);
+		expect(arcs.length).toBeGreaterThan(0);
+
+		// Every individual E value emitted for the circle's own portion of the move sequence must be
+		// on the order of a single move's worth of filament, never anywhere near the ~861mm absolute
+		// total in force by that point in the file
+		let sumAfterPriming = 0;
+		for (const line of output.split("\n").slice(output.split("\n").indexOf(priming) + 1)) {
+			const m = /\bE(-?[\d.]+)/.exec(line);
+			if (m === null) continue;
+			const value = Number(m[1]);
+			expect(Math.abs(value)).toBeLessThan(1);
+			sumAfterPriming += value;
+		}
+		expect(sumAfterPriming).toBeCloseTo(circle.totalE, 3);
+	});
+
 	it("preserves the final absolute E position, in absolute extrusion mode", () => {
 		const circle = circleMoves(0, 0, 20, ANGLES);
 		// M82 (absolute) means each circleMoves() line's own "E" is really a relative delta in this

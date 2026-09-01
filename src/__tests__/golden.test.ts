@@ -20,7 +20,7 @@ import { runToString } from "../model/pipeline";
 import { PRESETS } from "../model/presets";
 import { buildTransforms } from "../model/recipe";
 
-const FIXTURES = ["prusaslicer", "cura", "orcaslicer", "two-tool", "arc-circle"] as const;
+const FIXTURES = ["prusaslicer", "cura", "orcaslicer", "two-tool", "arc-circle", "arc-after-extrusion"] as const;
 
 function loadFixture(name: string): string {
 	return readFileSync(resolve(__dirname, "../../test/fixtures", `${name}.gcode`), "utf-8")
@@ -75,6 +75,27 @@ describe("fixtures parse as expected", () => {
 		expect(meta.totalLayers).toBe(1);
 		const analysis = analyseText(text, meta);
 		expect(analysis.layers).toBe(1);
+	});
+
+	// The property this fixture exists for, asserted directly: a substantial amount of filament is
+	// already extruded before the weldable curve begins. `arc-circle` extrudes nothing beforehand,
+	// which made a relative-vs-absolute E confusion in `arcWeld` invisible to every golden — see the
+	// fixture's own header comment.
+	it("reads the arc-after-extrusion fixture, with real extrusion before the curve (task 08 audit)", () => {
+		const text = loadFixture("arc-after-extrusion");
+		const meta = parseMetadata(text);
+		expect(meta.slicer).toBe("PrusaSlicer");
+
+		const lines = text.split("\n");
+		const firstCurveIndex = lines.findIndex((l) => l.startsWith(";TYPE:External perimeter"));
+		expect(firstCurveIndex).toBeGreaterThan(0);
+
+		let extrudedBeforeCurve = 0;
+		for (const line of lines.slice(0, firstCurveIndex)) {
+			const m = /^G1\b.*\bE(-?[\d.]+)/.exec(line);
+			if (m !== null) extrudedBeforeCurve += Number(m[1]);
+		}
+		expect(extrudedBeforeCurve).toBeGreaterThan(50);
 	});
 });
 

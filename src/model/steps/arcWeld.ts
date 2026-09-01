@@ -117,31 +117,60 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 	id: "arcWeld",
 	label: "Weld G1 runs into arcs",
 	description: "Collapses runs of straight moves that trace a circle back into a single G2/G3.",
+	tip: "Reverses what most slicers do to every curve: approximate it as a run of short straight "
+		+ "segments, because that is all classic G-code has. RepRapFirmware executes G2/G3 natively "
+		+ "(verified against its own source, not assumed), so a genuine curve as one arc command "
+		+ "means fewer, smaller lines and smoother motion through it than a jerk-limited polyline of "
+		+ "the same shape — an arc-welded file is typically the same length or faster to print, never "
+		+ "slower, for a correctly-fitted arc. Run it last in a recipe: it changes line counts and "
+		+ "coordinates outright, so an earlier find/replace or insertion sees the file as the slicer "
+		+ "wrote it, not as this step rewrote it. Filament use is exactly conserved — the arc carries "
+		+ "the same total extrusion as the run it replaces, whichever E mode (M82/M83) the file uses. "
+		+ "After applying, it is worth a quick \"Simulate on this machine\" and comparing the result "
+		+ "against the un-welded file's own simulated time before trusting either number blindly.",
+	docsAnchor: "weld-curves-into-arcs",
 	icon: "mdi-vector-curve",
 	fields: [
 		{
 			key: "resolutionMm", label: "Resolution", type: "number", default: 0.05, min: 0.001, max: 5, step: 0.01,
-			help: "Maximum deviation of the fitted arc from the original path, mm. Default: 0.05.",
+			help: "How far the fitted arc is allowed to stray from the original points, in mm — "
+				+ "tighter catches fewer, more genuinely circular runs; looser welds more aggressively "
+				+ "but risks a visibly-off curve on a run that was only approximately circular. "
+				+ "Default: 0.05, well under a typical 0.4mm nozzle's own line width.",
 		},
 		{
 			key: "pathTolerancePercent", label: "Path tolerance", type: "number", default: 5, min: 0.1, max: 50, step: 0.5,
-			help: "Maximum difference between the arc's length and the original path's, as a percent. Default: 5.",
+			help: "How much the fitted arc's own length may differ from the original polyline's, as a "
+				+ "percent — a second, independent check alongside 'Resolution': a fit can hug every "
+				+ "point closely yet still trace a meaningfully longer or shorter path (e.g. a "
+				+ "near-collinear run fit to a huge, gently-curving arc). Default: 5.",
 		},
 		{
 			key: "maxRadiusMm", label: "Maximum radius", type: "number", default: 9999, min: 1, max: 1000000,
-			help: "Reject a fit larger than this — catches near-straight runs from becoming vast arcs. Default: 9999.",
+			help: "Reject a fit larger than this — catches a near-straight run of points from being "
+				+ "fit to a technically-valid but enormous circle, which 'Path tolerance' alone would "
+				+ "not always catch. Default: 9999 (effectively no limit) — lower it only if a "
+				+ "specific file is welding runs you can see should have stayed straight.",
 		},
 		{
 			key: "minSegments", label: "Minimum segments", type: "number", default: 3, min: 3, max: 100,
-			help: "Fewest source moves worth replacing with one arc. Default: 3.",
+			help: "Fewest source moves worth replacing with one arc — three is the geometric minimum "
+				+ "(an arc needs three points to fit at all). Raising this skips welding very short "
+				+ "runs, where one G2/G3 saves little over the handful of G1 lines it would replace. Default: 3.",
 		},
 		{
 			key: "allow3dArcs", label: "Allow 3D arcs (vase mode)", type: "boolean", default: false,
-			help: "Let Z change across an arc, for a helical (vase-mode) print. Off by default.",
+			help: "Let Z change across an arc, for a helical (vase-mode) print with no layer changes "
+				+ "to break a run at. Off by default because most prints have layer boundaries "
+				+ "already ending each run naturally, and a 3D arc is a less common firmware path "
+				+ "worth opting into deliberately rather than by default.",
 		},
 		{
 			key: "extrusionRateVariancePercent", label: "Extrusion rate variance", type: "number", default: 5, min: 0, max: 100, step: 0.5,
-			help: "Abort a run if mm of filament per mm of travel varies more than this percent from how it started. Default: 5.",
+			help: "Abort a run if mm of filament per mm of travel varies more than this percent from "
+				+ "how the run started — protects against welding across a real flow change (a "
+				+ "seam, a rate-varying feature) into one arc that would then extrude at a single, "
+				+ "wrong average rate for its whole length. Default: 5.",
 		},
 	],
 
@@ -156,6 +185,11 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 		let lastGoodFit: FittedArc | null = null;
 		let runCharacter: ExtrusionCharacter | null = null;
 		let runFeedrate: number | null = null;
+		/** The E-axis mode in effect when the run started. A run can never span an M82/M83 change —
+		 *  either line closes whatever was buffered before it takes effect (see the `!isXYMove`
+		 *  branch below) — so one flag per run is enough; it just has to be threaded to `closeRun`,
+		 *  which has no `LineContext` of its own to read it from. */
+		let runRelativeE = false;
 		/** The first extruding segment's mm-of-filament-per-mm-of-travel in the current run — the
 		 *  reference every later segment's own rate is compared against. `null` when the run has not
 		 *  extruded yet (a travel-only or retraction-only run has nothing to check a rate against). */
@@ -166,11 +200,12 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 		let rejectedForRadiusCheck = 0;
 
 		/** Start a brand new run: `anchor` is the position *before* `point`'s own move. */
-		function establishRun(anchor: BufferedPoint, point: BufferedPoint, distance: number): void {
+		function establishRun(anchor: BufferedPoint, point: BufferedPoint, distance: number, relativeE: boolean): void {
 			buffer = [anchor, point];
 			const deltaE = point.e - anchor.e;
 			runCharacter = classify(deltaE);
 			runFeedrate = point.feedrate;
+			runRelativeE = relativeE;
 			referenceRate = runCharacter === "extrude" && distance > 0 ? Math.abs(deltaE) / distance : null;
 			lastGoodFit = null;
 		}
@@ -184,7 +219,7 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 					const start = buffer[0];
 					const end = buffer[buffer.length - 1];
 					const deltaE = end.e - start.e;
-					const command = buildArcCommand(start, end, lastGoodFit, runFeedrate, deltaE, false, config.allow3dArcs);
+					const command = buildArcCommand(start, end, lastGoodFit, runFeedrate, deltaE, runRelativeE, config.allow3dArcs);
 					if (command !== null) {
 						out = [command];
 						arcsEmitted++;
@@ -201,6 +236,7 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 			lastGoodFit = null;
 			runCharacter = null;
 			runFeedrate = null;
+			runRelativeE = false;
 			referenceRate = null;
 			return out;
 		}
@@ -217,9 +253,11 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 		 * never itself part of the returned lines — restarting a run *at* the point that broke the
 		 * previous one is what "restart the buffer from the last emitted endpoint" means in practice.
 		 */
-		function extendOrRestart(anchorBefore: BufferedPoint, point: BufferedPoint, compatible: boolean, distance: number): Array<string> {
+		function extendOrRestart(
+			anchorBefore: BufferedPoint, point: BufferedPoint, compatible: boolean, distance: number, relativeE: boolean,
+		): Array<string> {
 			if (buffer.length === 0) {
-				establishRun(anchorBefore, point, distance);
+				establishRun(anchorBefore, point, distance, relativeE);
 				return [];
 			}
 
@@ -240,7 +278,7 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 			}
 
 			const emitted = closeRun();
-			establishRun(anchorBefore, point, distance);
+			establishRun(anchorBefore, point, distance, relativeE);
 			return emitted;
 		}
 
@@ -292,7 +330,7 @@ export const arcWeldStep: StepDefinition<ArcWeldConfig> = {
 
 				const anchorBefore: BufferedPoint = { x: prevX, y: prevY, z: prevZ, e: prevE, feedrate: null };
 				const point: BufferedPoint = { x, y, z, e, line, feedrate: lineCtx.feedrate };
-				const emitted = extendOrRestart(anchorBefore, point, compatible, distance);
+				const emitted = extendOrRestart(anchorBefore, point, compatible, distance, lineCtx.relativeE);
 
 				// A candidate move is always absorbed into the (possibly fresh) buffer here, never
 				// passed through as itself — `undefined` would wrongly keep it as well as whatever
