@@ -131,7 +131,10 @@ export interface SafetyInput {
 	recipe: Recipe;
 }
 
-const BUSY_STATES = ["processing", "simulating", "resuming", "pausing"];
+/** Object-model `state.status` values meaning the machine is doing something time-sensitive with the
+ *  SD card or the motion system — shared with `io/simulate.ts`, which must not start a simulation
+ *  (or believe an old one already finished) while one of these is true. */
+export const BUSY_STATES = ["processing", "simulating", "resuming", "pausing"];
 
 /**
  * Everything that could go wrong with writing this file, in one list. `block` issues stop the run;

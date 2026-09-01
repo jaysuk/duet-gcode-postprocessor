@@ -46,7 +46,7 @@ interface LooseModel {
 		} | null>;
 		bedHeaters?: Array<number>;
 	};
-	job?: { file?: { fileName?: string } };
+	job?: { file?: { fileName?: string }; lastDuration?: number | null };
 	state?: { status?: string };
 	plugins?: Map<string, { version?: string }>;
 }
@@ -208,6 +208,16 @@ export function jobFileName(model: unknown): string | null {
 export function machineStatus(model: unknown): string | null {
 	const status = (model as LooseModel)?.state?.status;
 	return typeof status === "string" ? status.toLowerCase() : null;
+}
+
+/** The live status and last completed job's duration `model/io/simulate.ts` polls on — see that
+ *  module's own comment for why these two fields are what it watches. */
+export function simulationStatus(model: unknown): { status: string | null; lastDurationSeconds: number | null } {
+	const duration = (model as LooseModel)?.job?.lastDuration;
+	return {
+		status: machineStatus(model),
+		lastDurationSeconds: typeof duration === "number" && Number.isFinite(duration) ? duration : null,
+	};
 }
 
 /**

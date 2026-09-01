@@ -468,6 +468,22 @@ rest of the inspection rather than holding it up. The flow checks are also machi
 they never assume a filament diameter the slicer did not state, and never invent a flow ceiling the
 slicer did not state either.
 
+### Simulating on this machine
+
+**Inspect this file** first, then **Simulate on this machine** sends `M37` and reads back
+RepRapFirmware's own time estimate — the most accurate figure available, since it comes from the
+exact firmware that will run the print, not a model of it. This is the one action in this plugin that
+talks to the printer rather than only reading or writing files.
+
+Simulation briefly shows as "Simulating" to anyone else watching the machine, but does not move
+anything and does not take anywhere near the length of the real print — RepRapFirmware runs it as
+fast as it can compute the file, not in real time. It is refused outright (nothing is sent) if the
+machine is already printing, simulating, resuming or pausing.
+
+The result is shown next to this plugin's own estimate; it is not written back into the file
+automatically. To use it, re-run "Rewrite print time" — the comparison is the point, not a silent
+rewrite.
+
 ---
 
 ## Where the output goes

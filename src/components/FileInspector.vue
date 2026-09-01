@@ -25,9 +25,50 @@
 					{{ analysis === null ? "Inspect this file" : "Re-inspect" }}
 				</v-btn>
 				<v-btn v-if="busy" variant="text" @click="cancel">Cancel</v-btn>
+				<v-btn v-if="analysis !== null && !busy" :disabled="!canSimulate" :loading="simulating"
+					   prepend-icon="mdi-play-speed" variant="tonal" @click="simulateDialog = true">
+					Simulate on this machine
+				</v-btn>
 				<v-spacer />
 				<span class="text-caption text-medium-emphasis text-truncate">{{ path }}</span>
 			</div>
+
+			<v-alert v-if="simulationResult !== null" type="success" variant="tonal" density="compact" class="mb-3">
+				RepRapFirmware simulated this file in {{ formatDuration(simulationResult) }}
+				<span v-if="analysis !== null && analysis.estimatedSeconds !== null">
+					({{ formatDuration(analysis.estimatedSeconds) }} was this plugin's own estimate).
+				</span>
+				To use this figure, add or re-run "Rewrite print time" with a preset built from it.
+			</v-alert>
+			<v-alert v-if="simulationError !== null" type="error" variant="tonal" density="compact" class="mb-3">
+				{{ simulationError }}
+			</v-alert>
+
+			<v-dialog v-model="simulateDialog" max-width="34rem">
+				<v-card title="Simulate this file on the machine?">
+					<v-card-text>
+						<p class="mb-2">
+							Sends <code>M37</code> to have RepRapFirmware run the file through its own motion
+							planner without moving anything, then reads back its own time estimate — the most
+							accurate figure available, since it comes from the exact firmware that will print it.
+						</p>
+						<p class="mb-2">
+							This briefly occupies the machine (shown as "Simulating" to anyone else watching it)
+							but does not move it and does not take anywhere near the length of the real print —
+							RepRapFirmware runs the simulation as fast as it can compute it, not in real time.
+						</p>
+						<v-alert v-if="!machineStore.isConnected" type="warning" variant="tonal" density="compact">
+							Not connected to the machine.
+						</v-alert>
+					</v-card-text>
+					<v-card-actions>
+						<v-spacer />
+						<v-btn text="Cancel" :disabled="simulating" @click="simulateDialog = false" />
+						<v-btn text="Simulate" color="primary" :loading="simulating" :disabled="!canSimulate"
+							   @click="runSimulation" />
+					</v-card-actions>
+				</v-card>
+			</v-dialog>
 
 			<v-progress-linear v-if="busy" :model-value="progressPercent" :indeterminate="progress === null"
 							   height="6" rounded class="mb-3" />
@@ -189,12 +230,13 @@ import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
 import { checkMacros } from "../dwc/macroCheck";
-import { machineLimits, machineLimitsComplete, machineSnapshot } from "../dwc/machineSnapshot";
+import { machineLimits, machineLimitsComplete, machineSnapshot, simulationStatus } from "../dwc/machineSnapshot";
 import type { FileAnalysis } from "../model/analysis";
 import { runChecks, type CheckResult } from "../model/checks";
 import { featureLabel } from "../model/gcode/features";
 import type { SlicerMetadata } from "../model/gcode/metadata";
-import { formatBytes } from "../model/io/plan";
+import { BUSY_STATES, formatBytes } from "../model/io/plan";
+import { simulateFile } from "../model/io/simulate";
 import { CancelledError, inspectFile, type ProgressUpdate } from "../model/io/transfer";
 import type { Stamp } from "../model/recipe";
 
@@ -217,6 +259,17 @@ const progress = ref<number | null>(null);
 const limitsWereComplete = ref(true);
 let signal = { aborted: false };
 
+const simulateDialog = ref(false);
+const simulating = ref(false);
+const simulationResult = ref<number | null>(null);
+const simulationError = ref<string | null>(null);
+
+const canSimulate = computed(() => {
+	if (!machineStore.isConnected || analysis.value === null || simulating.value) return false;
+	const status = simulationStatus(machineStore.model).status;
+	return status === null || !BUSY_STATES.includes(status);
+});
+
 // A new selection invalidates everything: showing the previous file's statistics under a new
 // filename would be worse than showing nothing
 watch(() => props.path, () => {
@@ -225,6 +278,8 @@ watch(() => props.path, () => {
 	stamps.value = [];
 	error.value = null;
 	macroResults.value = [];
+	simulationResult.value = null;
+	simulationError.value = null;
 });
 
 const progressPercent = computed(() => (progress.value === null ? 0 : progress.value * 100));
@@ -391,6 +446,26 @@ async function inspect(): Promise<void> {
 	} finally {
 		busy.value = false;
 		progress.value = null;
+	}
+}
+
+async function runSimulation(): Promise<void> {
+	if (props.path === null || !canSimulate.value) return;
+	simulating.value = true;
+	simulationError.value = null;
+	simulationResult.value = null;
+	try {
+		const seconds = await simulateFile({
+			gateway: createGateway(),
+			sourcePath: props.path,
+			pollStatus: () => simulationStatus(machineStore.model),
+		});
+		simulationResult.value = seconds;
+		simulateDialog.value = false;
+	} catch (e) {
+		simulationError.value = (e as Error).message;
+	} finally {
+		simulating.value = false;
 	}
 }
 </script>

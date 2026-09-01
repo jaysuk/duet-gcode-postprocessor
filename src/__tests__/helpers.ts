@@ -109,6 +109,10 @@ export class FakeGateway implements FileGateway {
 	log: Array<string> = [];
 	failUploadOn: string | null = null;
 	corruptTargetSize = false;
+	sentCodes: Array<string> = [];
+	/** Reply to return from `sendCode`, or a function of the code for tests that need different
+	 *  replies to different commands. */
+	codeReply: string | ((code: string) => string) = "";
 
 	constructor(initial: Record<string, string> = {}) {
 		for (const [path, content] of Object.entries(initial)) this.files.set(path, content);
@@ -148,5 +152,11 @@ export class FakeGateway implements FileGateway {
 		const content = this.files.get(path);
 		if (content === undefined) return null;
 		return this.corruptTargetSize ? 1 : new Blob([content]).size;
+	}
+
+	async sendCode(code: string): Promise<string> {
+		this.log.push(`sendCode ${code}`);
+		this.sentCodes.push(code);
+		return typeof this.codeReply === "function" ? this.codeReply(code) : this.codeReply;
 	}
 }

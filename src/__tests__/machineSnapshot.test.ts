@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	installedPluginVersion, jobFileName, machineLimits, machineLimitsComplete, machineStatus,
-	toolHeaterConfigs,
+	simulationStatus, toolHeaterConfigs,
 } from "../dwc/machineSnapshot";
 
 describe("installedPluginVersion", () => {
@@ -33,6 +33,22 @@ describe("jobFileName and machineStatus", () => {
 		const model = { job: { file: { fileName: "0:/gcodes/benchy.gcode" } }, state: { status: "Processing" } };
 		expect(jobFileName(model)).toBe("0:/gcodes/benchy.gcode");
 		expect(machineStatus(model)).toBe("processing");
+	});
+});
+
+describe("simulationStatus", () => {
+	it("returns null status and null duration for an empty model", () => {
+		expect(simulationStatus({})).toEqual({ status: null, lastDurationSeconds: null });
+	});
+
+	it("reads the status and the last job's duration together", () => {
+		const model = { state: { status: "Simulating" }, job: { lastDuration: 3723 } };
+		expect(simulationStatus(model)).toEqual({ status: "simulating", lastDurationSeconds: 3723 });
+	});
+
+	it("treats a non-finite or missing lastDuration as null, not 0 or NaN", () => {
+		expect(simulationStatus({ job: { lastDuration: null } }).lastDurationSeconds).toBeNull();
+		expect(simulationStatus({ job: {} }).lastDurationSeconds).toBeNull();
 	});
 });
 

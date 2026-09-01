@@ -55,6 +55,12 @@ export function createGateway(): FileGateway {
 			}
 		},
 
+		async sendCode(code) {
+			// fromInput=false (not echoed as if the user typed it), logReply=false (this plugin
+			// decides for itself what to do with the reply, same suppression as download/upload above)
+			return machineStore.sendCode(code, false, false);
+		},
+
 		async sizeOf(path) {
 			try {
 				const listing = await machineStore.getFileList(dirName(path));

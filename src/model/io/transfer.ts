@@ -120,6 +120,13 @@ export interface FileGateway {
 	makeDirectory(path: string): Promise<void>;
 	/** Size in bytes of a file, or null when it does not exist. */
 	sizeOf(path: string): Promise<number | null>;
+	/**
+	 * Sends a G/M-code to the machine and returns its reply. The one place this plugin talks to the
+	 * printer rather than only its file system — see `model/io/simulate.ts`, the only current caller.
+	 * A reply starting with "Error:" is not thrown here; the caller decides what counts as failure for
+	 * its own command.
+	 */
+	sendCode(code: string): Promise<string>;
 }
 
 export type Phase = "downloading" | "scanning" | "analysing" | "processing" | "uploading" | "finalising" | "done";

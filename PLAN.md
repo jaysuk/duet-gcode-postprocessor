@@ -8,7 +8,7 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 746 tests green and `typecheck` + `verify-build` passing against DWC
+Implemented in v0.1.0, with 757 tests green and `typecheck` + `verify-build` passing against DWC
 `v3.7-dev`. Eleven work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
@@ -16,15 +16,16 @@ Implemented in v0.1.0, with 746 tests green and `typecheck` + `verify-build` pas
 by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes §8 phase 12),
 `10-audit-defects.md` (a second such pass, on 08–09), and `11-print-recovery.md` (§8 phase 13).
 `12-geometry-analysis.md` (§8 phase 14) is under way: §1–3 done, §4 (hole detection) is a tested
-prototype not wired to anything — see that section below for why.
+prototype not wired to anything — see that section below for why. `13-simulation-and-tail.md`
+(§8 phase 15) is under way too: the `M37` round-trip is done, the rest of it is not started.
 
 **Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–13 in full, plus arc welding, plus
-most of phase 14 — the browser (reusing DWC's own `FileList` where available, with a self-contained
-fallback), the inspector and its preflight checks, the streaming engine and safe write path,
-seventeen step types, recipes with import/export and board-backed storage, the diff preview, the
-Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
-normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
-validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
+most of phases 14–15 — the browser (reusing DWC's own `FileList` where available, with a
+self-contained fallback), the inspector and its preflight checks, the streaming engine and safe write
+path, seventeen step types, recipes with import/export and board-backed storage, the diff preview,
+the Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI,
+feature-type normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98`
+macro validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
 (`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a machine-aware move-time
 model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
 `M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
@@ -37,7 +38,8 @@ chord, a per-feature/per-layer/per-object time-and-filament breakdown, a `minLay
 slows or dwells on a layer too fast to cool, an `objectLabels` step that converts Klipper's
 `EXCLUDE_OBJECT` markers to `M486`, an `extractRange` step for pulling out or splitting a layer
 range, a `restartFrom` step that reconstructs machine state to resume a failed print without
-reprinting from scratch, and the usage guide.
+reprinting from scratch, an `M37` simulation round-trip — the first thing in this plugin that talks
+to the printer rather than only its file system — and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -66,9 +68,10 @@ filename (D4 — the field exists and is stored, nothing consumes it), and run h
 [12](docs/tasks/12-geometry-analysis.md) (phase 14) is under way, §1–3 done; its §4 (hole detection)
 has its own stop point — the false-positive rate on real fixtures has to be checked before it ships
 at all, which needs a real dense fixture this repo does not have, not a decision to make up front.
-Still to start: [13](docs/tasks/13-simulation-and-tail.md) (phase 15), which needs a decision on
-whether `M37` simulation is worth building once its own stop point (what it costs in machine time) is
-answered.
+[13](docs/tasks/13-simulation-and-tail.md) (phase 15) is under way too: its `M37` round-trip is done —
+the stop point turned out to resolve in its favour, not against it, once checked against RepRapFirmware
+source rather than assumed — and its remaining items (metadata-driven parameters, conditional steps,
+the long tail) have not been started.
 
 ---
 
@@ -655,10 +658,27 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
   building the UI half, or inventing one to make this look more finished than it is. See
   [docs/tasks/12-geometry-analysis.md](docs/tasks/12-geometry-analysis.md) §4.
 
-### Phase 15 — closing the loop, and the long tail
+### Phase 15 — closing the loop, and the long tail *(M37 round-trip done; the rest not started)*
 
-- **`M37` simulation round-trip** — apply, let the firmware simulate, report its own estimate and
-  optionally write it back into `M73`. No slicer can offer this.
+- ✅ **The stop point, resolved — and more favourably than it looked.** `docs/tasks/13-simulation-and-tail.md`
+  worried simulation might block the machine for the print's full duration; RepRapFirmware source says
+  otherwise. `SimulationMode::normal` (`GCodes/SimulationMode.h`) is documented in RRF's own header as
+  "not generating steps, just timing" — it runs at whatever speed the firmware's G-code parsing loop can
+  go, not in real time matching the eventual print, so a multi-hour print simulates in a small fraction
+  of that. Completion is directly observable, not inferred: `state.status` has a dedicated
+  `"simulating"` value (`ObjectModel/src/state/MachineStatus.ts`), cleared once RRF's own
+  `EndSimulation`/`StoppedPrint` runs, and `job.lastDuration` then holds the simulated seconds. Both
+  citations are in `model/io/simulate.ts`'s own module comment.
+- ✅ **`M37` simulation round-trip** — `model/io/simulate.ts`'s `simulateFile`, and `FileGateway` grew
+  `sendCode` for it: the first thing in this plugin that talks to the printer rather than only its file
+  system. Refuses before sending anything if the machine is already busy (`io/plan.ts`'s own
+  `BUSY_STATES`, shared rather than duplicated), polls `state.status` and `job.lastDuration` via an
+  injected callback (`model/` still never imports a store — `dwc/machineSnapshot.ts`'s new
+  `simulationStatus` supplies the real one), and is cancellable and bounded by a timeout so a
+  disconnected or hung machine cannot wait forever. `FileInspector.vue` gained a confirm-then-run
+  action showing the result next to the plugin's own estimate; writing it back into `M73` is a manual
+  follow-on (re-run "Rewrite print time"), not automatic, matching the task's own framing of the
+  comparison as the product and the rewrite as opt-in.
 - **Metadata-driven parameters** — pressure advance, retraction and temperature offsets from a table
   keyed on the file's own `filament_type`.
 - **Conditional steps** — run a step only when a condition on the file holds.

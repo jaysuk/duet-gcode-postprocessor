@@ -125,7 +125,7 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | G7 | ✅ **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how much time that adds | Done — `model/steps/clampFeedrate.ts`, `model/gcode/timeModel.ts` |
 | G8 | ✅ **Cold-extrusion and end-of-file hygiene checks** | Done — `model/checks.ts` |
 | G9 | ✅ **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Done — `model/steps/objectLabels.ts`. `EXCLUDE_OBJECT_DEFINE`/`_START`/`_END` → `M486`; inventing labels for an unlabelled file is a separate, later task (needs geometry segmentation) |
-| G10 | **`M37` simulation round-trip** — the firmware's own time estimate, written back into `M73` | |
+| G10 | ✅ **`M37` simulation round-trip** — the firmware's own time estimate | Done — `model/io/simulate.ts`, `FileGateway.sendCode` (the first thing in this plugin that talks to the printer). Shows the result next to the plugin's own estimate; writing it back into `M73` is a manual follow-on (re-run "Rewrite print time"), not automatic |
 | G11 | ✅ **Extract or split a layer range** into a standalone file | Done — `model/steps/extractRange.ts`. A split is two extractions with adjoining ranges; not state-reconstructing (that's G4) — the result is a partial file for debugging or splitting, not a runnable print |
 | G12 | ✅ **Per-feature and layer-time statistics** | Done — `model/analysis.ts` (`featureStats`, `slowestLayers`, `objectStats`), rendered in `FileInspector.vue`. Time needs machine limits; filament does not |
 
