@@ -137,6 +137,12 @@ priority over any feature override on layer 0.
 
 ### Rewrite print time (M73)
 
+> ⚠️ **Known defect:** the time model does not yet count `G2`/`G3` arc moves — it gives them zero
+> seconds. On a file containing arcs (one this plugin's "Weld curves into arcs" step has processed, or
+> one sliced by PrusaSlicer 2.8+/OrcaSlicer with arc fitting enabled) this step's output, the
+> inspector's print-time estimate and predictive pre-heat's timing are all wrong. Do not rely on them
+> for curved prints until this is fixed.
+
 A slicer's `M73 P<percent> R<minutes>` markers are computed for the machine it thinks it is
 slicing for — on a Duet with different acceleration, jerk or speed limits, DWC's own progress bar
 and remaining-time (which just reads those markers back) can be badly wrong. This step recomputes
@@ -213,6 +219,12 @@ precision, is left as the original moves rather than dropped.
 targets `G1` — a find/replace, a rule — will not see a welded arc, and anything that inserts lines
 (pre-heat) needs to run before this step sees the file, not after.
 
+> ⚠️ **Known defect:** the welding itself is sound, but two things that *read* its output are not. The
+> print-time model counts an arc as zero seconds, and the volumetric-flow figure measures an arc along
+> the straight line between its endpoints rather than the curve, over-stating flow. So after welding, a
+> re-inspection will show a much-too-low print time and a too-high peak flow. The G-code is fine; the
+> statistics about it are not.
+
 **Two caveats worth knowing before turning this on:**
 
 - Most G-code *viewers* — including the slicer's own preview — render `G2`/`G3` badly or not at all.
@@ -222,6 +234,12 @@ targets `G1` — a find/replace, a rule — will not see a welded arc, and anyth
   natively.
 
 ### Clamp feedrate to machine limits
+
+> ⚠️ **Known defects:** with **Apply to: printing moves**, a file using absolute extrusion (Cura's
+> default, which emits `G92 E0` regularly) has printing moves after each `G92 E0` misread as travel and
+> silently skipped — use "both" until this is fixed. The step also clamps only moves with X/Y motion,
+> while the inspector's clamping panel counts fast Z and E moves too, so adding this step will not
+> always remove the whole difference the panel reports.
 
 Rewrites a commanded `F` down to this machine's own speed limit for the axes actually involved, the
 same model the inspector already uses to estimate print time — this step is what closes the gap

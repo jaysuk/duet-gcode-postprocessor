@@ -30,6 +30,11 @@ transform pass reaches it, a predictive pre-heat step using RRF's own `M307` hea
 assumes a filament diameter or invents a flow ceiling, a `clampFeedrate` step and a matching
 clamped-vs-unclamped time comparison in the inspector, and the usage guide.
 
+**Known defects, open.** Auditing tasks 08 and 09 found six, each with a reproduction that fails on
+`main` today — see [task 10](docs/tasks/10-audit-defects.md). The one that matters: `TimeEstimator`
+gives a `G2`/`G3` arc **zero** time, so the print-time estimate, `rewriteTime`'s `M73` markers and
+`preheat`'s placement are all wrong on a curved or welded file. Task 10 blocks tasks 11–13.
+
 **Deviations from the plan, and why:**
 
 1. **No Web Worker.** §3.2 called for one; the pipeline instead runs on the main thread over the
@@ -366,7 +371,14 @@ feature tables are in [FEATURES.md](FEATURES.md) §G–H.
 Ordered by dependency, not by appeal. The first two are infrastructure that four later features
 need, and building them late means building the later features twice.
 
-### Phase 8 — the move-time model *(unlocks 11, 12)* *(done)*
+### Phase 8 — the move-time model *(unlocks 11, 12)* *(done — but see the defect below)*
+
+> ⚠️ **Known defect, open — [task 10](docs/tasks/10-audit-defects.md) finding A.** `TimeEstimator`
+> returns early for anything that is not `G0`/`G1`, so a `G2`/`G3` arc contributes **zero** time. Every
+> estimate below is therefore wrong on a curved file — badly wrong on one `arcWeld` has processed, and
+> wrong on any file from PrusaSlicer 2.8+/Orca with arc fitting on. This also breaks `rewriteTime`'s
+> `M73` output and `preheat`'s placement, both of which read this model. Fix before building anything
+> else on it.
 
 A per-move time estimate using **this machine's** `move.axes[].speed`/`acceleration`/`jerk` and
 `move.printingAcceleration`/`travelAcceleration`, rather than the slicer's profile for a printer it
@@ -492,7 +504,15 @@ extrusion rather than a visible error.
   and everything around it share zero elapsed time. See `docs/tasks/07-audit-defects.md`, defects
   B and C.
 
-### Phase 12 — machine-aware checks and rewrites *(done)*
+### Phase 12 — machine-aware checks and rewrites *(done — but see the defects below)*
+
+> ⚠️ **Known defects, open — [task 10](docs/tasks/10-audit-defects.md) findings B–F.** The flow figure
+> uses an arc's chord rather than its length (B); `clampFeedrate` loses extrusion tracking across
+> `G92 E0`, so an absolute-E printing move reads as travel and is silently skipped (C); the inspector
+> counts clamped Z-only and E-only moves the step will never fix, so "add the step to remove the
+> difference" does not hold (D); and two `unclampedSeconds` doc comments describe an implementation
+> that was deliberately changed during task 09 (E), plus a clamping panel that can contradict the stat
+> beside it (F).
 
 Individually small, collectively the thing that stops failed prints:
 
@@ -517,7 +537,13 @@ Individually small, collectively the thing that stops failed prints:
 - ✅ **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
   `M568 P1 S200`. Was a real gap in the Marlin preset, and a silent mistranslation.
 
-### Arc welding — `G1` runs into `G2`/`G3` arcs *(done)*
+### Arc welding — `G1` runs into `G2`/`G3` arcs *(done — but see the defect below)*
+
+> ⚠️ **Known defect, open — [task 10](docs/tasks/10-audit-defects.md) findings A and B.** The welding
+> itself is correct; what is not is everything that *reads* its output. The move-time model gives an
+> arc zero seconds, and the volumetric-flow figure measures an arc along its chord instead of its arc
+> length (so flow is over-stated, without limit as the sweep approaches a full circle). Welding a file
+> and then inspecting it currently produces a collapsed time estimate and an inflated flow figure.
 
 A slicer approximates curves with hundreds of short `G1` moves; RepRapFirmware executes real arcs.
 Welding those runs back into `G2`/`G3` typically removes 50–80% of the lines in a curved file and

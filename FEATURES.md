@@ -48,7 +48,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | B13 | **Cooling / fan overrides by layer range** — superseded by the more useful by-*feature* override, done in phase 10 (`fanByFeature` step) | 3 |
 | B14 | **Marlin-to-RRF preset** — a curated, documented mapping bundle for the ~20 commands that actually differ (explicitly not a general translator) | 3 |
 | B15 | **Z-offset / mesh injection** — insert or replace `G31`, `G29 S1`, baby-stepping at the top of a file | 3 |
-| B16 | ✅ **Arc welding** (G1 runs → G2/G3) — Done — `model/gcode/arcFit.ts`, `model/steps/arcWeld.ts`; RRF executes arcs natively and its source explicitly accommodates ArcWelder output. Un-welding is a separate, later task | — |
+| B16 | ⚠️ **Arc welding** (G1 runs → G2/G3) — Done — `model/gcode/arcFit.ts`, `model/steps/arcWeld.ts`; RRF executes arcs natively and its source explicitly accommodates ArcWelder output. Un-welding is a separate, later task. **Open defect:** the time and flow models misread its output — task 10 findings A/B | — |
 | B17 | **Retraction rewriting** — convert firmware retraction to explicit E moves or vice versa | Later |
 
 ## C. Scripting
@@ -116,13 +116,13 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 
 | # | Feature | Notes |
 | --- | --- | --- |
-| G1 | ✅ **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right — Done — `model/gcode/timeModel.ts`, `dwc/machineSnapshot.ts` (`machineLimits`), `model/steps/rewriteTime.ts` | The enabler for G2–G4; useful alone |
+| G1 | ⚠️ **Move-time model** using this machine's M201/M203/M204/M566, and rewriting `M73` so DWC's remaining-time is right — Done — `model/gcode/timeModel.ts`, `dwc/machineSnapshot.ts` (`machineLimits`), `model/steps/rewriteTime.ts` | The enabler for G2–G4. **Open defect:** gives a `G2`/`G3` arc zero time — task 10 finding A |
 | G2 | ✅ **Predictive pre-heat before a tool change** — estimates heat-up from the M307 model and inserts `M568 P<n> A2` at the right moment — Done — `model/preheat.ts`, `model/steps/preheat.ts` | Needs G1 (done) and the lookahead pass (done — `model/analysisPass.ts`) |
 | G3 | ✅ **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Done — `model/gcode/features.ts`, `model/steps/fanByFeature.ts` |
 | G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |
 | G5 | ✅ **Validate `M98` macro references** against the SD card | Done — `dwc/macroCheck.ts` |
 | G6 | ✅ **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt, from the slicer's own stated filament diameter, never assumed | Done — `model/analysis.ts`, `model/checks.ts` |
-| G7 | ✅ **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how much time that adds | Done — `model/steps/clampFeedrate.ts`, `model/gcode/timeModel.ts` |
+| G7 | ⚠️ **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how much time that adds | Done — `model/steps/clampFeedrate.ts`, `model/gcode/timeModel.ts`. **Open defects:** task 10 findings C/D |
 | G8 | ✅ **Cold-extrusion and end-of-file hygiene checks** | Done — `model/checks.ts` |
 | G9 | **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Makes DWC cancel-object work on more files |
 | G10 | **`M37` simulation round-trip** — the firmware's own time estimate, written back into `M73` | |
