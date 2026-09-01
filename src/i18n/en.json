@@ -1,10 +1,6 @@
 {
-	"plugins": {
-		"gCodePostProcessor": {
-			"menuCaption": "Post-Processor",
-			"title": "G-code Post-Processor",
-			"widget": "G-code Post-Processor",
-			"widgetDesc": "Run a post-processing recipe over a file on the SD card."
-		}
-	}
+	"menuCaption": "Post-Processor",
+	"title": "G-code Post-Processor",
+	"widget": "G-code Post-Processor",
+	"widgetDesc": "Run a post-processing recipe over a file on the SD card."
 }

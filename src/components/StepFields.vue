@@ -35,7 +35,7 @@
 			<v-text-field v-else-if="field.type === 'number'" density="compact" hide-details="auto"
 						  type="number"
 						  class="mb-3"
-						  :model-value="config[field.key]"
+						  :model-value="numberDisplayValue(field.key)"
 						  :label="field.label"
 						  :messages="field.help ? [field.help] : []"
 						  :min="field.min"
@@ -43,7 +43,8 @@
 						  :step="field.step ?? 1"
 						  :disabled="disabled"
 						  :error-messages="errorsFor(field.key)"
-						  @update:model-value="(value: string) => updateNumber(field.key, value)" />
+						  @update:model-value="(value: string) => updateNumber(field.key, value)"
+						  @blur="numberDrafts.delete(field.key)" />
 
 			<v-textarea v-else-if="field.type === 'textarea' || field.type === 'gcode'"
 						density="compact" hide-details="auto" auto-grow rows="4"
@@ -73,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, reactive } from "vue";
 
 import { isFieldVisible, type StepDefinition } from "../model/steps/types";
 
@@ -96,11 +97,28 @@ function update(key: string, value: unknown): void {
 }
 
 /**
+ * What the user is currently typing into a numeric field, keyed by field key — kept separate from
+ * `config[field.key]` because that prop only ever holds a committed `number` (or `""`), never an
+ * in-progress string like "0." or "-". Binding the field straight to `config[field.key]` round-trips
+ * every keystroke through `Number(...)` and back to a *different* string (`Number("0.")` is `0`,
+ * which redisplays as `"0"`), so the field silently eats trailing characters as you type — typing
+ * "0.05" one digit at a time never gets past "0" because the "." keeps getting erased. Keeping the
+ * raw text as its own state until the field blurs (or the value is cleared) lets Vuetify show
+ * exactly what was typed while still emitting a real number upstream on every keystroke.
+ */
+const numberDrafts = reactive(new Map<string, string>());
+
+function numberDisplayValue(key: string): string | number {
+	return numberDrafts.get(key) ?? (props.config[key] as string | number);
+}
+
+/**
  * Numeric fields come back from Vuetify as strings, and an emptied field is "" rather than 0 or
  * NaN. Storing the empty string on purpose (rather than coercing it to 0) is what lets validation
  * tell the user their field is blank instead of silently running with a zero.
  */
 function updateNumber(key: string, raw: string): void {
+	numberDrafts.set(key, raw);
 	if (raw === "" || raw === null || raw === undefined) {
 		update(key, "");
 		return;
