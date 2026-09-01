@@ -187,6 +187,40 @@ describe("TimeEstimator", () => {
 		});
 	});
 
+	describe("lastMoveSeconds", () => {
+		it("is zero before any move", () => {
+			const state = createState();
+			const estimator = new TimeEstimator(LIMITS);
+			estimator.line(tokenise("M104 S210"), state);
+			expect(estimator.lastMoveSeconds).toBe(0);
+		});
+
+		it("reports just the most recent move's own time, not the running total", () => {
+			const estimator = runLines(["G1 X50 F6000", "G1 X100 F6000"]);
+			expect(estimator.lastMoveSeconds).toBeLessThan(estimator.elapsed);
+			expect(estimator.lastMoveSeconds).toBeGreaterThan(0);
+		});
+
+		it("drops back to zero on a line that adds no time", () => {
+			const estimator = runLines(["G1 X50 F6000", "M104 S210"]);
+			expect(estimator.lastMoveSeconds).toBe(0);
+		});
+
+		it("sums across every line to the running total", () => {
+			const state = createState();
+			const estimator = new TimeEstimator(LIMITS);
+			const lines = ["G1 X50 F6000", "G1 X100 F6000", "G1 Z5 F300"];
+			let sum = 0;
+			for (const raw of lines) {
+				const token = tokenise(raw);
+				advance(state, token);
+				estimator.line(token, state);
+				sum += estimator.lastMoveSeconds;
+			}
+			expect(sum).toBeCloseTo(estimator.elapsed, 9);
+		});
+	});
+
 	describe("clamping report", () => {
 		it("matches unclamped when every move is within limits, and clamps nothing", () => {
 			const estimator = runLines(["G1 X100 Y0 F1200"]); // 20 mm/s, well under X's 200 mm/s limit

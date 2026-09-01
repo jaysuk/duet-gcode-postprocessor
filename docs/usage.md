@@ -239,6 +239,43 @@ so an absolute-extrusion file's constant `G92 E0` does not hide real printing mo
 Needs this machine's motion limits, the same as "Rewrite print time" and "Predictive pre-heat" —
 without them the step does nothing and says so in the report.
 
+### Enforce a minimum layer time
+
+A layer that prints in a few seconds has not had time to cool before the next one lands on top of
+it. This step measures each layer's clamped duration (the same model "Rewrite print time" and "Clamp
+feedrate" use) and, on a layer that comes out shorter than the target, either slows it down or
+inserts a pause.
+
+- **Minimum layer time (s)** — a layer clamped shorter than this is remedied. Default: 10.
+- **When a layer is too fast** — **Slow the layer** (default) scales every feedrate on that layer down
+  by the same factor, so it takes the target time instead; **Dwell away from the part** instead parks
+  at a chosen position and waits out the shortfall, so the nozzle is not left stationary and hot over
+  the print.
+- **Never slow below (mm/min)** — a floor on the slowed feedrate. A layer that cannot reach the target
+  without going below it is slowed as far as the floor allows and reported, not forced further —
+  oozing at a crawl is worse than a layer a few seconds too fast.
+- **Park X / Park Y** — where to move to before dwelling, in dwell mode.
+
+The scaling is an approximation, the same kind "Rewrite print time" is built on — real acceleration
+does not scale perfectly linearly with the target, so a very short, sharply accelerated move may land
+a little off target. It gets closer the longer the layer's moves are.
+
+Needs this machine's motion limits — without them the step does nothing and says so in the report.
+
+### Convert Klipper object markers to M486
+
+Klipper's `EXCLUDE_OBJECT_DEFINE`/`EXCLUDE_OBJECT_START`/`EXCLUDE_OBJECT_END` do the same job as
+RepRapFirmware's `M486`, but a file sliced for Klipper carries the former, and DWC's cancel-object UI
+understands only the latter. This step converts one to the other: `EXCLUDE_OBJECT_START NAME=foo`
+becomes `M486 S<n> A"foo"` (the same object name always gets the same index, even across a file's
+several visits to it), `EXCLUDE_OBJECT_END` becomes `M486 S-1`, and `EXCLUDE_OBJECT_DEFINE` is
+dropped — RRF's `M486` has no separate "declare an object" step, so nothing is lost, but nothing
+converts to either.
+
+Nothing to configure. A file that already uses `M486` is left completely untouched, with a warning —
+converting anyway could assign a Klipper-derived index that collides with one the slicer already
+used itself.
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,
@@ -352,6 +389,11 @@ The **Inspect** tab reads the file once, without writing anything, and reports:
 - A **command histogram**: every G/M code and how often it appears
 - A **fan speeds table**: every distinct fan speed used, how often, and under which features —
   including which scale (0–255 or 0–1) the file uses, so a "Fan speed by feature" step can match it
+- **Time and filament by feature** — which feature (external perimeter, infill, support, …) the print
+  spends its time and filament on. Time needs this machine's motion limits; filament does not, and
+  shows either way
+- **Time and filament by object**, when the file uses `M486` (directly, or converted from Klipper's
+  `EXCLUDE_OBJECT` by that step)
 - Every slicer setting found in the header and footer
 - Whether the file has already been post-processed, by which recipe and when
 

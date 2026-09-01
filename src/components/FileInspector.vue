@@ -115,6 +115,58 @@
 						</v-expansion-panel-text>
 					</v-expansion-panel>
 
+					<v-expansion-panel title="Time and filament by feature">
+						<v-expansion-panel-text>
+							<div v-if="featureRows.length === 0" class="text-medium-emphasis">
+								No feature markers in this file.
+							</div>
+							<template v-else>
+								<div v-if="!hasFeatureSeconds" class="text-caption text-medium-emphasis mb-2">
+									Filament only — inspect with this machine connected for a time breakdown too.
+								</div>
+								<v-table density="compact">
+									<thead>
+										<tr>
+											<th>Feature</th>
+											<th v-if="hasFeatureSeconds">Time</th>
+											<th>Filament</th>
+											<th>Moves</th>
+										</tr>
+									</thead>
+									<tbody>
+										<tr v-for="row in featureRows" :key="row.feature">
+											<td>{{ row.label }}</td>
+											<td v-if="hasFeatureSeconds">{{ formatDuration(row.seconds) }}</td>
+											<td>{{ (row.filamentMm / 1000).toFixed(2) }} m</td>
+											<td>{{ row.moves.toLocaleString() }}</td>
+										</tr>
+									</tbody>
+								</v-table>
+							</template>
+						</v-expansion-panel-text>
+					</v-expansion-panel>
+
+					<v-expansion-panel v-if="objectRows.length > 0" title="Time and filament by object">
+						<v-expansion-panel-text>
+							<v-table density="compact">
+								<thead>
+									<tr>
+										<th>Object</th>
+										<th v-if="hasFeatureSeconds">Time</th>
+										<th>Filament</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-for="row in objectRows" :key="row.object">
+										<td>{{ row.object }}</td>
+										<td v-if="hasFeatureSeconds">{{ formatDuration(row.seconds) }}</td>
+										<td>{{ (row.filamentMm / 1000).toFixed(2) }} m</td>
+									</tr>
+								</tbody>
+							</v-table>
+						</v-expansion-panel-text>
+					</v-expansion-panel>
+
 					<v-expansion-panel title="Slicer settings found">
 						<v-expansion-panel-text>
 							<div v-if="metaEntries.length === 0" class="text-medium-emphasis">
@@ -206,6 +258,25 @@ const fanRows = computed(() => (analysis.value?.fanSettings ?? []).map((s) => ({
 })));
 
 const metaEntries = computed(() => (meta.value === null ? [] : [...meta.value.values.entries()].slice(0, 200)));
+
+const featureRows = computed(() => (analysis.value?.featureStats ?? []).map((f) => ({
+	feature: f.feature,
+	label: featureLabel(f.feature),
+	seconds: f.seconds,
+	filamentMm: f.filamentMm,
+	moves: f.moves,
+})));
+
+// Seconds are always 0 across every feature when no machine limits were supplied (inspecting while
+// disconnected, or a partly-configured machine) — showing a column of zeroes reads as "this feature
+// takes no time" rather than "time was not measurable", so the column is hidden instead.
+const hasFeatureSeconds = computed(() => featureRows.value.some((r) => r.seconds > 0));
+
+const objectRows = computed(() => (analysis.value?.objectStats ?? []).map((o) => ({
+	object: o.object,
+	seconds: o.seconds,
+	filamentMm: o.filamentMm,
+})));
 
 const stats = computed(() => {
 	const a = analysis.value;

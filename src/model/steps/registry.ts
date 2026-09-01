@@ -13,6 +13,8 @@ import { deleteLinesStep } from "./deleteLines";
 import { fanByFeatureStep } from "./fanByFeature";
 import { findReplaceStep } from "./findReplace";
 import { insertAtStep } from "./insertAt";
+import { minLayerTimeStep } from "./minLayerTime";
+import { objectLabelsStep } from "./objectLabels";
 import { paramRewriteStep } from "./paramRewrite";
 import { preheatStep } from "./preheat";
 import { rangeVaryStep } from "./rangeVary";
@@ -24,6 +26,7 @@ import type { StepDefinition } from "./types";
 export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.freeze([
 	findReplaceStep,
 	commandMapStep,
+	objectLabelsStep,
 	insertAtStep,
 	deleteLinesStep,
 	paramRewriteStep,
@@ -34,6 +37,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	rulesStep,
 	scriptStep,
 	clampFeedrateStep,
+	minLayerTimeStep,
 	arcWeldStep,
 ] as unknown as Array<StepDefinition<never>>);
 

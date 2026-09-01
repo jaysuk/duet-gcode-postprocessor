@@ -124,10 +124,10 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | G6 | ✅ **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt, from the slicer's own stated filament diameter, never assumed | Done — `model/analysis.ts`, `model/checks.ts` |
 | G7 | ✅ **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how much time that adds | Done — `model/steps/clampFeedrate.ts`, `model/gcode/timeModel.ts` |
 | G8 | ✅ **Cold-extrusion and end-of-file hygiene checks** | Done — `model/checks.ts` |
-| G9 | **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Makes DWC cancel-object work on more files |
+| G9 | ✅ **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Done — `model/steps/objectLabels.ts`. `EXCLUDE_OBJECT_DEFINE`/`_START`/`_END` → `M486`; inventing labels for an unlabelled file is a separate, later task (needs geometry segmentation) |
 | G10 | **`M37` simulation round-trip** — the firmware's own time estimate, written back into `M73` | |
 | G11 | **Extract or split a layer range** into a standalone file | |
-| G12 | **Per-feature and layer-time statistics** | |
+| G12 | ✅ **Per-feature and layer-time statistics** | Done — `model/analysis.ts` (`featureStats`, `slowestLayers`, `objectStats`), rendered in `FileInspector.vue`. Time needs machine limits; filament does not |
 
 ## H. Longer-term candidates
 
@@ -138,7 +138,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 | # | Feature | Notes |
 | --- | --- | --- |
 | H1 | ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite |
-| H2 | ^ **Minimum layer time enforcement** on a thermal basis - slow or dwell on layers too fast to cool | Their heatmap idea, turned into an action |
+| H2 | ✅ ^ **Minimum layer time enforcement** on a thermal basis - slow or dwell on layers too fast to cool | Done — `model/steps/minLayerTime.ts`. Never slows below a configured feedrate floor; reports a layer that cannot reach the target rather than mangling it |
 | H3 | ^ **Eject sequence preset** for print farms | A preset, not machinery |
 | H4 | ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | `paramRewrite` already does the work |
 | H5 | ^ **G-code command palette with click-to-insert** in the insert and rules editors | Cheapest route may be the upstream Monaco ask |

@@ -127,6 +127,7 @@ export class TimeEstimator {
 	private seconds = 0;
 	private unclampedSecondsAcc = 0;
 	private clampedMovesAcc = 0;
+	private lastAddedSeconds = 0;
 	private x: number | null = null;
 	private y: number | null = null;
 	private z: number | null = null;
@@ -163,6 +164,13 @@ export class TimeEstimator {
 		return this.unclampedSecondsAcc;
 	}
 
+	/** Clamped seconds added by the most recent {@link line} call — 0 for a line that was not a
+	 *  timeable move at all. For a per-feature/per-layer time breakdown, which needs to know what one
+	 *  specific move cost rather than only the running total. */
+	get lastMoveSeconds(): number {
+		return this.lastAddedSeconds;
+	}
+
 	/** Count of moves (not lines) whose commanded feedrate exceeded this machine's limit for the
 	 *  axes actually involved. */
 	get clampedMoveCount(): number {
@@ -170,6 +178,7 @@ export class TimeEstimator {
 	}
 
 	line(token: Tokenised, state: MachineState): void {
+		this.lastAddedSeconds = 0;
 		if (token.code === null || (token.letter !== "G")) return;
 		const isArc = token.code === "G2" || token.code === "G3";
 		if (token.code !== "G0" && token.code !== "G1" && !isArc) return;
@@ -225,13 +234,14 @@ export class TimeEstimator {
 			const accel = this.limits.printAccel ?? maxAccel;
 			const cap = Number.isFinite(maxSpeed) ? maxSpeed : nominal;
 			if (nominal > cap) this.clampedMovesAcc++;
-			this.seconds += moveTime({
+			this.lastAddedSeconds = moveTime({
 				distance: xyDistance,
 				nominalSpeed: Math.min(nominal, cap),
 				accel: Number.isFinite(accel) ? accel : maxAccel,
 				entrySpeed: jerk,
 				exitSpeed: jerk,
 			});
+			this.seconds += this.lastAddedSeconds;
 			// Same accel/jerk as the clamped estimate above — the only thing "unclamped" ignores is
 			// the speed cap. Using the file's own uncapped nominal here (instead of `Math.min(nominal,
 			// cap)`) means the two are identical, not merely close, whenever nothing was actually
@@ -247,13 +257,14 @@ export class TimeEstimator {
 			const maxSpeed = this.limits.maxSpeed.Z ?? nominal;
 			const accel = this.limits.printAccel ?? this.limits.maxAccel.Z ?? 0;
 			if (nominal > maxSpeed) this.clampedMovesAcc++;
-			this.seconds += moveTime({
+			this.lastAddedSeconds = moveTime({
 				distance: zDistance,
 				nominalSpeed: Math.min(nominal, maxSpeed),
 				accel,
 				entrySpeed: this.limits.jerk.Z ?? 0,
 				exitSpeed: this.limits.jerk.Z ?? 0,
 			});
+			this.seconds += this.lastAddedSeconds;
 			this.unclampedSecondsAcc += moveTime({
 				distance: zDistance,
 				nominalSpeed: nominal,
@@ -266,13 +277,14 @@ export class TimeEstimator {
 			const maxSpeed = this.limits.maxSpeed.E ?? nominal;
 			const accel = this.limits.maxAccel.E ?? 0;
 			if (nominal > maxSpeed) this.clampedMovesAcc++;
-			this.seconds += moveTime({
+			this.lastAddedSeconds = moveTime({
 				distance: eDistance,
 				nominalSpeed: Math.min(nominal, maxSpeed),
 				accel,
 				entrySpeed: this.limits.jerk.E ?? 0,
 				exitSpeed: this.limits.jerk.E ?? 0,
 			});
+			this.seconds += this.lastAddedSeconds;
 			this.unclampedSecondsAcc += moveTime({
 				distance: eDistance,
 				nominalSpeed: nominal,

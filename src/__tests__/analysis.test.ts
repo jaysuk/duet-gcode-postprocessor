@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { analyseText } from "../model/analysis";
+import { analyseText, MAX_REPORTED_LAYERS } from "../model/analysis";
 import { detectDialect } from "../model/gcode/dialect";
 import { emptySnapshot, runChecks, type MachineSnapshot } from "../model/checks";
 import { parseMetadata } from "../model/gcode/metadata";
@@ -370,6 +372,90 @@ describe("analyseText", () => {
 		it("treats a stated 0 as \"no limit\" (PrusaSlicer/OrcaSlicer's own convention), not a real ceiling", () => {
 			const meta = parseMetadata("; max_volumetric_speed = 0");
 			expect(analyseText("G28", meta).statedMaxFlowMm3PerSec).toBeNull();
+		});
+	});
+
+	describe("feature/layer/object statistics", () => {
+		it("attributes a move's time to the feature in force when it happens, not the one after", () => {
+			const text = [
+				";TYPE:External perimeter", "G1 X10 F6000",
+				";TYPE:Solid infill", "G1 X20 F6000",
+			].join("\n");
+			const analysis = analyseText(text, undefined, LIMITS);
+			const perimeter = analysis.featureStats.find((f) => f.feature === "externalPerimeter");
+			const infill = analysis.featureStats.find((f) => f.feature === "solidInfill");
+			expect(perimeter?.moves).toBe(1);
+			expect(infill?.moves).toBe(1);
+			expect(perimeter?.seconds).toBeGreaterThan(0);
+			expect(infill?.seconds).toBeGreaterThan(0);
+		});
+
+		it("lands a move before any ;TYPE: comment under \"unknown\"", () => {
+			const analysis = analyseText("G1 X10 F6000", undefined, LIMITS);
+			expect(analysis.featureStats.find((f) => f.feature === "unknown")?.moves).toBe(1);
+		});
+
+		it("attributes filament per feature in both M82 and M83 modes", () => {
+			const absolute = analyseText([";TYPE:Solid infill", "G1 X10 E5 F1200"].join("\n"));
+			const relative = analyseText(["M83", ";TYPE:Solid infill", "G1 X10 E5 F1200"].join("\n"));
+			expect(absolute.featureStats.find((f) => f.feature === "solidInfill")?.filamentMm).toBe(5);
+			expect(relative.featureStats.find((f) => f.feature === "solidInfill")?.filamentMm).toBe(5);
+		});
+
+		it("does not count a retraction as filament used", () => {
+			const analysis = analyseText([";TYPE:Solid infill", "G1 E-2 F1200"].join("\n"));
+			expect(analysis.featureStats.find((f) => f.feature === "solidInfill")).toBeUndefined();
+		});
+
+		it("populates feature stats even with no machine limits, at zero seconds", () => {
+			const analysis = analyseText([";TYPE:Solid infill", "G1 X10 E5 F1200"].join("\n"));
+			const infill = analysis.featureStats.find((f) => f.feature === "solidInfill");
+			expect(infill?.filamentMm).toBe(5);
+			expect(infill?.seconds).toBe(0);
+		});
+
+		it("sums per-layer seconds to the file total (the identity that catches double-counting)", () => {
+			// clampedSeconds, not estimatedSeconds: SAMPLE carries its own M73 markers, which
+			// estimatedSeconds prefers over the model — but per-move seconds only ever come from the
+			// model (clampedSeconds), so that is the total this identity has to hold against.
+			const analysis = analyseText(SAMPLE, undefined, LIMITS);
+			const layerTotal = analysis.slowestLayers.reduce((sum, l) => sum + l.seconds, 0);
+			expect(layerTotal).toBeCloseTo(analysis.clampedSeconds as number, 6);
+		});
+
+		it("sums per-feature seconds to the file total on a real fixture (task 12 acceptance)", () => {
+			const fixture = readFileSync(resolve(__dirname, "../../test/fixtures/prusaslicer.gcode"), "utf-8");
+			const analysis = analyseText(fixture, parseMetadata(fixture), LIMITS);
+			const featureTotal = analysis.featureStats.reduce((sum, f) => sum + f.seconds, 0);
+			const layerTotal = analysis.slowestLayers.reduce((sum, l) => sum + l.seconds, 0);
+			expect(featureTotal).toBeCloseTo(analysis.clampedSeconds as number, 6);
+			expect(layerTotal).toBeCloseTo(analysis.clampedSeconds as number, 6);
+		});
+
+		it("reports no object stats for a file that never uses M486", () => {
+			const analysis = analyseText(SAMPLE, undefined, LIMITS);
+			expect(analysis.objectStats).toEqual([]);
+		});
+
+		it("reports per-object time and filament when M486 is present", () => {
+			const text = [
+				"M83",
+				"M486 S0", "G1 X10 E1 F1200",
+				"M486 S1", "G1 X20 E2 F1200",
+			].join("\n");
+			const analysis = analyseText(text, undefined, LIMITS);
+			expect(analysis.objectStats).toHaveLength(2);
+			expect(analysis.objectStats.find((o) => o.object === "0")?.filamentMm).toBe(1);
+			expect(analysis.objectStats.find((o) => o.object === "1")?.filamentMm).toBe(2);
+		});
+
+		it("caps the reported layers at MAX_REPORTED_LAYERS on a file with more layers than that", () => {
+			const lines: Array<string> = [];
+			for (let i = 0; i < MAX_REPORTED_LAYERS + 10; i++) {
+				lines.push(";LAYER_CHANGE", `G1 X${i} F6000`);
+			}
+			const analysis = analyseText(lines.join("\n"), undefined, LIMITS);
+			expect(analysis.slowestLayers.length).toBeLessThanOrEqual(MAX_REPORTED_LAYERS);
 		});
 	});
 });

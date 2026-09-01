@@ -8,29 +8,33 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 646 tests green and `typecheck` + `verify-build` passing against DWC
+Implemented in v0.1.0, with 689 tests green and `typecheck` + `verify-build` passing against DWC
 `v3.7-dev`. Ten work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
 (§8 phase 11), `07-audit-defects.md` (a defect pass on 04–06 found by auditing that work rather than
 by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes §8 phase 12), and
-`10-audit-defects.md` (a second such pass, on 08–09).
+`10-audit-defects.md` (a second such pass, on 08–09). `12-geometry-analysis.md` (§8 phase 14) is
+under way: §1–3 done, §4 (hole detection) not attempted — see that section below.
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–12 in full, plus arc welding — the
-browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
-inspector and its preflight checks, the streaming engine and safe write path, thirteen step types,
-recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
-self-update, a backup index with a restore/download/delete UI, feature-type normalisation across
-slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro validation, cold-extrusion
-and end-of-file hygiene checks, a `commandMap` condition (`onlyWithParam`) that fixed a real
-mistranslation in the Marlin preset, a machine-aware move-time model with an inspector estimate
-alongside the slicer's own, a `rewriteTime` step that recomputes `M73` markers from it, an opt-in
-second read-only pass over the file for steps that need to see a whole-file fact before the
-transform pass reaches it, a predictive pre-heat step using RRF's own `M307` heater model, an
-`arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, a volumetric-flow audit that never
-assumes a filament diameter or invents a flow ceiling, a `clampFeedrate` step and a matching
-clamped-vs-unclamped time comparison in the inspector, an arc-length model shared by the time
-estimate and the flow audit so neither treats a curve as its own chord, and the usage guide.
+**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–12 in full, plus arc welding, plus
+most of phase 14 — the browser (reusing DWC's own `FileList` where available, with a self-contained
+fallback), the inspector and its preflight checks, the streaming engine and safe write path, fifteen
+step types, recipes with import/export and board-backed storage, the diff preview, the
+Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
+normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
+validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
+(`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a machine-aware move-time
+model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
+`M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
+whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
+`M307` heater model, an `arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, a
+volumetric-flow audit that never assumes a filament diameter or invents a flow ceiling, a
+`clampFeedrate` step and a matching clamped-vs-unclamped time comparison in the inspector, an
+arc-length model shared by the time estimate and the flow audit so neither treats a curve as its own
+chord, a per-feature/per-layer/per-object time-and-filament breakdown, a `minLayerTime` step that
+slows or dwells on a layer too fast to cool, an `objectLabels` step that converts Klipper's
+`EXCLUDE_OBJECT` markers to `M486`, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -56,10 +60,13 @@ filename (D4 — the field exists and is stored, nothing consumes it), and run h
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
 **Next:** tasks 01–10 are done — the whole of phases 8–12, defect-free as far as auditing has found.
-[`docs/tasks/`](docs/tasks/) holds three more: [11](docs/tasks/11-print-recovery.md) (phase 13),
-[12](docs/tasks/12-geometry-analysis.md) (phase 14) and
-[13](docs/tasks/13-simulation-and-tail.md) (phase 15). Each carries an explicit stop point for a
-question in it that source alone cannot answer.
+[12](docs/tasks/12-geometry-analysis.md) (phase 14) is under way, §1–3 done; its §4 (hole detection)
+has its own stop point — the false-positive rate on real fixtures has to be checked before it ships
+at all, which needs building the detector to find out, not a decision to make up front. Still to
+start: [11](docs/tasks/11-print-recovery.md) (phase 13), which needs the user's own answer on their
+machine's Z-homing before any file-producing code is written, and
+[13](docs/tasks/13-simulation-and-tail.md) (phase 15), which needs a decision on whether `M37`
+simulation is worth building once its own stop point (what it costs in machine time) is answered.
 
 ---
 
@@ -585,16 +592,42 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
 - **Extract a layer range** into a standalone file, for debugging one bad region without re-slicing.
 - **Split at a layer**, for multi-day prints or a filament budget.
 
-### Phase 14 — geometry-aware analysis
+### Phase 14 — geometry-aware analysis *(§1–3 done; hole detection not attempted)*
 
-- **Hole detection with insert pauses** *(prompted by G-Code Modifier)* — find voids that get roofed
-  over, report each one's depth, and offer a pause at the closing layer so an insert can be dropped
-  in. Presented as candidates to tick; the plugin cannot tell an insert boss from a lightening
-  pocket.
-- **Per-feature and layer-time statistics** — time and filament by feature, tool and object.
-- **Minimum layer time enforcement** — slow, or dwell away from the part, on layers too fast to cool.
-- **`M486` object labelling**, including converting Klipper `EXCLUDE_OBJECT` markers, so DWC's
-  cancel-object works on files that did not ship with it.
+- ✅ **Per-feature and layer-time statistics** — time and filament by feature, layer and object.
+  `Analyser` now attributes each move's clamped time (`TimeEstimator.lastMoveSeconds`, added for
+  exactly this) and positive extrusion delta to whichever feature/layer/`M486` object was active when
+  it happened, exposed as `featureStats`/`slowestLayers`/`objectStats` on `FileAnalysis` and rendered
+  in the inspector the same way `fanSettings` already was. Filament needs no machine limits; time is
+  0 without them, rather than hidden, so the inspector says so instead of implying "no time" is a
+  real answer. `slowestLayers` is capped (`MAX_REPORTED_LAYERS`) so a 5,000-layer file cannot put
+  5,000 rows in the UI, without breaking the "sums to the file total" identity on any file smaller
+  than the cap — which is what the acceptance test actually checks.
+- ✅ **Minimum layer time enforcement** — `steps/minLayerTime.ts`, an `analysis()` collector (the
+  `rewriteTime.ts` shape) measuring each layer's *clamped* duration before the transform pass reaches
+  its first line. "Slow" scales every feedrate on a short layer by `actual/target` — less than one,
+  more time, stated plainly in the module comment because it is the easy direction to get backwards —
+  never below a configured floor, with a layer that cannot reach the target reported rather than
+  forced. "Dwell" parks and pauses for the shortfall instead, inserted at the layer boundary with a
+  trailing flush in `onEnd` for the file's last layer, which never sees a following boundary line to
+  trigger on.
+- ✅ **`M486` object labelling**, including converting Klipper `EXCLUDE_OBJECT` markers — 
+  `steps/objectLabels.ts`. `EXCLUDE_OBJECT_DEFINE` has no `M486` equivalent (RRF's own command both
+  assigns an index and starts the object in one step, where Klipper separates "declare" from
+  "start") and is dropped, its name still registered so a later `START` gets the same index. Declares
+  its own tiny `analysis()` collector purely to know, before the first line, whether the file already
+  uses `M486` — converting anyway would risk a Klipper-derived index colliding with one the slicer
+  assigned itself. A real bug this step's own tests caught before anything else did: the collector was
+  registered under its bare id in `analysis()` but looked up under the `stepIndex`-namespaced one in
+  `create()` — a mismatch that would have silently disabled the "never touch an M486 file" guard in
+  every real, indexed recipe run while still passing a naive test that never set `stepIndex`.
+- **Hole detection with insert pauses** *(prompted by G-Code Modifier)* — not attempted. Needs
+  per-layer occupancy (rasterising extruding moves into a grid, watching a cell go from empty to
+  covered), which is a different kind of work from the other three; find voids that get roofed over,
+  report each one's depth, and offer a pause at the closing layer so an insert can be dropped in.
+  Presented as candidates to tick; the plugin cannot tell an insert boss from a lightening pocket. See
+  [docs/tasks/12-geometry-analysis.md](docs/tasks/12-geometry-analysis.md) §4 for the stop point this
+  is gated on — the false-positive rate on real fixtures has to be checked before this ships at all.
 
 ### Phase 15 — closing the loop, and the long tail
 

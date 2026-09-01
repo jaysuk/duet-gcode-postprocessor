@@ -19,6 +19,31 @@ export interface Extents {
 	minZ: number; maxZ: number;
 }
 
+export interface FeatureStats {
+	feature: Feature;
+	/** Seconds spent on moves recorded under this feature. Always 0 when no machine limits were
+	 *  supplied — time needs the move-time model; filament does not. */
+	seconds: number;
+	/** mm of filament extruded under this feature (positive extrusion only, never net of retraction). */
+	filamentMm: number;
+	/** Moves recorded under this feature (a move contributes to exactly one feature: the one active
+	 *  when it happens). */
+	moves: number;
+}
+
+export interface LayerStats {
+	layer: number;
+	seconds: number;
+	filamentMm: number;
+}
+
+export interface ObjectStats {
+	/** The M486 label, exactly as last set by `M486 S<n> A"..."` or `M486 S<n>`. */
+	object: string;
+	seconds: number;
+	filamentMm: number;
+}
+
 export interface FileAnalysis {
 	lines: number;
 	bytes: number;
@@ -106,7 +131,20 @@ export interface FileAnalysis {
 	/** Moves whose commanded feedrate exceeded this machine's limit for the axes involved. 0 when no
 	 *  machine limits were supplied. */
 	clampedMoveCount: number;
+	/** Time and filament per feature, most time-consuming first (then most filament, to break a tie
+	 *  when no machine limits were supplied and every `seconds` is 0). */
+	featureStats: Array<FeatureStats>;
+	/** Time and filament for the busiest layers, most time-consuming first, capped at
+	 *  {@link MAX_REPORTED_LAYERS} entries — a report, not a full per-layer dump. Every layer appears
+	 *  when the file has fewer layers than the cap. */
+	slowestLayers: Array<LayerStats>;
+	/** Time and filament per `M486` object, most time-consuming first. Empty when the file never uses
+	 *  `M486`. */
+	objectStats: Array<ObjectStats>;
 }
+
+/** Cap on `slowestLayers` — a 5,000-layer file must not put 5,000 rows in the UI. */
+export const MAX_REPORTED_LAYERS = 50;
 
 export class Analyser {
 	private readonly state: MachineState;
@@ -118,6 +156,9 @@ export class Analyser {
 	}>();
 	private readonly objectSet = new Set<string>();
 	private readonly macroRefsMap = new Map<string, { path: string; count: number; firstLine: number }>();
+	private readonly featureStatsMap = new Map<Feature, { seconds: number; filamentMm: number; moves: number }>();
+	private readonly layerStatsMap = new Map<number, { seconds: number; filamentMm: number }>();
+	private readonly objectStatsMap = new Map<string, { seconds: number; filamentMm: number }>();
 
 	private lines = 0;
 	private bytes = 0;
@@ -277,6 +318,50 @@ export class Analyser {
 				}
 			}
 		}
+
+		// Per-feature/layer/object time and filament — independent of whether flow could be computed
+		// above (that needs a known filament diameter; this does not). Seconds are 0 without machine
+		// limits (no `timeEstimator`), same as everywhere else in this class; filament still counts.
+		const moveSeconds = this.timeEstimator?.lastMoveSeconds ?? 0;
+		const filamentDelta = Math.max(deltaE, 0);
+		if (moveSeconds > 0 || filamentDelta > 0) {
+			this.recordFeatureStats(moveSeconds, filamentDelta);
+			this.recordLayerStats(moveSeconds, filamentDelta);
+			if (this.state.object !== null) this.recordObjectStats(this.state.object, moveSeconds, filamentDelta);
+		}
+	}
+
+	private recordFeatureStats(seconds: number, filamentMm: number): void {
+		const feature = normaliseFeature(this.state.featureType);
+		let entry = this.featureStatsMap.get(feature);
+		if (entry === undefined) {
+			entry = { seconds: 0, filamentMm: 0, moves: 0 };
+			this.featureStatsMap.set(feature, entry);
+		}
+		entry.seconds += seconds;
+		entry.filamentMm += filamentMm;
+		entry.moves++;
+	}
+
+	private recordLayerStats(seconds: number, filamentMm: number): void {
+		const layer = this.state.layer;
+		let entry = this.layerStatsMap.get(layer);
+		if (entry === undefined) {
+			entry = { seconds: 0, filamentMm: 0 };
+			this.layerStatsMap.set(layer, entry);
+		}
+		entry.seconds += seconds;
+		entry.filamentMm += filamentMm;
+	}
+
+	private recordObjectStats(object: string, seconds: number, filamentMm: number): void {
+		let entry = this.objectStatsMap.get(object);
+		if (entry === undefined) {
+			entry = { seconds: 0, filamentMm: 0 };
+			this.objectStatsMap.set(object, entry);
+		}
+		entry.seconds += seconds;
+		entry.filamentMm += filamentMm;
 	}
 
 	private applyM(code: string, body: string): void {
@@ -445,6 +530,16 @@ export class Analyser {
 			clampedSeconds: this.timeEstimator?.clampedSeconds ?? null,
 			unclampedSeconds: this.timeEstimator?.unclampedSeconds ?? null,
 			clampedMoveCount: this.timeEstimator?.clampedMoveCount ?? 0,
+			featureStats: [...this.featureStatsMap.entries()]
+				.map(([feature, s]) => ({ feature, seconds: s.seconds, filamentMm: s.filamentMm, moves: s.moves }))
+				.sort((a, b) => b.seconds - a.seconds || b.filamentMm - a.filamentMm),
+			slowestLayers: [...this.layerStatsMap.entries()]
+				.map(([layer, s]) => ({ layer, seconds: s.seconds, filamentMm: s.filamentMm }))
+				.sort((a, b) => b.seconds - a.seconds || b.filamentMm - a.filamentMm)
+				.slice(0, MAX_REPORTED_LAYERS),
+			objectStats: [...this.objectStatsMap.entries()]
+				.map(([object, s]) => ({ object, seconds: s.seconds, filamentMm: s.filamentMm }))
+				.sort((a, b) => b.seconds - a.seconds || b.filamentMm - a.filamentMm),
 		};
 	}
 }
