@@ -19,7 +19,7 @@ four non-negotiables there are binding, not background.
 | [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Done** | 04, 07 |
 | [10](10-audit-defects.md) | Defect pass on 08–09 — arcs are invisible to the move-time model, and clamping mis-reads `G92` | **Done** — every reproduction in the work order now fails before the fix and passes after it | 08, 09 |
 | [11](11-print-recovery.md) | Print recovery and layer surgery (§8 phase 13) | **Ready**; has a stop point | 10 |
-| [12](12-geometry-analysis.md) | Geometry-aware analysis — per-feature stats, minimum layer time, `M486` labelling, void detection (§8 phase 14) | **§1–3 done**; §4 (hole detection) not attempted — has its own stop point | 10 |
+| [12](12-geometry-analysis.md) | Geometry-aware analysis — per-feature stats, minimum layer time, `M486` labelling, void detection (§8 phase 14) | **§1–3 done**; §4 is a tested prototype (`model/gcode/voids.ts`), not wired to anything — real-fixture validation still needed, this repo's own fixtures are too thin | 10 |
 | [13](13-simulation-and-tail.md) | `M37` simulation round-trip and the long tail (§8 phase 15) | **Ready**; has a stop point | 10 |
 
 **Tasks 11–13 each carry a stop point**, because each contains a question that cannot be answered by

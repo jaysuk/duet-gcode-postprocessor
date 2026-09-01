@@ -137,7 +137,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 
 | # | Feature | Notes |
 | --- | --- | --- |
-| H1 | ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite |
+| H1 | ⏸ ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite. **Prototype only** — `model/gcode/voids.ts`, a pure enclosure detector with its own tests, but no collector/step/UI: the real-world false-positive rate is still unvalidated (this repo's fixtures are too thin to test it against), which task 12 §4 says must be checked before anything else is built |
 | H2 | ✅ ^ **Minimum layer time enforcement** on a thermal basis - slow or dwell on layers too fast to cool | Done — `model/steps/minLayerTime.ts`. Never slows below a configured feedrate floor; reports a layer that cannot reach the target rather than mangling it |
 | H3 | ^ **Eject sequence preset** for print farms | A preset, not machinery |
 | H4 | ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | `paramRewrite` already does the work |
