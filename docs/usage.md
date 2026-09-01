@@ -96,6 +96,49 @@ Inserted text may use `{layer}`, `{z}`, `{tool}`, `{line}`, `{file}`, `{feedrate
 Matches lines and either comments them out (the default — reversible, and obvious in a diff) or
 deletes them.
 
+### Extract a layer range
+
+Keeps only a range of layers, discarding everything else — including the original start block
+(homing, bed levelling, initial temperatures), which sits before layer 0 and is not part of any
+layer range. A generated comment explains what the file is and that it is not runnable
+start-to-finish: prepare the machine manually before running it, or use "Restart from layer" instead
+if you want a file that reconstructs machine state for you.
+
+Splitting a file at a layer is just two extractions with adjoining ranges — layers 0–N in one recipe
+run, N+1 onward in another.
+
+- **From layer / To layer** — -1 means unbounded on that side. Default: the whole file.
+
+Warns rather than crashing if the range matches nothing, and warns (but still extracts) if the file
+has no layer-change markers of its own — layer numbers are then inferred from Z rises and may not
+exactly match what the slicer would call each layer.
+
+### Restart from layer
+
+Rebuilds a runnable file starting at a chosen layer, for recovering from a failure — a jam, a power
+cut, a knocked part that recovered — without reprinting from scratch. Reconstructs machine state at
+that layer from everything before it in the file: the active tool, bed and tool temperatures, fan
+speed, extrusion and move mode, and the absolute extrusion position. Then lifts clear of the part,
+travels in XY, and only then descends to the resumed layer's own height — never travelling across
+the part at its own Z.
+
+- **Resume from layer** — 0 is the first layer. Everything before it, including the original start
+  block, is replaced by the generated preamble.
+- **Re-home Z (G28 Z)** — off by default, and this matters: a machine that homes Z by probing would
+  probe the part already on the bed, not the bed itself, and set Z wrong by the part's own height.
+  Only turn this on if this machine's Z axis homes to a fixed endstop.
+- **Lift height**, **lift/travel/descend feedrates** — control the final reposition. The descend
+  feedrate defaults slower than the others, since that move ends at the part.
+
+This does **not** attempt any first-layer adhesion trickery (no re-purge, no extra brim) — there is
+no single right answer for a bed that already has a part on it, and the preamble restores state
+accurately rather than guessing. If the resumed print needs help sticking, that is a physical
+decision to make at the printer, not a setting here.
+
+Needs this file to have layer markers or a usable geometric fallback, the same as any other
+layer-anchored step. If the cut lands inside an `M486`-labelled object, the label is restored too, so
+DWC's cancel-object UI does not attribute the rest of the print to the wrong object.
+
 ### Rewrite a parameter
 
 Scale, offset, set or clamp a numeric parameter on chosen commands. Everything else about the line
@@ -211,7 +254,9 @@ precision, is left as the original moves rather than dropped.
 
 **Put this step last.** It changes both line counts and coordinates, so anything after it that
 targets `G1` — a find/replace, a rule — will not see a welded arc, and anything that inserts lines
-(pre-heat) needs to run before this step sees the file, not after.
+(pre-heat) needs to run before this step sees the file, not after. The same goes for "Extract a
+layer range" and "Restart from layer" below — both reason about per-line coordinates and layer
+boundaries that a welded arc would hide, so they need to run before this step too.
 
 **Two caveats worth knowing before turning this on:**
 

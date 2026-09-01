@@ -10,6 +10,7 @@ import { arcWeldStep } from "./arcWeld";
 import { clampFeedrateStep } from "./clampFeedrate";
 import { commandMapStep } from "./commandMap";
 import { deleteLinesStep } from "./deleteLines";
+import { extractRangeStep } from "./extractRange";
 import { fanByFeatureStep } from "./fanByFeature";
 import { findReplaceStep } from "./findReplace";
 import { insertAtStep } from "./insertAt";
@@ -18,6 +19,7 @@ import { objectLabelsStep } from "./objectLabels";
 import { paramRewriteStep } from "./paramRewrite";
 import { preheatStep } from "./preheat";
 import { rangeVaryStep } from "./rangeVary";
+import { restartFromStep } from "./restartFrom";
 import { rewriteTimeStep } from "./rewriteTime";
 import { rulesStep } from "./rules";
 import { scriptStep } from "./script";
@@ -27,6 +29,8 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	findReplaceStep,
 	commandMapStep,
 	objectLabelsStep,
+	extractRangeStep,
+	restartFromStep,
 	insertAtStep,
 	deleteLinesStep,
 	paramRewriteStep,

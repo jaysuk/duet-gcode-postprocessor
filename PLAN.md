@@ -8,20 +8,20 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 700 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. Ten work orders in `docs/tasks/` are complete: `01-defects.md`,
+Implemented in v0.1.0, with 746 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. Eleven work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
 (§8 phase 11), `07-audit-defects.md` (a defect pass on 04–06 found by auditing that work rather than
-by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes §8 phase 12), and
-`10-audit-defects.md` (a second such pass, on 08–09). `12-geometry-analysis.md` (§8 phase 14) is
-under way: §1–3 done, §4 (hole detection) is a tested prototype not wired to anything — see that
-section below for why.
+by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes §8 phase 12),
+`10-audit-defects.md` (a second such pass, on 08–09), and `11-print-recovery.md` (§8 phase 13).
+`12-geometry-analysis.md` (§8 phase 14) is under way: §1–3 done, §4 (hole detection) is a tested
+prototype not wired to anything — see that section below for why.
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–12 in full, plus arc welding, plus
+**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–13 in full, plus arc welding, plus
 most of phase 14 — the browser (reusing DWC's own `FileList` where available, with a self-contained
-fallback), the inspector and its preflight checks, the streaming engine and safe write path, fifteen
-step types, recipes with import/export and board-backed storage, the diff preview, the
+fallback), the inspector and its preflight checks, the streaming engine and safe write path,
+seventeen step types, recipes with import/export and board-backed storage, the diff preview, the
 Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
 normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
 validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
@@ -35,7 +35,9 @@ volumetric-flow audit that never assumes a filament diameter or invents a flow c
 arc-length model shared by the time estimate and the flow audit so neither treats a curve as its own
 chord, a per-feature/per-layer/per-object time-and-filament breakdown, a `minLayerTime` step that
 slows or dwells on a layer too fast to cool, an `objectLabels` step that converts Klipper's
-`EXCLUDE_OBJECT` markers to `M486`, and the usage guide.
+`EXCLUDE_OBJECT` markers to `M486`, an `extractRange` step for pulling out or splitting a layer
+range, a `restartFrom` step that reconstructs machine state to resume a failed print without
+reprinting from scratch, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -60,14 +62,13 @@ slows or dwells on a layer too fast to cool, an `objectLabels` step that convert
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–10 are done — the whole of phases 8–12, defect-free as far as auditing has found.
+**Next:** tasks 01–11 are done — the whole of phases 8–13, defect-free as far as auditing has found.
 [12](docs/tasks/12-geometry-analysis.md) (phase 14) is under way, §1–3 done; its §4 (hole detection)
 has its own stop point — the false-positive rate on real fixtures has to be checked before it ships
-at all, which needs building the detector to find out, not a decision to make up front. Still to
-start: [11](docs/tasks/11-print-recovery.md) (phase 13), which needs the user's own answer on their
-machine's Z-homing before any file-producing code is written, and
-[13](docs/tasks/13-simulation-and-tail.md) (phase 15), which needs a decision on whether `M37`
-simulation is worth building once its own stop point (what it costs in machine time) is answered.
+at all, which needs a real dense fixture this repo does not have, not a decision to make up front.
+Still to start: [13](docs/tasks/13-simulation-and-tail.md) (phase 15), which needs a decision on
+whether `M37` simulation is worth building once its own stop point (what it costs in machine time) is
+answered.
 
 ---
 
@@ -585,13 +586,30 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
   its chord — zero seconds and an over-stated flow, respectively — until `arcFit.ts` gained the
   `arcMoveLength` helper both now share.
 
-### Phase 13 — print recovery and surgery
+### Phase 13 — print recovery and surgery *(done)*
 
-- **Restart from layer N** — rebuild a runnable file after a failure. The care is in reconstructing
-  state at the cut: temperatures, fan, tool, extrusion mode, absolute E, and whether to re-home Z
-  against a part already on the bed.
-- **Extract a layer range** into a standalone file, for debugging one bad region without re-slicing.
-- **Split at a layer**, for multi-day prints or a filament budget.
+- ✅ **The stop point, resolved.** Whether `G28 Z` is safe after a restart depends on whether this
+  machine homes Z to a fixed endstop or by probing — a probe would probe the part already on the bed
+  and set Z wrong by the part's own height, and the object model's `sensors.probes[]` is evidence a
+  probe is *configured*, not proof it is *used* for homing. Not decidable from source, so `restartFrom`
+  leaves it opt-in and off by default, stated plainly in both the step's module comment and its own UI
+  copy. Likewise, no first-layer adhesion trickery (re-purge, extra brim) is invented — there is no
+  single right answer for a bed that already has a part on it, and guessing wastes filament at best;
+  the preamble restores state accurately and does nothing more.
+- ✅ **Restart from layer N** — `model/recovery.ts`'s `recoveryPlan` is a pure fold over a plain event
+  stream (tool, bed/tool temperatures, fan, extrusion/move mode, absolute E, position, `M486` object),
+  independently tested field-by-field with a synthetic list — no G-code, no pipeline. `RestartFromCollector`
+  (`steps/restartFrom.ts`) turns the real file, up to the cut, into that stream via its own `analysis()`
+  collector, namespaced by `stepIndex` the same way `rewriteTime.ts` is. The temperature commands are
+  verified against RepRapFirmware source rather than assumed from Marlin familiarity: `M104 T<n> S<temp>`
+  sets a tool's target without selecting it, and `M116 P<n>` waits for that tool specifically — both
+  confirmed in `GCodes2.cpp` (cited in the step's own module comment) — which is what lets the preamble
+  set every temperature before selecting any tool, bed before tool, then lift-travel-descend rather than
+  travelling across the part at its own Z.
+- ✅ **Extract a layer range / split at a layer** — one step, `extractRange.ts`: a split is two
+  extractions with adjoining ranges. Deliberately *not* state-reconstructing — its preamble is a plain
+  comment saying so, not a generated one — so it stays the simple, read-mostly half the task named it
+  as; a user who wants a runnable resumed print uses `restartFrom` instead.
 
 ### Phase 14 — geometry-aware analysis *(§1–3 done; hole detection is a prototype, not shipped)*
 
