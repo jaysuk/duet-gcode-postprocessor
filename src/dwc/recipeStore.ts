@@ -20,7 +20,6 @@ import { useSettingsStore } from "@/stores/settings";
 
 import { PLUGIN_ID } from "../model/constants";
 import { createRecipe, newUid, type Recipe } from "../model/recipe";
-import { PRESETS } from "../model/presets";
 
 const KEY = "recipes";
 const LS_KEY = "gCodePostProcessor.recipes";
@@ -31,12 +30,10 @@ interface StoredState {
 }
 
 function defaults(): StoredState {
-	// A first run that opens on an empty list and a blank form is useless, so seed the two presets
-	// that answer the most common asks
-	const seeded = PRESETS
-		.filter((p) => p.key === "pauseAtLayer" || p.key === "marlinToRrf")
-		.map((p) => p.build());
-	return { recipes: seeded, activeId: seeded[0]?.id ?? null };
+	// A first run starts with nothing built — the presets are one click away from an empty list
+	// (RecipeEditor's "add" flow), not something silently pre-applied to a file the user hasn't
+	// chosen yet.
+	return { recipes: [], activeId: null };
 }
 
 /** Per-session trust decisions, keyed by recipe id. Never persisted. */

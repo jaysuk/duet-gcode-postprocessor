@@ -1,68 +1,109 @@
 <style scoped>
+.browser-wrap {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	width: 100%;
+}
+
+.selected-strip {
+	flex: 0 0 auto;
+}
+
 .browser {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
+	flex: 1 1 auto;
+}
+
+/* Vuetify's toolbar pins its own height via a CSS custom property, but a plain v-text-field has no
+ * such guarantee — left to default flex sizing (flex: 0 1 auto) it can be stretched along the main
+ * axis by whatever the flex column's own height resolves to, which is how this ended up scaling with
+ * the window: nothing else in `.browser` was claiming the leftover space, so this was. Pinning both
+ * to flex: 0 0 auto makes them exactly their content height, unconditionally, leaving `.browser-list`
+ * (flex: 1 1 auto, the only element meant to grow) as the sole consumer of whatever space remains. */
+.browser > :deep(.v-toolbar),
+.filter-field {
+	flex: 0 0 auto;
 }
 
 .browser-list {
 	overflow-y: auto;
+	overflow-x: hidden;
 	flex: 1 1 auto;
 	min-height: 12rem;
 }
 
-.selected {
-	background: rgba(var(--v-theme-primary), 0.12);
+.file-row {
+	border-inline-start: 3px solid transparent;
+}
+
+.file-row.selected {
+	background: rgba(var(--v-theme-primary), 0.14);
+	border-inline-start-color: rgb(var(--v-theme-primary));
+}
+
+.file-row.selected :deep(.v-list-item-title) {
+	font-weight: 700;
+	color: rgb(var(--v-theme-primary));
 }
 </style>
 
 <template>
-	<!--
-		DWC 3.7 publishes every one of its own components to plugins (window.DWC.Components), so the
-		real file browser - breadcrumbs, tiles, thumbnails, sorting - is reused when it is there. The
-		fallback below is a plain list against getFileList, so the plugin still works on a DWC that
-		predates that exposure. One seam, no feature loss for the job at hand.
-	-->
-	<component :is="dwcFileList" v-if="dwcFileList !== null"
-			   :options="{ initialDirectory: directory }"
-			   :directory="directory"
-			   root-directory="0:/gcodes"
-			   root-label="Jobs"
-			   no-items-text="list.baseFileList.noFiles"
-			   no-new-file no-new-directory no-delete no-rename no-download
-			   @update:directory="(value: string) => (directory = value)"
-			   @file-click="onDwcFileClick" />
+	<div class="browser-wrap">
+		<v-sheet class="selected-strip px-3 py-2 d-flex align-center ga-2" color="primary" variant="tonal">
+			<v-icon size="small">mdi-file-check-outline</v-icon>
+			<span v-if="modelValue !== null" class="text-body-2 text-truncate">
+				Selected: <strong>{{ selectedName }}</strong>
+			</span>
+			<span v-else class="text-body-2 text-medium-emphasis">No file selected</span>
+		</v-sheet>
 
-	<div v-else class="browser">
-		<v-toolbar density="compact" color="surface">
-			<v-btn variant="text" icon size="small" :disabled="atRoot" title="Up one folder" @click="goUp">
-				<v-icon>mdi-arrow-up</v-icon>
-			</v-btn>
-			<v-toolbar-title class="text-body-2 text-truncate">{{ directory }}</v-toolbar-title>
-			<v-spacer />
-			<v-btn variant="text" icon size="small" :loading="loading" title="Refresh" @click="refresh">
-				<v-icon>mdi-refresh</v-icon>
-			</v-btn>
-		</v-toolbar>
+		<!--
+			DWC's own FileList component is built for managing files (bulk select, delete, upload),
+			not for picking a single one to hand to another tool — it has no way to show "this is the
+			file in use elsewhere on the page", and its table needs more width than this pane has to
+			give. A plain, purpose-built list against getFileList keeps the browser this page actually
+			needs: obviously one-file-at-a-time, and no wider than the pane around it.
+		-->
+		<div class="browser">
+			<v-toolbar density="compact" color="surface">
+				<v-btn variant="text" icon size="small" :disabled="atRoot" title="Up one folder" @click="goUp">
+					<v-icon>mdi-arrow-up</v-icon>
+				</v-btn>
+				<v-toolbar-title class="text-body-2 text-truncate">{{ directory }}</v-toolbar-title>
+				<v-spacer />
+				<v-btn variant="text" icon size="small" :loading="loading" title="Refresh" @click="refresh">
+					<v-icon>mdi-refresh</v-icon>
+				</v-btn>
+			</v-toolbar>
 
-		<v-text-field v-model="filter" density="compact" hide-details variant="solo-filled" flat
-					  class="mx-2 my-1" placeholder="Filter by name" prepend-inner-icon="mdi-magnify"
-					  clearable />
+			<v-text-field v-model="filter" density="compact" hide-details variant="outlined"
+						  class="filter-field mx-2 my-1" placeholder="Filter by name" prepend-inner-icon="mdi-magnify"
+						  clearable />
 
-		<v-alert v-if="error !== null" type="warning" variant="tonal" density="compact" class="ma-2">
-			{{ error }}
-		</v-alert>
+			<v-alert v-if="error !== null" type="warning" variant="tonal" density="compact" class="ma-2">
+				{{ error }}
+			</v-alert>
 
-		<v-list v-else class="browser-list" density="compact" nav>
-			<v-list-item v-for="item in filtered" :key="item.name"
-						 :prepend-icon="item.isDirectory ? 'mdi-folder' : 'mdi-file-document-outline'"
-						 :title="item.name"
-						 :subtitle="item.isDirectory ? undefined : describe(item)"
-						 :class="{ selected: !item.isDirectory && fullPath(item.name) === modelValue }"
-						 @click="onClick(item)" />
-			<v-list-item v-if="filtered.length === 0 && !loading"
-						 title="Nothing here" subtitle="No G-code files in this folder" disabled />
-		</v-list>
+			<v-list v-else class="browser-list" density="compact" nav>
+				<v-list-item v-for="item in filtered" :key="item.name"
+							 class="file-row"
+							 :class="{ selected: !item.isDirectory && fullPath(item.name) === modelValue }"
+							 :title="item.name"
+							 :subtitle="item.isDirectory ? undefined : describe(item)"
+							 @click="onClick(item)">
+					<template #prepend>
+						<v-icon v-if="item.isDirectory">mdi-folder</v-icon>
+						<v-icon v-else-if="fullPath(item.name) === modelValue" color="primary">mdi-check-circle</v-icon>
+						<v-icon v-else>mdi-file-document-outline</v-icon>
+					</template>
+				</v-list-item>
+				<v-list-item v-if="filtered.length === 0 && !loading"
+							 title="Nothing here" subtitle="No G-code files in this folder" disabled />
+			</v-list>
+		</div>
 	</div>
 </template>
 
@@ -90,16 +131,13 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const filter = ref("");
 
-/**
- * DWC's own FileList, when this DWC exposes it. Resolved once rather than per render: the global is
- * populated before plugins load, and re-reading it in a computed would only add work.
- */
-const dwcFileList = computed(() => {
-	const components = (window as unknown as { DWC?: { Components?: Record<string, unknown> } }).DWC?.Components;
-	return (components?.FileList as object | undefined) ?? null;
-});
-
 const atRoot = computed(() => directory.value.replace(/\/+$/, "") === "0:/gcodes");
+
+const selectedName = computed(() => {
+	if (modelValue.value === null) return "";
+	const parts = modelValue.value.split("/");
+	return parts[parts.length - 1] ?? modelValue.value;
+});
 
 const filtered = computed(() => {
 	const needle = (filter.value ?? "").toLowerCase();
@@ -135,19 +173,12 @@ function onClick(item: BrowserItem): void {
 	modelValue.value = fullPath(item.name);
 }
 
-function onDwcFileClick(item: { name: string; isDirectory?: boolean }, dir: string): void {
-	if (item.isDirectory === true) return;
-	if (!isGcode(item.name)) return;
-	modelValue.value = `${dir.replace(/\/+$/, "")}/${item.name}`;
-}
-
 function goUp(): void {
 	const parent = directory.value.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
 	directory.value = parent === "0:" || parent === "" ? "0:/gcodes" : parent;
 }
 
 async function refresh(): Promise<void> {
-	if (dwcFileList.value !== null) return;
 	loading.value = true;
 	error.value = null;
 	try {

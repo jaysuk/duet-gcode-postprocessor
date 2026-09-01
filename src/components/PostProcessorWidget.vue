@@ -26,7 +26,9 @@
 
 		<div class="widget-body">
 			<v-select :model-value="recipeId" :items="recipeItems" item-title="name" item-value="id"
-					  density="compact" hide-details variant="outlined" label="Recipe" class="mb-2"
+					  density="compact" :hide-details="recipeItems.length > 0" variant="outlined"
+					  label="Recipe" class="mb-2"
+					  :messages="recipeItems.length === 0 ? 'No recipes yet — build one on the Post-Processor page' : ''"
 					  :disabled="busy" @update:model-value="(id: string) => select(id)" />
 
 			<v-text-field :model-value="path ?? ''" density="compact" hide-details variant="outlined"

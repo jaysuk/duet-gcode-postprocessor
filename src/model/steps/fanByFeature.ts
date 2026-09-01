@@ -87,6 +87,15 @@ export const fanByFeatureStep: StepDefinition<FanByFeatureConfig> = {
 	id: "fanByFeature",
 	label: "Fan speed by feature",
 	description: "Override the part-cooling fan speed for specific features such as bridges or overhangs.",
+	tip: "The slicer re-emits M106 constantly, including inside the region you are overriding, so an "
+		+ "override alone would be undone by the very next line — this step also suppresses the "
+		+ "slicer's own M106/M107 for as long as an override is in force. Which means the diff will "
+		+ "show more than just your overridden feature: every M106/M107 the override needs to restore "
+		+ "the previous speed to (on the very next feature change, or at a layer change even if the "
+		+ "same feature label continues) also shows up, marked '; fan override: restored' so it reads "
+		+ "as deliberate rather than stray. That restore is what stops the override bleeding into "
+		+ "features you never asked to change.",
+	docsAnchor: "fan-speed-by-feature",
 	icon: "mdi-fan",
 	fields: [
 		{
@@ -191,7 +200,7 @@ export const fanByFeatureStep: StepDefinition<FanByFeatureConfig> = {
 				if (wantId !== activeId || forceExit) {
 					if (activeKind !== null) {
 						if (restorePending !== null) {
-							emitted.push(`M106 P${restorePending.fan} S${formatNumber(restorePending.speed, 3)}`);
+							emitted.push(`M106 P${restorePending.fan} S${formatNumber(restorePending.speed, 3)} ; fan override: restored`);
 						}
 						activeKind = null;
 						activeFeature = null;
@@ -201,7 +210,8 @@ export const fanByFeatureStep: StepDefinition<FanByFeatureConfig> = {
 						// Capture what to restore to BEFORE overriding, from the slicer's last real
 						// setting — never from a previous override's value
 						restorePending = { fan: lastRealFan, speed: lastRealSpeed };
-						emitted.push(`M106 P${lastRealFan} S${formatNumber(want.speed, 3)}`);
+						const label = want.kind === "firstLayer" ? "first layer" : featureLabel(want.feature as Exclude<Feature, "unknown">);
+						emitted.push(`M106 P${lastRealFan} S${formatNumber(want.speed, 3)} ; fan override: ${label}`);
 						activeKind = want.kind;
 						activeFeature = want.feature;
 					}

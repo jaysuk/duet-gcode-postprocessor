@@ -71,7 +71,7 @@ describe("the fanByFeature step", () => {
 		const out = runStep("fanByFeature", { overrides: "bridge=255" }, BRIDGE_FIXTURE);
 		const lines = out.split("\n");
 		const typeIndex = lines.indexOf(";TYPE:Bridge infill");
-		expect(lines[typeIndex + 1]).toBe("M106 P0 S255");
+		expect(lines[typeIndex + 1]).toBe("M106 P0 S255 ; fan override: Bridge");
 	});
 
 	it("suppresses the slicer's own M106 while inside an overridden region", () => {
@@ -90,14 +90,14 @@ describe("the fanByFeature step", () => {
 	it("restores the speed that was in force before the override, exactly once", () => {
 		const out = runStep("fanByFeature", { overrides: "bridge=255" }, BRIDGE_FIXTURE);
 		const lines = out.split("\n");
-		// "M106 P0 S128" appears twice in total: the original, untouched slicer line (it sits
-		// before the bridge region even starts, so it is never suppressed) plus one injected
-		// restore — the restore itself must fire exactly once, immediately after the second
+		// The original, untouched slicer line sits before the bridge region even starts, so it is
+		// never suppressed — it appears exactly once, unmodified. The restore itself is a separate,
+		// annotated line and must fire exactly once, immediately after the second
 		// ";TYPE:External perimeter" line that ends the bridge region
-		expect(lines.filter((l) => l === "M106 P0 S128")).toHaveLength(2);
+		expect(lines.filter((l) => l === "M106 P0 S128")).toHaveLength(1);
 		const secondType = lines.lastIndexOf(";TYPE:External perimeter");
-		expect(lines[secondType + 1]).toBe("M106 P0 S128");
-		expect(lines[secondType + 2]).not.toBe("M106 P0 S128");
+		expect(lines[secondType + 1]).toBe("M106 P0 S128 ; fan override: restored");
+		expect(lines[secondType + 2]).not.toBe("M106 P0 S128 ; fan override: restored");
 	});
 
 	it("restores to 0 when the file never set its own fan speed before the override", () => {
@@ -123,16 +123,16 @@ describe("the fanByFeature step", () => {
 		const lines = out.split("\n");
 		// Second LAYER_CHANGE: restore (leaving) immediately followed by re-entering the same feature
 		const secondLayerChange = lines.lastIndexOf(";LAYER_CHANGE");
-		expect(lines[secondLayerChange + 1]).toBe("M106 P0 S0");
-		expect(lines[secondLayerChange + 2]).toBe("M106 P0 S255");
+		expect(lines[secondLayerChange + 1]).toBe("M106 P0 S0 ; fan override: restored");
+		expect(lines[secondLayerChange + 2]).toBe("M106 P0 S255 ; fan override: Bridge");
 	});
 
 	it("honours the first-layer override independently of any feature settings", () => {
 		const input = [";LAYER_CHANGE", "G1 X1", ";LAYER_CHANGE", "G1 X2"].join("\n");
 		const out = runStep("fanByFeature", { overrides: "", firstLayerEnabled: true, firstLayerSpeed: 50 }, input);
 		const lines = out.split("\n");
-		expect(lines[1]).toBe("M106 P0 S50"); // right after the first LAYER_CHANGE
-		expect(lines).toContain("M106 P0 S0"); // restored once layer 1 begins
+		expect(lines[1]).toBe("M106 P0 S50 ; fan override: first layer"); // right after the first LAYER_CHANGE
+		expect(lines).toContain("M106 P0 S0 ; fan override: restored"); // restored once layer 1 begins
 	});
 
 	it("gives the first-layer override priority over a feature override on layer 0", () => {
