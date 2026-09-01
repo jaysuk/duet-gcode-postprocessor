@@ -216,4 +216,14 @@ export function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
+/** Compact "2h 15m" form, for a table or inline label. `summary.ts`'s `summariseFile` wants a
+ *  wordier "2 hours 15 minutes" for a sentence and keeps its own formatter for that reason — this
+ *  one is for the tabular/label contexts (`FileInspector`, `compareFiles`) that all want the same
+ *  short form and previously each carried their own copy of it. */
+export function formatDuration(seconds: number): string {
+	const h = Math.floor(seconds / 3600);
+	const m = Math.round((seconds % 3600) / 60);
+	return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 // #endregion

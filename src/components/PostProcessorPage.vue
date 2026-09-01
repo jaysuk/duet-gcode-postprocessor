@@ -19,6 +19,7 @@
 	max-width: 22rem;
 	display: flex;
 	min-height: 0;
+	overflow: hidden;
 }
 
 .work-pane {
@@ -53,10 +54,27 @@
 			<v-icon class="ms-4 me-2">mdi-file-replace-outline</v-icon>
 			<v-toolbar-title class="text-body-large">G-code Post-Processor</v-toolbar-title>
 			<v-spacer />
+
+			<v-btn v-if="busy" variant="text" class="me-2" @click="cancel">Cancel</v-btn>
+			<v-btn prepend-icon="mdi-eye-outline" variant="tonal" class="me-2" :disabled="!canRun || busy"
+				   @click="run(true)">
+				Preview
+			</v-btn>
+			<v-btn prepend-icon="mdi-content-save-outline" color="primary" class="me-2"
+				   :disabled="!canApply || busy" @click="startApply">
+				Apply
+			</v-btn>
+
+			<v-divider vertical class="mx-2" />
+
 			<v-btn variant="text" icon title="About" @click="aboutOpen = true">
 				<v-icon>mdi-information-outline</v-icon>
 			</v-btn>
 		</v-toolbar>
+
+		<div v-if="!canRun" class="text-caption text-medium-emphasis px-4 pt-2">
+			{{ blockedReason }}
+		</div>
 
 		<div class="panes">
 			<v-card class="browser-pane" variant="outlined">
@@ -72,6 +90,7 @@
 						<v-badge v-if="lastRun !== null" inline :content="lastRun.diff.length" color="primary" />
 					</v-tab>
 					<v-tab value="backups">Backups</v-tab>
+					<v-tab value="compare">Compare</v-tab>
 				</v-tabs>
 				<v-divider />
 
@@ -97,6 +116,8 @@
 								 :source-name="selectedPath ?? ''" />
 
 					<BackupManager v-if="tab === 'backups'" />
+
+					<CompareFiles v-if="tab === 'compare'" :initial-path="selectedPath" />
 				</div>
 			</v-card>
 		</div>
@@ -145,22 +166,6 @@
 				<v-text-field v-if="outputMode === 'folder'" v-model="folder" density="compact" hide-details
 							  variant="outlined" label="Destination folder" style="max-width: 20rem"
 							  :disabled="busy" />
-
-				<v-spacer />
-
-				<v-btn v-if="busy" variant="text" @click="cancel">Cancel</v-btn>
-				<v-btn prepend-icon="mdi-eye-outline" variant="tonal" :disabled="!canRun || busy"
-					   @click="run(true)">
-					Preview
-				</v-btn>
-				<v-btn prepend-icon="mdi-content-save-outline" color="primary" :disabled="!canApply || busy"
-					   @click="startApply">
-					Apply
-				</v-btn>
-			</div>
-
-			<div v-if="!canRun" class="text-caption text-medium-emphasis mt-2">
-				{{ blockedReason }}
 			</div>
 		</div>
 
@@ -225,6 +230,7 @@ import { useMachineStore } from "@/stores/machine";
 import { LogLevel, useUiStore } from "@/stores/ui";
 
 import BackupManager from "./BackupManager.vue";
+import CompareFiles from "./CompareFiles.vue";
 import DiffPreview from "./DiffPreview.vue";
 import FileInspector from "./FileInspector.vue";
 import GcodeBrowser from "./GcodeBrowser.vue";

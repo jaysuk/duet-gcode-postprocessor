@@ -38,7 +38,9 @@
 				<span v-if="analysis !== null && analysis.estimatedSeconds !== null">
 					({{ formatDuration(analysis.estimatedSeconds) }} was this plugin's own estimate).
 				</span>
-				To use this figure, add or re-run "Rewrite print time" with a preset built from it.
+				This is the most accurate figure available — the exact firmware that will run the print,
+				not a model of it — but "Rewrite M73 print time" cannot be pointed at it yet: that step
+				always recomputes M73 from this machine's own motion limits, not from a simulated total.
 			</v-alert>
 			<v-alert v-if="simulationError !== null" type="error" variant="tonal" density="compact" class="mb-3">
 				{{ simulationError }}
@@ -237,7 +239,7 @@ import type { FileAnalysis } from "../model/analysis";
 import { runChecks, type CheckResult } from "../model/checks";
 import { featureLabel } from "../model/gcode/features";
 import type { SlicerMetadata } from "../model/gcode/metadata";
-import { BUSY_STATES, formatBytes } from "../model/io/plan";
+import { BUSY_STATES, formatBytes, formatDuration } from "../model/io/plan";
 import { simulateFile } from "../model/io/simulate";
 import { CancelledError, inspectFile, type ProgressUpdate } from "../model/io/transfer";
 import type { Stamp } from "../model/recipe";
@@ -409,12 +411,6 @@ const clampingLabel = computed(() => {
 	return `This machine's limits add about ${formatDuration(extra)} to this file, `
 		+ `across ${moveCount} move${a.clampedMoveCount === 1 ? "" : "s"} that ask for more than it can do.`;
 });
-
-function formatDuration(seconds: number): string {
-	const h = Math.floor(seconds / 3600);
-	const m = Math.round((seconds % 3600) / 60);
-	return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
 
 function cancel(): void {
 	signal.aborted = true;
