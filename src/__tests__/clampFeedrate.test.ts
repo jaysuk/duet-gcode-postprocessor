@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { clampFeedrateStep, type ClampFeedrateConfig } from "../model/steps/clampFeedrate";
 import type { MachineLimits } from "../model/gcode/timeModel";
+import { getStepDefinition } from "../model/steps/registry";
 import { withDefaults } from "../model/steps/types";
 import { runSteps } from "./helpers";
 
@@ -13,8 +14,13 @@ const LIMITS: MachineLimits = {
 	travelAccel: 1500,
 };
 
+// Goes through the registry's own (erased-generic) definition for defaults, the way `helpers.ts`'s
+// `makeStep` does — the concretely-typed `clampFeedrateStep` export does not structurally satisfy
+// `withDefaults`'s `Record<string, unknown>` parameter, since an `interface` config type has no
+// index signature of its own.
 function run(overrides: Partial<ClampFeedrateConfig>, input: string, limits: MachineLimits | "none" = LIMITS) {
-	const config = { ...withDefaults(clampFeedrateStep, {}), ...overrides } as ClampFeedrateConfig;
+	const def = getStepDefinition("clampFeedrate")!;
+	const config = { ...withDefaults(def, {}), ...overrides } as ClampFeedrateConfig;
 	const transform = clampFeedrateStep.create(config, { scriptsTrusted: true, machineLimits: limits === "none" ? undefined : limits });
 	return runSteps([transform], input);
 }
