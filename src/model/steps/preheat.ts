@@ -345,6 +345,16 @@ export const preheatStep: StepDefinition<PreheatConfig> = {
 	id: "preheat",
 	label: "Predictive pre-heat",
 	description: "Inserts M568 A2 ahead of each tool change so the tool is at temperature when it's needed.",
+	tip: "Only does anything on a multi-tool file — a single-tool file has nothing to pre-heat for, "
+		+ "and says so. Needs both this machine connected (for its motion limits, to know how long "
+		+ "the print leading up to each tool change actually takes) and each tool's heater to have a "
+		+ "tuned M307 model (to know how fast it heats) — a tool missing either is reported and "
+		+ "skipped, not guessed at. When there is not enough print before a tool change to fit the "
+		+ "full heat-up time, the pre-heat is clamped as early as it safely can be (never before that "
+		+ "tool's own temperatures are first established) and reported as having less lead than "
+		+ "ideal — the run report after applying always says exactly how many changes were pre-heated "
+		+ "and which ones were not, so nothing here is silent.",
+	docsAnchor: "predictive-pre-heat",
 	icon: "mdi-thermometer-chevron-up",
 	fields: [
 		{

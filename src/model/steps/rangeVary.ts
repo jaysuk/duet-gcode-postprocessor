@@ -44,12 +44,22 @@ export const rangeVaryStep: StepDefinition<RangeVaryConfig> = {
 	id: "rangeVary",
 	label: "Vary a value up the print (calibration tower)",
 	description: "Emit a command with a value that steps from one number to another as the print gets taller.",
+	tip: "Turns a print you already sliced into a pressure-advance, temperature, retraction or speed "
+		+ "tower without going back to the slicer — the one transformation genuinely hard to do any "
+		+ "other way. Works on a plain single object: run it on a tall calibration cube or tower "
+		+ "model, not a multi-part plate, since it steps by layer height, not by feature. \"In a "
+		+ "fixed number of bands\" is the usual choice — easier to measure against the finished part "
+		+ "than \"every layer\", which produces a smoother but harder-to-read gradient and needs the "
+		+ "file to state its own layer count to reach the end value exactly.",
+	docsAnchor: "vary-a-value-up-the-print-calibration-tower",
 	icon: "mdi-stairs-up",
 	fields: [
 		{
 			key: "template", label: "Command", type: "gcode", required: true, default: "M572 D0 S{value}",
 			placeholder: "M572 D0 S{value}",
-			help: "Emitted at each band. {value} is the swept number; {band}, {layer} and {z} are also available.",
+			help: "Emitted at each band. {value} is the swept number, formatted to 'Decimal places' "
+				+ "below; {band} is the 1-based band number; {layer}, {z}, {tool}, {line}, {file} and "
+				+ "{feedrate} are also available, same as \"Insert G-code\".",
 		},
 		{
 			key: "from", label: "From", type: "number", default: 0, step: 0.01,
@@ -83,7 +93,7 @@ export const rangeVaryStep: StepDefinition<RangeVaryConfig> = {
 		},
 		{
 			key: "decimals", label: "Decimal places", type: "number", default: 3, min: 0, max: 6,
-			help: "Default: 3.",
+			help: "How precisely {value} is formatted in the emitted command. Default: 3.",
 		},
 		{
 			key: "announce", label: "Show the value on the display", type: "boolean", default: true,

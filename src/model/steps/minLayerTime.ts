@@ -69,6 +69,16 @@ export const minLayerTimeStep: StepDefinition<MinLayerTimeConfig> = {
 	id: "minLayerTime",
 	label: "Enforce a minimum layer time",
 	description: "Slows or pauses a layer that would otherwise print too fast to cool.",
+	tip: "A layer that prints in a few seconds has no time to cool before the next one goes down on "
+		+ "top of it, so measuring against the *clamped* duration — what this machine will actually "
+		+ "do, from \"Clamp feedrate\"'s own model, not the file's commanded speed — matters: on a "
+		+ "machine whose own speed limits already slow a fast layer down, judging against the file's "
+		+ "unclamped time would slow it a second time for no reason. Slowing is the default remedy "
+		+ "since dwelling leaves the nozzle hot and stationary directly over the print, which can "
+		+ "ooze or heat-soak a small feature; dwelling suits a layer too small to slow its way to the "
+		+ "target without the feedrate floor kicking in. A layer that cannot reach the target without "
+		+ "going below the feedrate floor is reported in the run summary, not silently forced past it.",
+	docsAnchor: "enforce-a-minimum-layer-time",
 	icon: "mdi-timer-sand",
 	fields: [
 		{
@@ -81,7 +91,10 @@ export const minLayerTimeStep: StepDefinition<MinLayerTimeConfig> = {
 				{ value: "slow", label: "Slow the layer" },
 				{ value: "dwell", label: "Dwell away from the part" },
 			],
-			help: "Slowing scales feedrate down; dwelling parks and waits. Default: slow.",
+			help: "Slowing scales every F on the layer down so it takes exactly the target time, never "
+				+ "below the feedrate floor. Dwelling parks at the given X/Y and waits out the "
+				+ "shortfall instead of touching any feedrate — better for a layer so small that even "
+				+ "the floor cannot stretch it far enough. Default: slow.",
 		},
 		{
 			key: "minFeedrateMmPerMin", label: "Never slow below (mm/min)", type: "number", default: 300, min: 1,

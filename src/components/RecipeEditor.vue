@@ -95,8 +95,10 @@
 					}">
 				<v-toolbar density="compact" color="transparent">
 					<v-icon class="ms-3 me-2">{{ definitionFor(step.type)?.icon ?? 'mdi-help' }}</v-icon>
-					<v-toolbar-title class="text-body-1">
+					<v-toolbar-title class="text-body-1 d-flex align-center ga-1">
 						{{ index + 1 }}. {{ definitionFor(step.type)?.label ?? step.type }}
+						<HelpTip v-if="definitionFor(step.type)?.tip" :text="definitionFor(step.type)!.tip!"
+								 :href="docsHref(definitionFor(step.type))" size="small" />
 						<span v-if="step.note" class="text-medium-emphasis text-caption">— {{ step.note }}</span>
 					</v-toolbar-title>
 					<v-spacer />
@@ -121,11 +123,17 @@
 					<v-text-field :model-value="step.note ?? ''" label="Note (optional)" density="compact"
 								  hide-details class="mb-3"
 								  @update:model-value="(v: string) => setStep(index, { note: v })" />
+					<div class="d-flex align-center ga-1 mb-1">
+						<span class="text-caption text-medium-emphasis">Only run if... (JSON array, optional)</span>
+						<HelpTip :text="conditionTipText"
+								 :href="`${DOCS_URL}#conditions--only-run-a-step-for-certain-files`"
+								 size="x-small" />
+					</div>
 					<v-text-field :model-value="conditionText(step)"
-								  label="Only run if... (JSON array, optional)" density="compact"
+								  density="compact"
 								  :error-messages="conditionError(step)" class="mb-3"
 								  placeholder='[{"key":"filament_type","op":"eq","value":"PETG"}]'
-								  hint='Matched against the file&#39;s own slicer metadata. See docs/usage.md.'
+								  hint="Every condition must match (an AND). Leave blank to always run."
 								  persistent-hint
 								  @update:model-value="(v: string) => setCondition(index, v)" />
 					<StepFields :definition="definitionFor(step.type)!" :config="step.config"
@@ -185,9 +193,11 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { HelpTip } from "dwc-plugin-runtime";
 import { downloadBlob } from "dwc-plugin-runtime/download";
 
 import StepFields from "./StepFields.vue";
+import { DOCS_URL } from "../model/constants";
 import { PRESETS, findPreset } from "../model/presets";
 import {
 	exportRecipe as serialise, importRecipe, newUid, usesScripts, validateRecipe,
@@ -195,6 +205,19 @@ import {
 } from "../model/recipe";
 import { defaultConfig, getStepDefinition, STEP_DEFINITIONS } from "../model/steps/registry";
 import type { StepCondition } from "../model/stepCondition";
+
+const conditionTipText = "Checked once against the file's own slicer metadata before the recipe "
+	+ "runs — a step whose condition fails is skipped entirely, not run against an empty result. "
+	+ "key: a metadata field (slicer, slicerVersion, totalLayers, layerHeight, filamentMm, "
+	+ "filamentDiameterMm, printTimeSeconds, or any other setting your slicer states, e.g. "
+	+ "filament_type). op: eq, neq, contains, gt, lt, gte, lte, exists, notExists. value: compared "
+	+ "case-insensitively for text; omit for exists/notExists. Every condition in the array must "
+	+ "hold (AND). This is also how to do per-filament parameters: add the same step once per "
+	+ "filament, each gated by its own condition.";
+
+function docsHref(definition: { docsAnchor?: string } | null | undefined): string | undefined {
+	return definition?.docsAnchor ? `${DOCS_URL}#${definition.docsAnchor}` : undefined;
+}
 
 const props = defineProps<{
 	recipe: Recipe | null;

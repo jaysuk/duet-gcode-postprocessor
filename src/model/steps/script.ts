@@ -103,15 +103,37 @@ export const scriptStep: StepDefinition<ScriptConfig> = {
 	id: "script",
 	label: "JavaScript",
 	description: "Run your own JavaScript over each line. Powerful, and runs with the privileges of this page — read it before you trust it.",
+	tip: "The escape hatch for what the \"Rules\" step cannot express — reach for Rules first, since "
+		+ "most \"scripts\" people want turn out to be a when/then list. Honest about its own limits: "
+		+ "network and storage globals (fetch, localStorage, Worker, and others) are shadowed to "
+		+ "undefined, so using them is a TypeError rather than a request, but this is a guardrail "
+		+ "against accidents, not a real sandbox — a determined script can still reach the true "
+		+ "global object. What actually protects you: this recipe's scripts must be explicitly "
+		+ "trusted (having read them) before any run, and a watchdog aborts the run if the script "
+		+ "starts averaging too long per line, so a genuine infinite loop stops the run rather than "
+		+ "hanging the browser tab. A thrown error inside your script aborts the whole run — wrap "
+		+ "risky code in try/catch if a line failing should not stop the file.",
+	docsAnchor: "javascript",
 	icon: "mdi-language-javascript",
 	fields: [
 		{
 			key: "source", label: "Script", type: "textarea", required: true, default: DEFAULT_SCRIPT,
-			help: "Called once per line. Return a replacement string, null to drop the line, or nothing to leave it unchanged.",
+			help: "Called once per line with (line, ctx, api). Return a replacement string, null to "
+				+ "drop the line, or nothing (or the same line) to leave it unchanged. ctx carries "
+				+ "layer, z, tool, feedrate, relativeE, object, meta, lineNo. The api gives you "
+				+ "emit(text)/emitBefore(text) to insert lines after/before this one, drop() as an "
+				+ "alternative to returning null, state (a plain object that persists for the whole "
+				+ "run, for anything that needs to remember something across lines), log(message) to "
+				+ "add a line to the run report, and gcode (parse/num/has/set/scale/offset/remove/"
+				+ "isMove/isExtrusion/format) — the same tokeniser every other step in this plugin "
+				+ "uses, rather than hand-rolled string splitting.",
 		},
 		{
 			key: "maxMsPerLine", label: "Time budget (ms per line)", type: "number", default: 0.5, min: 0.01, max: 100, step: 0.1,
-			help: "The run aborts if the script averages more than this per line — the guard against an accidental infinite loop. Default: 0.5.",
+			help: "The run aborts if the script averages more than this per line, checked periodically "
+				+ "rather than after every single line (checking has its own cost). Raise it only if a "
+				+ "script doing genuinely heavy per-line work keeps tripping the watchdog on a large "
+				+ "file that is otherwise working correctly. Default: 0.5.",
 		},
 	],
 

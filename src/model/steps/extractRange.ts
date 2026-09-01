@@ -21,6 +21,14 @@ export const extractRangeStep: StepDefinition<ExtractRangeConfig> = {
 	id: "extractRange",
 	label: "Extract a layer range",
 	description: "Keeps only a range of layers — a partial file for debugging or splitting, not a runnable print on its own.",
+	tip: "Deliberately does not reconstruct machine state — no re-homing, no re-heating, no tool "
+		+ "selection stitched back in — so the result is only ever a partial file for inspection, "
+		+ "or a half of a split. Feeding it straight to the printer will start mid-air, cold, on "
+		+ "whichever tool was last selected before the cut. For a file you actually want to resume "
+		+ "printing from a failure, use \"Restart from layer\" instead, which rebuilds the state "
+		+ "that matters. To split one file into two runnable-later pieces at layer N, run this step "
+		+ "twice with ranges [-1, N] and [N+1, -1].",
+	docsAnchor: "extract-a-layer-range",
 	icon: "mdi-content-cut",
 	fields: [
 		{

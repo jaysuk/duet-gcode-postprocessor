@@ -37,6 +37,14 @@ export const insertAtStep: StepDefinition<InsertAtConfig> = {
 	id: "insertAt",
 	label: "Insert G-code",
 	description: "Add lines at the start or end of the file, at a layer, at a Z height, at a tool change, or wherever a pattern matches.",
+	tip: "Covers most day-to-day post-processing on its own: pause at a layer, fire a timelapse "
+		+ "macro every layer, show a message at 50%, run a purge before every tool change — all of "
+		+ "those are \"put these lines here\", picked apart only by which anchor they attach to. "
+		+ "Add several insert steps to a recipe to combine anchors (a park move at a layer plus a "
+		+ "message at a percentage, say). Placeholders in the inserted text are resolved per "
+		+ "occurrence, using this line's own machine state at the point of insertion — {layer} is "
+		+ "always the anchor's layer even if you inserted \"after\" and the next line changes it.",
+	docsAnchor: "insert-g-code",
 	icon: "mdi-playlist-plus",
 	fields: [
 		{
@@ -53,12 +61,19 @@ export const insertAtStep: StepDefinition<InsertAtConfig> = {
 				{ value: "percent", label: "At a percentage through the file" },
 				{ value: "match", label: "Wherever a pattern matches" },
 			],
-			help: "The anchor the inserted lines attach to.",
+			help: "The anchor the inserted lines attach to — the fields below change to match. "
+				+ "\"At the start/end of each object\" needs the file to already carry M486 labels "
+				+ "(the \"Convert Klipper object markers\" step adds them if it does not).",
 		},
 		{
 			key: "text", label: "G-code to insert", type: "gcode", required: true, default: "",
 			placeholder: "M291 P\"Layer {layer} reached\" S0",
-			help: "One command per line. Placeholders: {layer} {z} {tool} {line} {file} {feedrate} {object}.",
+			help: "One command per line. Placeholders, expanded per occurrence from this line's own "
+				+ "machine state: {layer} the layer index, {z} the current Z height, {tool} the "
+				+ "current tool number, {line} the 1-based source line number, {file} the file's own "
+				+ "SD-card path, {feedrate} the sticky F value last set, {object} the current M486 "
+				+ "label. A placeholder with nothing to resolve to (e.g. {z} before any Z move) "
+				+ "expands to an empty string, not the literal text.",
 		},
 		{
 			key: "position", label: "Position", type: "select", default: "after",
@@ -70,7 +85,11 @@ export const insertAtStep: StepDefinition<InsertAtConfig> = {
 				key: "anchor",
 				equals: ["layer", "everyLayer", "firstLayerChange", "z", "toolChange", "match", "objectStart", "percent"],
 			},
-			help: "Default: after.",
+			help: "\"The anchor line\" is the actual source line that satisfied the anchor — the "
+				+ "specific move that reached the Z height, the T command that changed tool, the line "
+				+ "the pattern matched. \"After\" is the natural choice for reacting to something "
+				+ "that just happened (a purge after a tool change); \"before\" for something that "
+				+ "must happen first (a park move before the layer that needs to pause). Default: after.",
 		},
 		{
 			key: "layer", label: "Layer index", type: "number", default: 1, min: 0,
@@ -110,22 +129,25 @@ export const insertAtStep: StepDefinition<InsertAtConfig> = {
 		{
 			key: "regex", label: "Regular expression", type: "boolean", default: false,
 			showWhen: { key: "anchor", equals: ["match"] },
-			help: "Default: off.",
+			help: "Treat 'Pattern' as a JavaScript regular expression rather than literal text. Default: off.",
 		},
 		{
 			key: "caseSensitive", label: "Case sensitive", type: "boolean", default: true,
 			showWhen: { key: "anchor", equals: ["match"] },
-			help: "Default: on.",
+			help: "Match upper and lower case exactly. Default: on — G-code is conventionally upper case.",
 		},
 		{
 			key: "percent", label: "Percent through file", type: "number", default: 50, min: 0, max: 100,
 			showWhen: { key: "anchor", equals: ["percent"] },
-			help: "By file size, not by print time — the two differ on prints with dense top layers.",
+			help: "By file size, not by print time — the two differ on prints with dense top layers. "
+				+ "If the file's size cannot be determined, this anchor never fires and the run "
+				+ "reports it rather than silently doing nothing.",
 		},
 		{
 			key: "once", label: "Only the first time", type: "boolean", default: false,
 			showWhen: { key: "anchor", equals: ["match", "toolChange", "objectStart"] },
-			help: "Insert once and then stop. Default: off.",
+			help: "Insert once, at the first match, then stop — instead of at every tool change, "
+				+ "every object, or every line 'Pattern' matches. Default: off.",
 		},
 	],
 

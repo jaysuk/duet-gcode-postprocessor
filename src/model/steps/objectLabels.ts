@@ -65,6 +65,14 @@ export const objectLabelsStep: StepDefinition<Record<string, never>> = {
 	id: "objectLabels",
 	label: "Convert Klipper object markers to M486",
 	description: "Rewrites EXCLUDE_OBJECT_DEFINE/START/END into RepRapFirmware's M486, for DWC's cancel-object.",
+	tip: "Nothing to configure. Only worth adding for a file sliced with Klipper's own object markers "
+		+ "(EXCLUDE_OBJECT_DEFINE/START/END) instead of M486 — check the Inspect tab's flavour "
+		+ "detection first. Each distinct object name gets a stable index, reused if the same name "
+		+ "reappears later in the file, and EXCLUDE_OBJECT_END always becomes M486 S-1. A file that "
+		+ "already carries real M486 (already sliced for RepRapFirmware, or run through this step "
+		+ "once already) is left completely untouched rather than double-labelled — converting "
+		+ "anyway would risk a Klipper-derived index colliding with one the slicer assigned itself.",
+	docsAnchor: "convert-klipper-object-markers-to-m486",
 	icon: "mdi-shape-outline",
 	fields: [],
 

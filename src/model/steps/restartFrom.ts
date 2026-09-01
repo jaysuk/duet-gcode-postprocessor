@@ -257,6 +257,16 @@ export const restartFromStep: StepDefinition<RestartFromConfig> = {
 	id: "restartFrom",
 	label: "Restart from layer",
 	description: "Rebuilds a runnable file starting at a chosen layer, reconstructing machine state at the cut.",
+	tip: "For recovering from a failed print without starting over: pick the layer it failed at, "
+		+ "and this reconstructs everything the resumed print needs — active tool, bed and tool "
+		+ "temperatures, fan, extrusion/move mode, absolute E, last X/Y/Z — by reading the whole "
+		+ "original file up to that point, exactly like a second reader would. What it deliberately "
+		+ "does NOT do: re-home Z (unless you opt in below — a probe would probe the part already on "
+		+ "the bed, not the bed itself) or add any first-layer-adhesion trickery for a bed that has "
+		+ "sat with a part on it. That is a physical decision for a human, not something this step "
+		+ "should guess at. The reposition sequence is always lift, then travel, then descend — never "
+		+ "a direct diagonal move at the old Z, which would drag the nozzle across the existing part.",
+	docsAnchor: "restart-from-layer",
 	icon: "mdi-restart",
 	fields: [
 		{
@@ -273,15 +283,15 @@ export const restartFromStep: StepDefinition<RestartFromConfig> = {
 		},
 		{
 			key: "liftFeedrateMmPerMin", label: "Lift feedrate (mm/min)", type: "number", default: 600, min: 1,
-			help: "Default: 600.",
+			help: "How fast to raise Z clear of the part before moving over it in XY. Default: 600.",
 		},
 		{
 			key: "travelFeedrateMmPerMin", label: "Travel feedrate (mm/min)", type: "number", default: 3000, min: 1,
-			help: "Default: 3000.",
+			help: "How fast to move in XY once lifted clear, before descending back to the resumed layer. Default: 3000.",
 		},
 		{
 			key: "descendFeedrateMmPerMin", label: "Descend feedrate (mm/min)", type: "number", default: 300, min: 1,
-			help: "Slower than the lift/travel — this move ends at the part. Default: 300.",
+			help: "Slower than the lift/travel — this move ends at the part, so a gentle approach matters. Default: 300.",
 		},
 	],
 

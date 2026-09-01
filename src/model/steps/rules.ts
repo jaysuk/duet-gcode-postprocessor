@@ -255,11 +255,27 @@ export const rulesStep: StepDefinition<RulesConfig> = {
 	id: "rules",
 	label: "Rules (no scripting)",
 	description: "A when/then rule list in JSON — conditional rewrites without running any code.",
+	tip: "Covers most of what a post-processing script actually does, expressed as data instead of "
+		+ "code — diffable, shareable, immune to any Content-Security-Policy, and every one of them "
+		+ "is a unit test. Rules are evaluated in order against each line; every rule whose "
+		+ "conditions all hold applies (not just the first match) unless it sets \"stop\": true. A "
+		+ "line dropped by an earlier rule's \"drop\" action can still receive insertions from a "
+		+ "later rule, but not a rewrite, since there is no line left to rewrite. Reach for the "
+		+ "JavaScript step instead only when a rule genuinely cannot express what you need — most "
+		+ "\"scripts\" people reach for turn out to be exactly this shape.",
+	docsAnchor: "rules--scripting-without-code",
 	icon: "mdi-format-list-checks",
 	fields: [
 		{
 			key: "rules", label: "Rules (JSON)", type: "textarea", required: true, default: EXAMPLE_RULES,
-			help: "An array of { when: [conditions], then: [actions] }. See docs/usage.md for the full condition and action list.",
+			help: "An array of { when: [conditions], then: [actions], stop?: boolean }. All conditions "
+				+ "in a rule must hold. Conditions: matches (pattern, regex, caseSensitive, negate), "
+				+ "command (codes), layer (from, to), tool, z (from, to), param (letter, "
+				+ "op: present/absent/gt/lt/eq, value), comment, object (name), feature (name, from "
+				+ "the slicer's ;TYPE: comment). Actions: replace (pattern, replacement), replaceLine "
+				+ "(text), setParam/scaleParam/offsetParam (letter, value/factor/delta, decimals), "
+				+ "removeParam (letter), insertBefore/insertAfter (text), appendComment (text), "
+				+ "commentOut, drop. See docs/usage.md for a worked example of each.",
 		},
 	],
 

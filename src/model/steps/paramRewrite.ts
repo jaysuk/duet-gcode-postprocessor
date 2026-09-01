@@ -41,6 +41,13 @@ export const paramRewriteStep: StepDefinition<ParamRewriteConfig> = {
 	id: "paramRewrite",
 	label: "Rewrite a parameter",
 	description: "Scale, offset, set or clamp a numeric parameter on chosen commands.",
+	tip: "Also how to do per-filament settings without a dedicated step: add this step once per "
+		+ "filament, each gated by its own \"Only run if...\" condition on filament_type. Arithmetic "
+		+ "runs on the parsed number and is written back into the same span, so everything else about "
+		+ "the line — spacing, other parameters, a trailing comment — survives untouched and the diff "
+		+ "stays readable. A line whose value is an expression rather than a plain number (some "
+		+ "scripted slicer output does this) is left alone rather than guessed at.",
+	docsAnchor: "rewrite-a-parameter",
 	icon: "mdi-calculator-variant-outline",
 	fields: [
 		{
@@ -61,7 +68,8 @@ export const paramRewriteStep: StepDefinition<ParamRewriteConfig> = {
 				{ value: "set", label: "Set to" },
 				{ value: "clamp", label: "Clamp between min and max" },
 			],
-			help: "Default: multiply.",
+			help: "Multiply and add work on the existing value; set replaces it outright; clamp only "
+				+ "pulls a value back inside a range, leaving one already inside it untouched. Default: multiply.",
 		},
 		{
 			key: "value", label: "Value", type: "number", default: 1, step: 0.01,
@@ -71,12 +79,12 @@ export const paramRewriteStep: StepDefinition<ParamRewriteConfig> = {
 		{
 			key: "min", label: "Minimum", type: "number", default: 0,
 			showWhen: { key: "op", equals: ["clamp"] },
-			help: "Lower bound for the clamp.",
+			help: "A value below this is raised to it; a value already at or above it is left alone.",
 		},
 		{
 			key: "max", label: "Maximum", type: "number", default: 0,
 			showWhen: { key: "op", equals: ["clamp"] },
-			help: "Upper bound for the clamp.",
+			help: "A value above this is lowered to it; a value already at or below it is left alone.",
 		},
 		{
 			key: "decimals", label: "Decimal places", type: "number", default: 3, min: 0, max: 6,

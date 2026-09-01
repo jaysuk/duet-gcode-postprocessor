@@ -84,6 +84,17 @@ export interface StepDefinition<C = Record<string, unknown>> {
 	label: string;
 	/** One line, shown under the label in the "add step" menu. */
 	description: string;
+	/**
+	 * A few sentences shown in a `HelpTip` (dwc-plugin-runtime) next to the step's title on its card —
+	 * what it does, when to reach for it, and the one thing about it that is not obvious from the
+	 * field labels alone. `description` has to fit an "add step" menu row; this does not, and should
+	 * say the thing `description` had no room for.
+	 */
+	tip?: string;
+	/** Anchor (no `#`) of this step's own section in `docs/usage.md`, GitHub's own heading-slug form —
+	 *  turns the card's `HelpTip` into a link straight to the full write-up. Verified against GitHub's
+	 *  actual slugger, not guessed: run `npx github-slugger` over the heading text before trusting one. */
+	docsAnchor?: string;
 	icon: string;
 	fields: Array<StepField>;
 	/** Build the transform. Throws a {@link StepConfigError} when the config is unusable. */

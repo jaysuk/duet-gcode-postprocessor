@@ -57,6 +57,16 @@ export const rewriteTimeStep: StepDefinition<Record<string, never>> = {
 	id: "rewriteTime",
 	label: "Rewrite M73 print time",
 	description: "Recomputes existing M73 progress/remaining-time markers from this machine's own motion limits.",
+	tip: "Nothing to configure — this step reads this machine's own connected motion limits "
+		+ "(M201/M203/M204/M566) and recomputes every M73 P<percent> R<minutes> already in the file "
+		+ "against them, so DWC's own progress and remaining-time display matches what this specific "
+		+ "machine will actually do rather than what the slicer assumed. It never inserts a marker "
+		+ "where none existed — a file with no M73 markers at all is passed through unchanged, with a "
+		+ "warning rather than a silent no-op. Needs the machine connected when the recipe runs; "
+		+ "without its limits, this step does nothing and says so. Note: this always recomputes from "
+		+ "this machine's own model, not from a firmware M37 simulation you may have run separately — "
+		+ "there is currently no way to feed a simulated total into it.",
+	docsAnchor: "rewrite-print-time-m73",
 	icon: "mdi-progress-clock",
 	fields: [],
 

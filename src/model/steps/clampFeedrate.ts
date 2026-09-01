@@ -51,6 +51,18 @@ export const clampFeedrateStep: StepDefinition<ClampFeedrateConfig> = {
 	id: "clampFeedrate",
 	label: "Clamp feedrate to machine limits",
 	description: "Rewrites a commanded feedrate down to this machine's own speed limit for the axes involved.",
+	tip: "For a file sliced with a different (typically faster) machine's speed profile than the "
+		+ "one that will actually print it — RepRapFirmware would clamp these moves on its own at "
+		+ "print time anyway, so this does not change what gets printed, only what the file *says*, "
+		+ "which is what makes this machine's own time estimate and DWC's remaining-time display "
+		+ "honest instead of optimistic. Checked per axis combination, not against one global limit: "
+		+ "an X-only move is checked against X's own limit, a diagonal XY move against the combined "
+		+ "XY limit, Z-only and E-only moves against their own axes — matching exactly how the "
+		+ "inspector's own time estimate already treats them, so this step and that estimate can "
+		+ "never quietly disagree. A move already within limits is left byte-identical, and the run "
+		+ "report says how many moves were touched and how much time that added. Needs this machine "
+		+ "connected to know its limits; without them, nothing is clamped and the report says so.",
+	docsAnchor: "clamp-feedrate-to-machine-limits",
 	icon: "mdi-speedometer-slow",
 	fields: [
 		{

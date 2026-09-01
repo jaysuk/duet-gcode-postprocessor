@@ -101,6 +101,13 @@ export const commandMapStep: StepDefinition<CommandMapConfig> = {
 	id: "commandMap",
 	label: "Map a command",
 	description: "Rewrite one G/M command as another, renaming, adding or dropping its parameters.",
+	tip: "For when find/replace would produce something the firmware rejects — e.g. Marlin's "
+		+ "\"M900 K0.05\" has to become RepRapFirmware's \"M572 D0 S0.05\", not \"M572 K0.05\", "
+		+ "because the factor belongs in S and the drive has to be named in D. This understands the "
+		+ "command's own parameter structure, so renames/adds/drops apply correctly regardless of "
+		+ "what order the original parameters were written in, and a rewritten line's parameters "
+		+ "come out in a sensible order rather than patched in place.",
+	docsAnchor: "map-a-command",
 	icon: "mdi-swap-horizontal",
 	fields: [
 		{

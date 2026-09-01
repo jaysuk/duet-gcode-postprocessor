@@ -27,6 +27,12 @@ export const findReplaceStep: StepDefinition<FindReplaceConfig> = {
 	id: "findReplace",
 	label: "Find and replace",
 	description: "Replace text on matching lines, literally or by regular expression.",
+	tip: "Runs per line, so a pattern cannot span two lines — PrusaSlicer's own G-code Substitutions "
+		+ "apply to a whole layer block and can, which is the one behaviour difference if you are "
+		+ "porting a rule across. Everything single-line (a command, a parameter, a comment) behaves "
+		+ "identically. In regex mode, $1/$2 in \"Replace with\" insert capture groups from \"Find\"; "
+		+ "leaving \"Replace with\" empty deletes whatever matched.",
+	docsAnchor: "find-and-replace",
 	icon: "mdi-find-replace",
 	fields: [
 		{

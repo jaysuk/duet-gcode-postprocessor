@@ -1,8 +1,9 @@
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
+import { dwc, mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
 
 import BackupManager from "../src/components/BackupManager.vue";
+import CompareFiles from "../src/components/CompareFiles.vue";
 import DiffPreview from "../src/components/DiffPreview.vue";
 import FileInspector from "../src/components/FileInspector.vue";
 import GcodeBrowser from "../src/components/GcodeBrowser.vue";
@@ -50,6 +51,23 @@ describe("components mount", () => {
 		expect(mountInDwc(GcodeBrowser).exists()).toBe(true);
 	});
 
+	it("mounts the compare view with nothing chosen yet", () => {
+		const wrapper = mountInDwc(CompareFiles);
+		expect(wrapper.text()).toContain("No file chosen");
+		expect(wrapper.text()).toContain("Pick and analyse both files to see the comparison");
+	});
+
+	it("primes slot A from the page's own selection, and shows an error if analysis fails", async () => {
+		setConnected(true);
+		const wrapper = mountInDwc(CompareFiles, { props: { initialPath: "0:/gcodes/one.gcode" } });
+		expect(wrapper.text()).toContain("0:/gcodes/one.gcode");
+		const analyseButtons = wrapper.findAll("button").filter((b) => b.text().includes("Analyse"));
+		expect(analyseButtons.length).toBeGreaterThan(0);
+		await analyseButtons[0]!.trigger("click");
+		await flushPromises();
+		expect(wrapper.text()).toContain("No such file");
+	});
+
 	it("mounts the backup manager and shows the empty state when there is no index yet", async () => {
 		setConnected(true);
 		const wrapper = mountInDwc(BackupManager);
@@ -93,6 +111,21 @@ describe("components mount", () => {
 		expect(wrapper.text()).toContain("Find and replace");
 	});
 
+	// Every step's HelpTip (the runtime's shared hover-tip component) has to actually render for
+	// every step type, not just the one exercised above — a self-maintaining loop, like the
+	// StepFields "renders every step's form" test, so a step added later is covered automatically.
+	it.each(STEP_DEFINITIONS.map((d) => [d.id, d] as const))("renders %s's HelpTip with its own text", (id, definition) => {
+		const recipe = {
+			...createRecipe("Test"),
+			steps: [{ uid: newUid(), type: id, enabled: true, config: defaultConfig(id) }],
+		};
+		const wrapper = mountInDwc(RecipeEditor, {
+			props: { recipe, recipes: [recipe], scriptsTrusted: false },
+		});
+		const labels = wrapper.findAll("[aria-label]").map((el) => el.attributes("aria-label"));
+		expect(labels).toContain(definition.tip);
+	});
+
 	it("warns before running a recipe that contains a script", () => {
 		const recipe = {
 			...createRecipe("Scripted"),
@@ -114,10 +147,34 @@ describe("PostProcessorPage safety warnings", () => {
 		resetDwc();
 		sizeOfMock.mockReset();
 		sizeOfMock.mockResolvedValue(null);
+
+		// The test kit's settings stub doesn't implement registerPluginData/setPluginData, so
+		// recipeStore falls back to real `localStorage` — a non-functional stub in this
+		// Node/happy-dom combination (confirmed: `localStorage.setItem` is `undefined`), which
+		// silently no-ops every save. Fill in the per-board path with the same reactive
+		// `dwc.settings.plugins` bag a real DWC would expose, so recipes created in a test are
+		// actually visible to the page's own `useRecipes()` call.
+		const settings = dwc.settings as Record<string, unknown> & { plugins: Record<string, unknown> };
+		settings.plugins = {};
+		(settings as Record<string, unknown>).registerPluginData = (plugin: string, key: string, value: unknown) => {
+			const bag = (settings.plugins[plugin] ?? {}) as Record<string, unknown>;
+			if (!(key in bag)) settings.plugins[plugin] = { ...bag, [key]: value };
+		};
+		(settings as Record<string, unknown>).setPluginData = (plugin: string, key: string, value: unknown) => {
+			settings.plugins[plugin] = { ...(settings.plugins[plugin] as Record<string, unknown> ?? {}), [key]: value };
+		};
 	});
 
 	async function selectFile(wrapper: ReturnType<typeof mountInDwc>, path: string): Promise<void> {
 		await wrapper.findComponent(GcodeBrowser).vm.$emit("update:modelValue", path);
+		await flushPromises();
+	}
+
+	// The safety-warning computeds only run once a recipe is active — recipes now start empty
+	// (no recipe is pre-seeded on first load), so these tests create one themselves rather than
+	// relying on a default that used to be seeded for them.
+	async function addRecipe(wrapper: ReturnType<typeof mountInDwc>): Promise<void> {
+		await wrapper.findComponent(RecipeEditor).vm.$emit("add");
 		await flushPromises();
 	}
 
@@ -128,6 +185,7 @@ describe("PostProcessorPage safety warnings", () => {
 		setConnected(true);
 
 		const wrapper = mountInDwc(PostProcessorPage);
+		await addRecipe(wrapper);
 		await selectFile(wrapper, "0:/gcodes/big.gcode");
 
 		expect(sizeOfMock).toHaveBeenCalledWith("0:/gcodes/big.gcode");
@@ -139,6 +197,7 @@ describe("PostProcessorPage safety warnings", () => {
 		setConnected(true);
 
 		const wrapper = mountInDwc(PostProcessorPage);
+		await addRecipe(wrapper);
 		await selectFile(wrapper, "0:/gcodes/small.gcode");
 
 		expect(wrapper.text()).not.toMatch(/leave the tab open/i);
@@ -151,6 +210,7 @@ describe("PostProcessorPage safety warnings", () => {
 		setConnected(true);
 
 		const wrapper = mountInDwc(PostProcessorPage);
+		await addRecipe(wrapper);
 		await selectFile(wrapper, "0:/gcodes/big.gcode");
 		expect(wrapper.text()).toMatch(/leave the tab open/i);
 
@@ -186,6 +246,39 @@ describe("the step form", () => {
 		const emitted = wrapper.emitted("update:config");
 		expect(emitted).toBeTruthy();
 		expect((emitted![0][0] as Record<string, unknown>).find).toBe("M104");
+	});
+
+	// Regression test for a real defect: the number field was bound straight to `config[field.key]`,
+	// which round-trips every keystroke through `Number(...)` and back. `Number("0.")` is `0`, which
+	// redisplays as `"0"` — so a real user typing "0.05" into the arc-welder's "Resolution" field one
+	// key at a time (default 0.05) never got past "0": each new character landed after whatever the
+	// field had just been silently reverted to, not after what they actually typed, and the field
+	// ended up holding "5" instead of "0.05" by the time they were done. This mirrors what actually
+	// happens in the app: StepFields is a controlled component, and its parent (RecipeEditor) always
+	// echoes the emitted config straight back down as the next `config` prop — so the test does too,
+	// typing each new character onto whatever the DOM is currently showing rather than onto the
+	// string the test itself intended, which is what makes this fail on the old binding and pass on
+	// the fixed one.
+	it("keeps what was typed on screen while building up a decimal that starts with 0", async () => {
+		const definition = STEP_DEFINITIONS.find((d) => d.id === "arcWeld")!;
+		let config = defaultConfig("arcWeld");
+		const wrapper = mountInDwc(StepFields, { props: { definition, config } });
+		const numeric = wrapper.findAll("input").find((i) => i.attributes("type") === "number")!;
+		expect(numeric).toBeDefined();
+
+		async function pressKey(key: string): Promise<void> {
+			const current = (numeric!.element as HTMLInputElement).value;
+			await numeric!.setValue(current + key);
+			const emitted = wrapper.emitted("update:config")!;
+			config = emitted[emitted.length - 1][0] as Record<string, unknown>;
+			await wrapper.setProps({ config });
+		}
+
+		await numeric!.setValue("");
+		for (const key of ["0", ".", "0", "5"]) await pressKey(key);
+
+		expect((numeric.element as HTMLInputElement).value).toBe("0.05");
+		expect(config.resolutionMm).toBe(0.05);
 	});
 
 	it("keeps a cleared numeric field empty rather than coercing it to zero", async () => {

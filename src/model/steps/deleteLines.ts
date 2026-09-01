@@ -24,20 +24,28 @@ export const deleteLinesStep: StepDefinition<DeleteLinesConfig> = {
 	id: "deleteLines",
 	label: "Delete or disable lines",
 	description: "Remove matching lines, or comment them out so they stay visible.",
+	tip: "Comment-out (the default) is deliberately the safer of the two actions: the line stays "
+		+ "in the file, at the same position, so a backup or an earlier version of the file still "
+		+ "reads line-for-line the same, and re-enabling it later is deleting one semicolon rather "
+		+ "than reconstructing a deleted command from memory. Reach for 'Delete the line entirely' "
+		+ "only when the line genuinely should not exist any more — a stray thumbnail block, a "
+		+ "command a firmware update made obsolete.",
+	docsAnchor: "delete-or-disable-lines",
 	icon: "mdi-comment-remove-outline",
 	fields: [
 		{
 			key: "pattern", label: "Matching", type: "regex", required: true, default: "",
 			placeholder: "^M420",
-			help: "A line is affected when this matches anywhere in it.",
+			help: "A line is affected when this matches anywhere in it — not just at the start, "
+				+ "unless the pattern itself anchors with ^.",
 		},
 		{
 			key: "regex", label: "Regular expression", type: "boolean", default: false,
-			help: "Treat the pattern as a regular expression. Default: off.",
+			help: "Treat 'Matching' as a JavaScript regular expression rather than literal text. Default: off.",
 		},
 		{
 			key: "caseSensitive", label: "Case sensitive", type: "boolean", default: true,
-			help: "Default: on.",
+			help: "Match upper and lower case exactly. Default: on — G-code is conventionally upper case.",
 		},
 		{
 			key: "action", label: "Action", type: "select", default: "comment",
