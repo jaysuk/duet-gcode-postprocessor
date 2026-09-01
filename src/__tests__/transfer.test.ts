@@ -185,6 +185,117 @@ describe("processFile", () => {
 	});
 });
 
+// defect A (docs/tasks/07-audit-defects.md): the analysis pass must see what its own step will
+// actually receive — the output of the steps ordered before it — not the untouched source. These
+// reproduce the exact failure the audit found, as assertions.
+describe("the analysis pass sees preceding steps' output, not the raw source", () => {
+	const SLOWDOWN = {
+		uid: "slowdown", type: "paramRewrite", enabled: true,
+		config: { commands: "G0,G1", param: "F", op: "scale", value: 0.25, decimals: 3, skipMissing: true, layerFrom: -1, layerTo: -1 },
+	};
+
+	// Three markers, not one: SAMPLE's own single M73 is always forced to P100 R0 by rewriteTime
+	// regardless of the total (it's the last and only marker), which would hide this defect entirely
+	const MULTI_MARKER = [
+		"M73 P0 R10",
+		"G28",
+		"G1 X100 Y0 F6000",
+		"G1 X100 Y100 F6000",
+		"M73 P50 R5",
+		"G1 X0 Y100 F6000",
+		"G1 X0 Y0 F6000",
+		"M73 P100 R0",
+	].join("\n") + "\n";
+
+	function multiMarkerGateway(): FakeGateway {
+		return new FakeGateway({ [SOURCE]: MULTI_MARKER });
+	}
+
+	function markersIn(text: string): Array<string> {
+		return text.split("\n").filter((l) => l.startsWith("M73"));
+	}
+
+	function recipeWithSteps(name: string, steps: Recipe["steps"]): Recipe {
+		return { ...createRecipe(name), steps };
+	}
+
+	it("gives rewriteTime a total reflecting a slowdown step that runs before it", async () => {
+		const baseline = multiMarkerGateway();
+		await run(baseline, { recipe: rewriteTimeRecipe(), limits: LIMITS });
+		const baselineMarkers = markersIn(baseline.files.get(SOURCE)!);
+
+		const gw = multiMarkerGateway();
+		await run(gw, {
+			recipe: recipeWithSteps("slow then rewrite", [
+				SLOWDOWN,
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+			]),
+			limits: LIMITS,
+		});
+		const slowedMarkers = markersIn(gw.files.get(SOURCE)!);
+
+		// The real print now takes roughly four times as long, so the time axis rewriteTime measures
+		// must differ too — the middle marker is the reproduction from the audit
+		expect(slowedMarkers[1]).not.toBe(baselineMarkers[1]);
+		// The last marker is always forced to P100 R0 regardless of the total
+		expect(slowedMarkers[slowedMarkers.length - 1]).toBe("M73 P100 R0");
+	});
+
+	it("gives the same markers when the earlier step cannot affect timing (no regression)", async () => {
+		const baseline = multiMarkerGateway();
+		await run(baseline, { recipe: rewriteTimeRecipe(), limits: LIMITS });
+		const baselineMarkers = markersIn(baseline.files.get(SOURCE)!);
+
+		const gw = multiMarkerGateway();
+		await run(gw, {
+			recipe: recipeWithSteps("no-op then rewrite", [
+				{ uid: newUid(), type: "findReplace", enabled: true, config: { find: "nonexistent-token", replace: "x", regex: false, caseSensitive: true, all: true } },
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+			]),
+			limits: LIMITS,
+		});
+		expect(markersIn(gw.files.get(SOURCE)!)).toEqual(baselineMarkers);
+	});
+
+	it("does not let a step running AFTER it affect rewriteTime's own markers", async () => {
+		const baseline = multiMarkerGateway();
+		await run(baseline, { recipe: rewriteTimeRecipe(), limits: LIMITS });
+		const baselineMarkers = markersIn(baseline.files.get(SOURCE)!);
+
+		const gw = multiMarkerGateway();
+		await run(gw, {
+			recipe: recipeWithSteps("rewrite then slow", [
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+				SLOWDOWN,
+			]),
+			limits: LIMITS,
+		});
+		expect(markersIn(gw.files.get(SOURCE)!)).toEqual(baselineMarkers);
+	});
+
+	it("gives each of two rewriteTime steps in one recipe its own upstream view, not a shared one", async () => {
+		function tworewriteTimeRecipe(withSlowdownBetween: boolean): Recipe {
+			const steps: Recipe["steps"] = [{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} }];
+			if (withSlowdownBetween) steps.push(SLOWDOWN);
+			steps.push({ uid: newUid(), type: "rewriteTime", enabled: true, config: {} });
+			return recipeWithSteps("two rewriteTime", steps);
+		}
+
+		const withoutSlowdown = multiMarkerGateway();
+		await run(withoutSlowdown, { recipe: tworewriteTimeRecipe(false), limits: LIMITS });
+		const a = markersIn(withoutSlowdown.files.get(SOURCE)!);
+
+		const withSlowdown = multiMarkerGateway();
+		await run(withSlowdown, { recipe: tworewriteTimeRecipe(true), limits: LIMITS });
+		const b = markersIn(withSlowdown.files.get(SOURCE)!);
+
+		// If both instances collided on the same collector-result key (the bug the id namespacing in
+		// defect A's fix exists to prevent), the second instance's write — which always wins, since
+		// it runs later and rewrites every marker again — would come out the same either way
+		expect(b[1]).not.toBe(a[1]);
+	});
+});
+
 describe("the backup index", () => {
 	let gateway: FakeGateway;
 

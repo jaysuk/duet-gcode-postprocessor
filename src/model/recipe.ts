@@ -101,18 +101,54 @@ export function usesScripts(recipe: Recipe): boolean {
 }
 
 /**
- * Every collector the recipe's enabled steps need run over the file before the transform pass can
- * start. Empty when none do — the common case, and the reason `processFile` can skip the whole
- * analysis pass rather than always paying for it.
+ * Collectors declared by one step, tagged with that step's position among the recipe's enabled
+ * steps. The position is what lets `processFile` run each group's collectors against the *output*
+ * of the steps ordered before it, rather than against the untouched source — see
+ * `docs/tasks/07-audit-defects.md` defect A.
  */
-export function collectorsFor(recipe: Recipe, ctx: StepFactoryContext): Array<AnalysisCollector> {
-	const collectors: Array<AnalysisCollector> = [];
-	for (const step of effectiveSteps(recipe)) {
-		const def = getStepDefinition(step.type);
+export interface CollectorGroup {
+	/** Index into `effectiveSteps(recipe)` of the step that declared these collectors. */
+	stepIndex: number;
+	collectors: Array<AnalysisCollector>;
+}
+
+/**
+ * Every collector the recipe's enabled steps need run over the file before the transform pass can
+ * start, grouped by which step declared them. Empty when none do — the common case, and the reason
+ * `processFile` can skip the whole analysis pass rather than always paying for it.
+ */
+export function collectorsFor(recipe: Recipe, ctx: StepFactoryContext): Array<CollectorGroup> {
+	const groups: Array<CollectorGroup> = [];
+	const steps = effectiveSteps(recipe);
+	for (let i = 0; i < steps.length; i++) {
+		const def = getStepDefinition(steps[i].type);
 		if (def === null || def.analysis === undefined) continue;
-		collectors.push(...def.analysis(step.config as never, ctx));
+		const collectors = def.analysis(steps[i].config as never, { ...ctx, stepIndex: i });
+		if (collectors.length > 0) groups.push({ stepIndex: i, collectors });
 	}
-	return collectors;
+	return groups;
+}
+
+/**
+ * Build transforms for an explicit step list, each stamped with its index within that list as
+ * `StepFactoryContext.stepIndex`. Shared by `buildTransforms` (the full recipe) and `processFile`'s
+ * analysis sub-pass (a prefix of it) — the indices line up between the two because a prefix always
+ * starts at position 0 of the same `effectiveSteps` list.
+ */
+function buildTransformsForSteps(steps: Array<RecipeStep>, ctx: StepFactoryContext): Array<Transform> {
+	const transforms: Array<Transform> = [];
+	for (let i = 0; i < steps.length; i++) {
+		const step = steps[i];
+		const def = getStepDefinition(step.type);
+		if (def === null) continue;
+		try {
+			transforms.push(def.create(step.config as never, { ...ctx, stepIndex: i }));
+		} catch (e) {
+			const label = step.note !== undefined && step.note !== "" ? `${def.label} (${step.note})` : def.label;
+			throw new StepConfigError(`${label}: ${(e as Error).message}`);
+		}
+	}
+	return transforms;
 }
 
 /**
@@ -120,18 +156,16 @@ export function collectorsFor(recipe: Recipe, ctx: StepFactoryContext): Array<An
  * step when one refuses to build (a bad regex, an untrusted script).
  */
 export function buildTransforms(recipe: Recipe, ctx: StepFactoryContext): Array<Transform> {
-	const transforms: Array<Transform> = [];
-	for (const step of effectiveSteps(recipe)) {
-		const def = getStepDefinition(step.type);
-		if (def === null) continue;
-		try {
-			transforms.push(def.create(step.config as never, ctx));
-		} catch (e) {
-			const label = step.note !== undefined && step.note !== "" ? `${def.label} (${step.note})` : def.label;
-			throw new StepConfigError(`${label}: ${(e as Error).message}`);
-		}
-	}
-	return transforms;
+	return buildTransformsForSteps(effectiveSteps(recipe), ctx);
+}
+
+/**
+ * Transforms for just the steps ordered before `stepIndex` in the recipe's enabled-step list — what
+ * an analysis sub-pass runs to see what its own collector-declaring step will actually receive. Only
+ * `processFile` calls this.
+ */
+export function buildPrefixTransforms(recipe: Recipe, stepIndex: number, ctx: StepFactoryContext): Array<Transform> {
+	return buildTransformsForSteps(effectiveSteps(recipe).slice(0, stepIndex), ctx);
 }
 
 // #region Identity stamp

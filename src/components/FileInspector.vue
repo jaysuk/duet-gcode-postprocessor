@@ -133,7 +133,7 @@ import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
 import { checkMacros } from "../dwc/macroCheck";
-import { machineLimits, machineSnapshot } from "../dwc/machineSnapshot";
+import { machineLimits, machineLimitsComplete, machineSnapshot } from "../dwc/machineSnapshot";
 import type { FileAnalysis } from "../model/analysis";
 import { runChecks, type CheckResult } from "../model/checks";
 import { featureLabel } from "../model/gcode/features";
@@ -154,6 +154,11 @@ const stamps = ref<Array<Stamp>>([]);
 const busy = ref(false);
 const error = ref<string | null>(null);
 const progress = ref<number | null>(null);
+// Snapshotted at inspection time, alongside the limits actually fed to the estimate — the machine's
+// own configuration can change between inspections, so this must not be read live when labelling a
+// result computed earlier. See docs/tasks/07-audit-defects.md, defect E: a partly-configured machine
+// must not have its estimate presented as fully machine-specific.
+const limitsWereComplete = ref(true);
 let signal = { aborted: false };
 
 // A new selection invalidates everything: showing the previous file's statistics under a new
@@ -244,7 +249,9 @@ function estimatedTimeLabel(a: FileAnalysis): string {
 	const duration = formatDuration(a.estimatedSeconds);
 	switch (a.timeSource) {
 		case "m73": return `${duration} (from M73 markers)`;
-		case "model": return `${duration} (estimated from this machine's limits)`;
+		case "model": return limitsWereComplete.value
+			? `${duration} (estimated from this machine's limits)`
+			: `${duration} (estimated — this machine's limits are incomplete)`;
 		default: return duration;
 	}
 }
@@ -265,6 +272,7 @@ async function inspect(): Promise<void> {
 	error.value = null;
 	progress.value = 0;
 	signal = { aborted: false };
+	limitsWereComplete.value = machineLimitsComplete(machineStore.model);
 	try {
 		const result = await inspectFile({
 			gateway: createGateway(),

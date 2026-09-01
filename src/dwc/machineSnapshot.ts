@@ -82,42 +82,77 @@ export function machineSnapshot(model: unknown): MachineSnapshot {
 }
 
 /**
- * Machine motion limits for the move-time model — axis speed/acceleration/jerk plus the extruder's
- * own (exposed under "E", since extruders have no letter of their own in the object model) and the
- * M204 printing/travel acceleration.
+ * `machineLimits` and `machineLimitsComplete` share this single pass over the model, so there is
+ * exactly one place that knows what "complete" means and it cannot silently drift from what the
+ * limits themselves are actually built from.
  */
-export function machineLimits(model: unknown): MachineLimits {
+function computeMachineLimits(model: unknown): { limits: MachineLimits; complete: boolean } {
 	const m = (model ?? {}) as LooseModel;
 
 	const maxSpeed: Record<string, number> = {};
 	const maxAccel: Record<string, number> = {};
 	const jerk: Record<string, number> = {};
+	let complete = true;
 
-	for (const axis of m.move?.axes ?? []) {
+	const axes = m.move?.axes ?? [];
+	if (axes.length === 0) complete = false;
+	for (const axis of axes) {
 		if (typeof axis?.letter !== "string") continue;
-		if (typeof axis.speed === "number") maxSpeed[axis.letter] = axis.speed;
-		if (typeof axis.acceleration === "number") maxAccel[axis.letter] = axis.acceleration;
-		if (typeof axis.jerk === "number") jerk[axis.letter] = axis.jerk;
+		if (typeof axis.speed === "number") maxSpeed[axis.letter] = axis.speed; else complete = false;
+		if (typeof axis.acceleration === "number") maxAccel[axis.letter] = axis.acceleration; else complete = false;
+		if (typeof axis.jerk === "number") jerk[axis.letter] = axis.jerk; else complete = false;
 	}
 
 	const extruder = (m.move?.extruders ?? []).find((e) => e !== null && e !== undefined);
 	if (extruder) {
-		if (typeof extruder.speed === "number") maxSpeed.E = extruder.speed;
-		if (typeof extruder.acceleration === "number") maxAccel.E = extruder.acceleration;
-		if (typeof extruder.jerk === "number") jerk.E = extruder.jerk;
+		if (typeof extruder.speed === "number") maxSpeed.E = extruder.speed; else complete = false;
+		if (typeof extruder.acceleration === "number") maxAccel.E = extruder.acceleration; else complete = false;
+		if (typeof extruder.jerk === "number") jerk.E = extruder.jerk; else complete = false;
+	} else {
+		complete = false;
 	}
 
 	const motionSystem = m.move?.motionSystems?.find((s) => s !== null && s !== undefined);
 	const printAccel = motionSystem?.printingAcceleration ?? m.move?.printingAcceleration;
 	const travelAccel = motionSystem?.travelAcceleration ?? m.move?.travelAcceleration;
+	if (typeof printAccel !== "number") complete = false;
+	if (typeof travelAccel !== "number") complete = false;
 
 	return {
-		maxSpeed,
-		maxAccel,
-		jerk,
-		printAccel: typeof printAccel === "number" ? printAccel : null,
-		travelAccel: typeof travelAccel === "number" ? travelAccel : null,
+		limits: {
+			maxSpeed,
+			maxAccel,
+			jerk,
+			printAccel: typeof printAccel === "number" ? printAccel : null,
+			travelAccel: typeof travelAccel === "number" ? travelAccel : null,
+		},
+		complete,
 	};
+}
+
+/**
+ * Machine motion limits for the move-time model — axis speed/acceleration/jerk plus the extruder's
+ * own (exposed under "E", since extruders have no letter of their own in the object model) and the
+ * M204 printing/travel acceleration.
+ *
+ * Returns whatever it can find even when incomplete — `TimeEstimator` degrades gracefully on a
+ * missing value (falling back to `distance / feedrate` for that axis) rather than throwing. A caller
+ * presenting the resulting estimate as machine-specific must check {@link machineLimitsComplete}
+ * first: a number quietly computed from partial defaults is not what "estimated from this machine's
+ * limits" claims to be. See docs/tasks/07-audit-defects.md, defect E.
+ */
+export function machineLimits(model: unknown): MachineLimits {
+	return computeMachineLimits(model).limits;
+}
+
+/**
+ * False when at least one axis, the extruder, or either M204 acceleration could not be read from the
+ * object model — the Inspect button is disabled while disconnected, so this is not about an empty
+ * model, it is about a real but incompletely configured machine (an untuned or newly added axis, a
+ * single-motion-system board that still lacks `move.motionSystems`). See {@link machineLimits}.
+ */
+export function machineLimitsComplete(model: unknown): boolean {
+	return computeMachineLimits(model).complete;
 }
 
 /**

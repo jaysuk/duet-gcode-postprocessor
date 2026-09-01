@@ -24,12 +24,22 @@ export interface RewriteTimeTotals {
 
 const COLLECTOR_ID = "rewriteTime";
 
+/**
+ * Namespace the collector id by this step's position in the recipe, so two `rewriteTime` steps in
+ * one recipe don't collide on the same key in the merged analysis results map (see
+ * `docs/tasks/07-audit-defects.md`, defect A). Falls back to the bare id when `stepIndex` is not set
+ * — a direct unit-test call that passes one shared context to both `analysis()` and `create()` still
+ * computes the same key both times.
+ */
+function collectorId(ctx: StepFactoryContext): string {
+	return ctx.stepIndex !== undefined ? `${COLLECTOR_ID}#${ctx.stepIndex}` : COLLECTOR_ID;
+}
+
 class RewriteTimeCollector implements AnalysisCollector<RewriteTimeTotals> {
-	readonly id = COLLECTOR_ID;
 	private readonly estimator: TimeEstimator;
 	private markerCount = 0;
 
-	constructor(limits: MachineLimits) {
+	constructor(readonly id: string, limits: MachineLimits) {
 		this.estimator = new TimeEstimator(limits);
 	}
 
@@ -52,12 +62,13 @@ export const rewriteTimeStep: StepDefinition<Record<string, never>> = {
 
 	analysis(_config: Record<string, never>, ctx: StepFactoryContext): Array<AnalysisCollector> {
 		if (ctx.machineLimits === undefined) return [];
-		return [new RewriteTimeCollector(ctx.machineLimits)];
+		return [new RewriteTimeCollector(collectorId(ctx), ctx.machineLimits)];
 	},
 
 	create(_config: Record<string, never>, ctx: StepFactoryContext): Transform {
 		const limits = ctx.machineLimits;
 		const estimator = limits !== undefined ? new TimeEstimator(limits) : null;
+		const resultKey = collectorId(ctx);
 
 		let totals: RewriteTimeTotals | null = null;
 		let seen = 0;
@@ -67,7 +78,7 @@ export const rewriteTimeStep: StepDefinition<Record<string, never>> = {
 			id: "rewriteTime",
 
 			onStart(runCtx: RunContext): void {
-				totals = (runCtx.analysis.get(COLLECTOR_ID) as RewriteTimeTotals | undefined) ?? null;
+				totals = (runCtx.analysis.get(resultKey) as RewriteTimeTotals | undefined) ?? null;
 			},
 
 			onLine(lineCtx: LineContext): string | undefined {

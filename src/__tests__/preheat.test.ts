@@ -67,68 +67,111 @@ function tool(n: number, active: number, standby: number, model: HeaterModel | n
 	return { toolNumber: n, heaters: [{ heaterIndex: n, active, standby, model }] };
 }
 
+/**
+ * `tempSetupSeconds` defaults to empty: a tool with nothing explicit is floored at its own first
+ * selection, per `planPreheats`' documented behaviour (see docs/tasks/07-audit-defects.md, defect C)
+ * — pass one explicitly to give a test genuine room to pre-heat into.
+ */
+function events(
+	changes: Array<{ tool: number; elapsedSeconds: number; layer: number }>,
+	options: {
+		existingPreheats?: Array<{ tool: number; elapsedSeconds: number }>;
+		tempSetupSeconds?: Map<number, number>;
+		/** Defaults to 1, 2, 3... in the order `tempSetupSeconds` iterates — the exact numbers rarely
+		 *  matter for a test not specifically about line-sequence gating, only that each is a real,
+		 *  distinct line position. */
+		tempSetupLineSeq?: Map<number, number>;
+	} = {},
+) {
+	const tempSetupSeconds = options.tempSetupSeconds ?? new Map<number, number>();
+	const tempSetupLineSeq = options.tempSetupLineSeq
+		?? new Map([...tempSetupSeconds.keys()].map((tool, i) => [tool, i + 1]));
+	return {
+		changes,
+		existingPreheats: options.existingPreheats ?? [],
+		tempSetupSeconds,
+		tempSetupLineSeq,
+	};
+}
+
 describe("planPreheats", () => {
-	it("schedules one preheat per tool change, each landing no later than its own change", () => {
-		const events = {
-			changes: [
-				{ tool: 0, elapsedSeconds: 0, layer: 0 },
-				{ tool: 1, elapsedSeconds: 100, layer: 1 },
-			],
-			existingPreheats: [],
-		};
-		const tools = [tool(0, 200, 140), tool(1, 200, 140)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
+	it("schedules a preheat with genuine lead when the tool's temperatures are set well before its change", () => {
+		// T1's temperatures are established at t=0, ten seconds before it is needed — plenty of room
+		// for FAST_MODEL's ~6s lead
+		const e = events(
+			[{ tool: 1, elapsedSeconds: 10, layer: 1 }],
+			{ tempSetupSeconds: new Map([[1, 0]]) },
+		);
+		const plan = planPreheats(e, [tool(1, 200, 140)], { ambient: 20, standbyPrevious: true });
 		const preheats = plan.insertions.filter((i) => i.action === "preheat");
-		expect(preheats.map((i) => i.tool)).toEqual([0, 1]);
-		expect(preheats[1].atSeconds).toBeLessThan(100);
-		expect(preheats[1].atSeconds).toBeGreaterThan(0);
+		expect(preheats).toHaveLength(1);
+		expect(preheats[0].tool).toBe(1);
+		expect(preheats[0].atSeconds).toBeGreaterThan(0);
+		expect(preheats[0].atSeconds).toBeLessThan(10);
+		expect(plan.clampedAt).toEqual([]);
 	});
 
-	it("clamps to the start of the file when there is not enough print before the change, and records it", () => {
-		const events = { changes: [{ tool: 0, elapsedSeconds: 1, layer: 0 }], existingPreheats: [] };
-		const tools = [tool(0, 200, 20)]; // a large rise, far more lead needed than the 1s available
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
-		expect(plan.insertions[0].atSeconds).toBe(0);
+	it("gives a tool's own first selection no lead at all when nothing sets its temperatures earlier", () => {
+		// Nothing in the file says what T0's active temperature even is before T0 itself is selected —
+		// there is no legitimate point to activate it any earlier than that
+		const e = events([{ tool: 0, elapsedSeconds: 5, layer: 0 }]);
+		const plan = planPreheats(e, [tool(0, 200, 140)], { ambient: 20, standbyPrevious: true });
+		expect(plan.insertions).toEqual([]);
+		expect(plan.noLeadAt).toEqual([{ tool: 0, layer: 0 }]);
+	});
+
+	it("clamps to the tool's own temperature setup, not to line 0, and records it", () => {
+		// An M568/G10 for T0 lands at t=2 — the earliest legitimate point — but the tool needs far
+		// more than 3s of lead, so the pre-heat clamps to t=2 rather than reaching further back
+		const e = events(
+			[{ tool: 0, elapsedSeconds: 5, layer: 0 }],
+			{ tempSetupSeconds: new Map([[0, 2]]) },
+		);
+		const plan = planPreheats(e, [tool(0, 200, 20)], { ambient: 20, standbyPrevious: true });
+		expect(plan.insertions).toEqual([{ atSeconds: 2, tool: 0, action: "preheat", minLineSeqAfter: 1 }]);
 		expect(plan.clampedAt).toEqual([{ tool: 0, layer: 0 }]);
 	});
 
-	it("never schedules a standby for the outgoing tool at or after its own next pending preheat", () => {
-		const events = {
-			changes: [
-				{ tool: 0, elapsedSeconds: 0, layer: 0 },
-				{ tool: 1, elapsedSeconds: 10, layer: 0 },
-				{ tool: 0, elapsedSeconds: 15, layer: 0 }, // back to T0 almost immediately
-			],
-			existingPreheats: [],
-		};
-		const tools = [tool(0, 200, 140), tool(1, 200, 140)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
-		const t0Preheats = plan.insertions.filter((i) => i.tool === 0 && i.action === "preheat" && i.atSeconds >= 15);
-		const t0Standbys = plan.insertions.filter((i) => i.tool === 0 && i.action === "standby");
-		for (const standby of t0Standbys) {
-			for (const preheat of t0Preheats) {
-				expect(standby.atSeconds).toBeLessThan(preheat.atSeconds);
-			}
-		}
+	it("never schedules a standby for the outgoing tool when its own next pre-heat has already fired", () => {
+		// T0 -> T1 at t=10, then straight back to T0 at t=15. T0's return needs far more lead than the
+		// 15s available from the start of the file, so its pre-heat clamps to t=0 — before the T0->T1
+		// standby decision at t=10. That pre-heat, not a standby, is what determines T0's state at t=10.
+		const e = events([
+			{ tool: 0, elapsedSeconds: 0, layer: 0 },
+			{ tool: 1, elapsedSeconds: 10, layer: 0 },
+			{ tool: 0, elapsedSeconds: 15, layer: 0 },
+		], { tempSetupSeconds: new Map([[0, 0], [1, 0]]) });
+		const plan = planPreheats(e, [tool(0, 300, 20), tool(1, 200, 140)], { ambient: 20, standbyPrevious: true });
+
+		expect(plan.insertions.some((i) => i.tool === 0 && i.action === "standby")).toBe(false);
+		expect(plan.insertions).toContainEqual({ atSeconds: 0, tool: 0, action: "preheat" });
+	});
+
+	it("does schedule a standby when the outgoing tool has no pre-heat pending", () => {
+		const e = events([
+			{ tool: 0, elapsedSeconds: 0, layer: 0 },
+			{ tool: 1, elapsedSeconds: 100, layer: 1 },
+		], { tempSetupSeconds: new Map([[0, 0], [1, 0]]) });
+		// A generous gap and a fast heater: T0's next reappearance (there isn't one) can't be pending,
+		// so the T0 -> T1 transition should demote T0 to standby
+		const plan = planPreheats(e, [tool(0, 200, 140), tool(1, 200, 140)], { ambient: 20, standbyPrevious: true });
+		expect(plan.insertions).toContainEqual({ atSeconds: 100, tool: 0, action: "standby" });
 	});
 
 	it("skips a tool with no standby temperature below its active temperature, reporting it once", () => {
-		const events = {
-			changes: [
-				{ tool: 0, elapsedSeconds: 0, layer: 0 },
-				{ tool: 1, elapsedSeconds: 50, layer: 1 },
-			],
-			existingPreheats: [],
-		};
+		const e = events([
+			{ tool: 0, elapsedSeconds: 0, layer: 0 },
+			{ tool: 1, elapsedSeconds: 50, layer: 1 },
+		]);
 		const tools = [tool(0, 200, 200), tool(1, 200, 140)]; // T0 standby == active
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
+		const plan = planPreheats(e, tools, { ambient: 20, standbyPrevious: true });
 		expect(plan.noStandby.has(0)).toBe(true);
 		expect(plan.insertions.some((i) => i.tool === 0 && i.action === "preheat")).toBe(false);
 	});
 
 	it("skips a tool with no heater, without treating it as any other kind of failure", () => {
-		const events = { changes: [{ tool: 5, elapsedSeconds: 10, layer: 0 }], existingPreheats: [] };
-		const plan = planPreheats(events, [], { ambient: 20, standbyPrevious: true });
+		const e = events([{ tool: 5, elapsedSeconds: 10, layer: 0 }]);
+		const plan = planPreheats(e, [], { ambient: 20, standbyPrevious: true });
 		expect(plan.noHeater.has(5)).toBe(true);
 		expect(plan.insertions).toEqual([]);
 	});
@@ -136,51 +179,59 @@ describe("planPreheats", () => {
 	it("skips a change the file already pre-heats for within the lead window", () => {
 		const model = tool(1, 200, 140).heaters[0].model as HeaterModel;
 		const lead = heatUpSeconds({ from: 140, to: 200, model, ambient: 20 }) as number;
-		const events = {
-			changes: [{ tool: 1, elapsedSeconds: 100, layer: 1 }],
-			// Comfortably inside (100 - lead, 100]
-			existingPreheats: [{ tool: 1, elapsedSeconds: 100 - lead / 2 }],
-		};
-		const tools = [tool(1, 200, 140)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
+		const e = events(
+			[{ tool: 1, elapsedSeconds: 100, layer: 1 }],
+			{
+				// Comfortably inside (100 - lead, 100]
+				existingPreheats: [{ tool: 1, elapsedSeconds: 100 - lead / 2 }],
+				// An explicit earlier setup gives genuine room to pre-heat, so there is something for
+				// the file's own pre-heat to actually suppress
+				tempSetupSeconds: new Map([[1, 0]]),
+			},
+		);
+		const plan = planPreheats(e, [tool(1, 200, 140)], { ambient: 20, standbyPrevious: true });
 		expect(plan.insertions).toEqual([]);
 	});
 
-	it("records a tool whose heat-up estimate hit the cap", () => {
+	it("records a tool whose heat-up estimate hit the cap, even when the change itself gets no lead", () => {
 		const impossible: HeaterModel = { heatingRate: 1, deadTime: 0, coolingRate: 50, coolingExp: 1 };
-		const events = { changes: [{ tool: 0, elapsedSeconds: 1000, layer: 5 }], existingPreheats: [] };
-		const tools = [tool(0, 520, 20, impossible)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
+		const e = events([{ tool: 0, elapsedSeconds: 1000, layer: 5 }]);
+		const plan = planPreheats(e, [tool(0, 520, 20, impossible)], { ambient: 20, standbyPrevious: true });
 		expect(plan.cappedTools.has(0)).toBe(true);
 	});
 
 	it("records a tool with no tuned model separately from one with no standby temperature", () => {
-		const events = { changes: [{ tool: 0, elapsedSeconds: 100, layer: 0 }], existingPreheats: [] };
-		const tools = [tool(0, 200, 140, null)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
+		const e = events([{ tool: 0, elapsedSeconds: 100, layer: 0 }]);
+		const plan = planPreheats(e, [tool(0, 200, 140, null)], { ambient: 20, standbyPrevious: true });
 		expect(plan.noModel.has(0)).toBe(true);
 		expect(plan.noStandby.has(0)).toBe(false);
 	});
 
+	it("never stacks two pre-heats at the same instant — keeps the soonest-needed and drops the rest", () => {
+		// Both tools' temperatures are set at t=0 and both need far more lead than is available, so
+		// both clamp to the same instant (t=0). Only the one needed sooner (T1 at 20) should survive.
+		const e = events([
+			{ tool: 0, elapsedSeconds: 30, layer: 1 },
+			{ tool: 1, elapsedSeconds: 20, layer: 0 },
+		], { tempSetupSeconds: new Map([[0, 0], [1, 0]]) });
+		const plan = planPreheats(e, [tool(0, 300, 20), tool(1, 300, 20)], { ambient: 20, standbyPrevious: false });
+		const preheatsAtZero = plan.insertions.filter((i) => i.action === "preheat" && i.atSeconds === 0);
+		expect(preheatsAtZero).toEqual([{ atSeconds: 0, tool: 1, action: "preheat", minLineSeqAfter: 2 }]);
+		expect(plan.droppedStacked).toEqual([{ tool: 0, atSeconds: 0 }]);
+	});
+
 	it("does not schedule a standby for the previous tool when standbyPrevious is off", () => {
-		const events = {
-			changes: [
-				{ tool: 0, elapsedSeconds: 0, layer: 0 },
-				{ tool: 1, elapsedSeconds: 50, layer: 1 },
-			],
-			existingPreheats: [],
-		};
-		const tools = [tool(0, 200, 140), tool(1, 200, 140)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: false });
+		const e = events([
+			{ tool: 0, elapsedSeconds: 0, layer: 0 },
+			{ tool: 1, elapsedSeconds: 50, layer: 1 },
+		], { tempSetupSeconds: new Map([[0, 0], [1, 0]]) });
+		const plan = planPreheats(e, [tool(0, 200, 140), tool(1, 200, 140)], { ambient: 20, standbyPrevious: false });
 		expect(plan.insertions.some((i) => i.action === "standby")).toBe(false);
 	});
 
 	it("does nothing for a file that only ever uses one tool", () => {
-		const events = { changes: [{ tool: 0, elapsedSeconds: 0, layer: 0 }], existingPreheats: [] };
-		const tools = [tool(0, 200, 140)];
-		const plan = planPreheats(events, tools, { ambient: 20, standbyPrevious: true });
-		// A single tool still gets its own (clamped) first pre-heat attempt; "only one tool used"
-		// is reported by the step itself from the raw tool-change count, not by the planner
-		expect(plan.insertions.filter((i) => i.action === "standby")).toEqual([]);
+		const e = events([{ tool: 0, elapsedSeconds: 0, layer: 0 }]);
+		const plan = planPreheats(e, [tool(0, 200, 140)], { ambient: 20, standbyPrevious: true });
+		expect(plan.insertions).toEqual([]);
 	});
 });

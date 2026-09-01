@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	alreadyProcessed, buildTransforms, createRecipe, effectiveSteps, exportRecipe, findStamps,
-	hashString, importRecipe, makeStamp, matchesFilter, newUid, recipeHash, usesScripts,
+	alreadyProcessed, buildTransforms, collectorsFor, createRecipe, effectiveSteps, exportRecipe,
+	findStamps, hashString, importRecipe, makeStamp, matchesFilter, newUid, recipeHash, usesScripts,
 	validateRecipe, type Recipe,
 } from "../model/recipe";
 import { findPreset, PRESETS } from "../model/presets";
+import type { MachineLimits } from "../model/gcode/timeModel";
 import { runToString } from "../model/pipeline";
 import { StepConfigError } from "../model/steps/types";
+
+const LIMITS: MachineLimits = {
+	maxSpeed: { X: 200, Y: 200, Z: 20, E: 50 },
+	maxAccel: { X: 1500, Y: 1500, Z: 100, E: 1000 },
+	jerk: { X: 15, Y: 15, Z: 2, E: 5 },
+	printAccel: 1000,
+	travelAccel: 1500,
+};
 
 function recipeWith(steps: Array<{ type: string; config?: Record<string, unknown>; enabled?: boolean }>): Recipe {
 	return {
@@ -76,6 +85,54 @@ describe("buildTransforms", () => {
 		expect(usesScripts(recipe)).toBe(true);
 		expect(() => buildTransforms(recipe, { scriptsTrusted: false })).toThrow(StepConfigError);
 		expect(() => buildTransforms(recipe, { scriptsTrusted: true })).not.toThrow();
+	});
+});
+
+describe("collectorsFor", () => {
+	it("tags each group with the declaring step's position among the enabled steps", () => {
+		// effectiveSteps drops disabled steps entirely, so the disabled findReplace in the middle
+		// does not occupy an index slot — the second rewriteTime is at position 1, not 2. The index
+		// has to follow effectiveSteps' own numbering, matching what buildTransforms uses, not the
+		// raw steps array's.
+		const recipe: Recipe = {
+			...createRecipe("indices"),
+			steps: [
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+				{ uid: newUid(), type: "findReplace", enabled: false, config: { find: "x" } },
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+			],
+		};
+		const groups = collectorsFor(recipe, { scriptsTrusted: false, machineLimits: LIMITS });
+		expect(groups.map((g) => g.stepIndex)).toEqual([0, 1]);
+	});
+
+	it("gives two instances of the same step type distinct, non-colliding collector ids", () => {
+		// Before this was fixed (docs/tasks/07-audit-defects.md, defect A) both instances' collectors
+		// shared the bare step-type id, so the second silently overwrote the first in the merged
+		// analysis results map and both ended up reading whichever one wrote last
+		const recipe: Recipe = {
+			...createRecipe("two rewriteTime"),
+			steps: [
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+			],
+		};
+		const groups = collectorsFor(recipe, { scriptsTrusted: false, machineLimits: LIMITS });
+		const ids = groups.flatMap((g) => g.collectors.map((c) => c.id));
+		expect(ids).toHaveLength(2);
+		expect(new Set(ids).size).toBe(2);
+	});
+
+	it("returns nothing when no enabled step declares a collector", () => {
+		const recipe = recipeWith([{ type: "findReplace", config: { find: "x" } }]);
+		expect(collectorsFor(recipe, { scriptsTrusted: false, machineLimits: LIMITS })).toEqual([]);
+	});
+
+	it("returns nothing for a collector-capable step that has nothing to collect against", () => {
+		// rewriteTime declares no collector at all without machine limits, rather than one that
+		// would just collect nothing useful
+		const recipe = recipeWith([{ type: "rewriteTime" }]);
+		expect(collectorsFor(recipe, { scriptsTrusted: false })).toEqual([]);
 	});
 });
 

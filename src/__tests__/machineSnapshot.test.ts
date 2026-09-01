@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs } from "../dwc/machineSnapshot";
+import {
+	installedPluginVersion, jobFileName, machineLimits, machineLimitsComplete, machineStatus,
+	toolHeaterConfigs,
+} from "../dwc/machineSnapshot";
 
 describe("installedPluginVersion", () => {
 	it("returns 0.0.0 when the model has no plugins map at all", () => {
@@ -162,5 +165,68 @@ describe("toolHeaterConfigs", () => {
 
 	it("returns an empty array for a model with no tools", () => {
 		expect(toolHeaterConfigs({})).toEqual([]);
+	});
+});
+
+describe("machineLimitsComplete", () => {
+	const FULL_MODEL = {
+		move: {
+			axes: [
+				{ letter: "X", speed: 200, acceleration: 1500, jerk: 15 },
+				{ letter: "Y", speed: 200, acceleration: 1500, jerk: 15 },
+				{ letter: "Z", speed: 20, acceleration: 100, jerk: 2 },
+			],
+			extruders: [{ speed: 50, acceleration: 1000, jerk: 5 }],
+			motionSystems: [{ printingAcceleration: 1000, travelAcceleration: 1500 }],
+		},
+	};
+
+	it("is true for a fully specified machine", () => {
+		expect(machineLimitsComplete(FULL_MODEL)).toBe(true);
+	});
+
+	it("is false for an empty model", () => {
+		expect(machineLimitsComplete({})).toBe(false);
+		expect(machineLimitsComplete(null)).toBe(false);
+	});
+
+	it("is false when one axis is missing acceleration, even though the others are complete", () => {
+		const model = {
+			move: {
+				...FULL_MODEL.move,
+				axes: [
+					{ letter: "X", speed: 200, acceleration: 1500, jerk: 15 },
+					{ letter: "Y", speed: 200, jerk: 15 }, // no acceleration
+				],
+			},
+		};
+		expect(machineLimitsComplete(model)).toBe(false);
+	});
+
+	it("is false when there is no extruder at all", () => {
+		const model = { move: { ...FULL_MODEL.move, extruders: [] } };
+		expect(machineLimitsComplete(model)).toBe(false);
+	});
+
+	it("is false when the extruder is missing one of its own limits", () => {
+		const model = { move: { ...FULL_MODEL.move, extruders: [{ speed: 50, acceleration: 1000 }] } };
+		expect(machineLimitsComplete(model)).toBe(false);
+	});
+
+	it("is false when neither motionSystems nor the deprecated top-level acceleration fields are present", () => {
+		const model = { move: { axes: FULL_MODEL.move.axes, extruders: FULL_MODEL.move.extruders } };
+		expect(machineLimitsComplete(model)).toBe(false);
+	});
+
+	it("is true when the deprecated top-level acceleration fields stand in for motionSystems", () => {
+		const model = {
+			move: {
+				axes: FULL_MODEL.move.axes,
+				extruders: FULL_MODEL.move.extruders,
+				printingAcceleration: 1000,
+				travelAcceleration: 1500,
+			},
+		};
+		expect(machineLimitsComplete(model)).toBe(true);
 	});
 });

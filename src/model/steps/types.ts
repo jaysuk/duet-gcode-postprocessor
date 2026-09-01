@@ -113,6 +113,18 @@ export interface StepFactoryContext {
 	/** Per-tool heater configuration (active/standby temperatures, tuned M307 model), when known.
 	 *  Only `preheat` currently uses this. */
 	toolHeaters?: Array<ToolConfig>;
+	/**
+	 * This step's own position among the recipe's *enabled* steps (matching `effectiveSteps`'
+	 * indexing), set by `recipe.ts` when it builds each step's context. Undefined when a step is
+	 * constructed outside a recipe run (a unit test calling `create`/`analysis` directly).
+	 *
+	 * A step that declares an `analysis()` collector needs this to namespace its collector id
+	 * (`` `${id}#${stepIndex}` ``) — otherwise two instances of the same step type in one recipe
+	 * collide on the same key in the merged analysis results map, and both silently read whichever
+	 * one wrote last. Falling back to the bare id when this is undefined keeps direct unit-test calls
+	 * (which pass one shared context to both `analysis()` and `create()`) working unchanged.
+	 */
+	stepIndex?: number;
 }
 
 export class StepConfigError extends Error {

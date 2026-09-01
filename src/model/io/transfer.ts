@@ -25,7 +25,10 @@ import type { MachineLimits } from "../gcode/timeModel";
 import { parseMetadata, type SlicerMetadata } from "../gcode/metadata";
 import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
 import type { ToolConfig } from "../preheat";
-import { alreadyProcessed, buildTransforms, collectorsFor, findStamps, makeStamp, type Recipe, type Stamp } from "../recipe";
+import {
+	alreadyProcessed, buildPrefixTransforms, buildTransforms, collectorsFor, findStamps, makeStamp,
+	type Recipe, type Stamp,
+} from "../recipe";
 import type { StepFactoryContext } from "../steps/types";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
 
@@ -218,23 +221,57 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 
 	// A second pass over the same already-downloaded blob, for any step that needs to see a fact
 	// about the whole file before the transform pass reaches the line that needs it — skipped
-	// entirely when no enabled step asked for one, so the common recipe pays nothing extra
-	const collectors = collectorsFor(recipe, factoryCtx);
-	let analysisResults: ReadonlyMap<string, unknown> = new Map();
+	// entirely when no enabled step asked for one, so the common recipe pays nothing extra.
+	//
+	// Each collector-declaring step gets its OWN sub-pass, run through a throwaway Pipeline built
+	// from only the steps ordered before it — its collector must see what its own step will actually
+	// receive, not the untouched source (see docs/tasks/07-audit-defects.md, defect A). A recipe with
+	// one collector-declaring step — the overwhelming common case — costs exactly one extra pass,
+	// same as before this fix.
+	const collectorGroups = collectorsFor(recipe, factoryCtx);
+	const analysisResultsMut = new Map<string, unknown>();
 	let analysisMs: number | null = null;
-	if (collectors.length > 0) {
+	if (collectorGroups.length > 0) {
 		const analysisStarted = Date.now();
 		report({ phase: "analysing", fraction: 0 });
-		const runner = new AnalysisRunner({ collectors, meta, totalBytes: blob.size });
-		await forEachLine(blob, (line, byteOffset) => { runner.line(line, byteOffset); }, {
-			chunkBytes: options.chunkBytes,
-			signal,
-			onProgress: (fraction) => { report({ phase: "analysing", fraction }); },
-		});
-		checkCancelled();
-		analysisResults = runner.result();
+		for (const group of collectorGroups) {
+			const prefixTransforms = buildPrefixTransforms(recipe, group.stepIndex, factoryCtx);
+			// Empty analysisResults: an earlier collector-declaring step's own result is not yet
+			// available while this prefix pipeline runs (that step's sub-pass hasn't merged yet, and
+			// even if it had, this prefix's onStart fires before the merge loop below reaches it).
+			// A prefix step reading `ctx.analysis` degrades to doing less, per its own contract.
+			const prefixPipeline = new Pipeline({
+				transforms: prefixTransforms,
+				meta,
+				sourcePath,
+				totalBytes: blob.size,
+				stampLine: null,
+				analysisResults: new Map(),
+			});
+			const runner = new AnalysisRunner({ collectors: group.collectors, meta, totalBytes: blob.size });
+
+			const feed = (result: string | Array<string> | null, byteOffset: number): void => {
+				if (result === null) return;
+				if (typeof result === "string") runner.line(result, byteOffset);
+				else for (const l of result) runner.line(l, byteOffset);
+			};
+
+			for (const line of prefixPipeline.begin()) runner.line(line, 0);
+			await forEachLine(blob, (line, byteOffset) => {
+				feed(prefixPipeline.line(line, byteOffset), byteOffset);
+			}, {
+				chunkBytes: options.chunkBytes,
+				signal,
+				onProgress: (fraction) => { report({ phase: "analysing", fraction }); },
+			});
+			checkCancelled();
+			for (const line of prefixPipeline.end()) runner.line(line, blob.size);
+
+			for (const [key, value] of runner.result()) analysisResultsMut.set(key, value);
+		}
 		analysisMs = Date.now() - analysisStarted;
 	}
+	const analysisResults: ReadonlyMap<string, unknown> = analysisResultsMut;
 
 	const transforms = buildTransforms(recipe, factoryCtx);
 	const pipeline = new Pipeline({

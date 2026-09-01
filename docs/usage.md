@@ -137,11 +137,6 @@ priority over any feature override on layer 0.
 
 ### Rewrite print time (M73)
 
-> ⚠️ **Known defect — do not rely on this yet.** The step measures the file as it was *before* the
-> rest of the recipe ran, so if any earlier step changes how fast the print goes, the markers it
-> writes will be wrong while looking authoritative. Use it only as the sole step in a recipe until
-> this is fixed. *(Remove this note when `docs/tasks/07-audit-defects.md` lands.)*
-
 A slicer's `M73 P<percent> R<minutes>` markers are computed for the machine it thinks it is
 slicing for — on a Duet with different acceleration, jerk or speed limits, DWC's own progress bar
 and remaining-time (which just reads those markers back) can be badly wrong. This step recomputes
@@ -153,12 +148,6 @@ is inserted at a fixed cadence) and the run report notes that nothing was found.
 configure: it reads the machine's limits automatically at apply time.
 
 ### Predictive pre-heat
-
-> ⚠️ **Known defect — do not rely on this yet.** Where a tool change comes up sooner than the tool
-> can heat, the step can emit a standby command that cancels its own pre-heat, and still report the
-> pre-heat as successful. It does not damage the print — RepRapFirmware brings the tool to
-> temperature on selection either way — but it may quietly achieve nothing.
-> *(Remove this note when `docs/tasks/07-audit-defects.md` lands.)*
 
 On a toolchanger, an idle tool sits at its standby temperature and only starts heating to its active
 temperature when it is selected — so either the print waits for it, or nothing waits and the first
@@ -180,10 +169,15 @@ for the rest of the job.
 
 A tool with no heater (a laser, a pen) is skipped silently. A tool with no standby temperature set
 below its active one, or whose heater has no tuned `M307` model, has nothing pre-heated for it and is
-named in the run report instead. A change too close to the start of the file to fit the full lead
-time gets its pre-heat clamped to the very start of the file rather than skipped, also named in the
-report. A profile that already emits its own early `M568 A2` for a tool is left alone rather than
-getting a second, redundant one. A file that only ever uses one tool is left untouched entirely.
+named in the run report instead. A change too close to the point where the tool's own temperatures
+are first known — an `M568`/`G10` setting them, or otherwise the tool's own first selection — gets
+its pre-heat clamped to that earliest legitimate point rather than to line 0, or dropped entirely
+with a report line if even that leaves no real lead: activating a tool before anything has said what
+temperature "active" even means would just apply whatever was left over from the previous job. If two
+changes would both clamp to the exact same instant, only the one needed soonest gets a pre-heat; the
+rest are dropped, also named in the report. A profile that already emits its own early `M568 A2` for
+a tool is left alone rather than getting a second, redundant one. A file that only ever uses one tool
+is left untouched entirely.
 
 ### Rules — scripting without code
 

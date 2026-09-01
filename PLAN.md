@@ -8,11 +8,12 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 513 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. All six work orders in `docs/tasks/` are complete: `01-defects.md`,
+Implemented in v0.1.0, with 543 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. Seven work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
-`04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9) and `06-preheat.md`
-(§8 phase 11).
+`04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
+(§8 phase 11) and `07-audit-defects.md`, a defect pass on 04–06 found by auditing that work rather
+than by a hardware report.
 
 **Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–9 and 11, plus phase 10, plus most of
 phase 12 — the browser (reusing DWC's own `FileList` where available, with a self-contained
@@ -26,11 +27,6 @@ model with an inspector estimate alongside the slicer's own, a `rewriteTime` ste
 `M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
 whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
 `M307` heater model, and the usage guide.
-
-⚠️ **`rewriteTime` and `preheat` are built but not yet trustworthy.** Both read the file as it was
-before the recipe ran, and `preheat` can cancel its own work while reporting success. Neither should
-be recommended to a user until [task 07](docs/tasks/07-audit-defects.md) lands. Details and
-reproductions are in that work order.
 
 **Deviations from the plan, and why:**
 
@@ -55,14 +51,9 @@ reproductions are in that work order.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–06 are done; [`docs/tasks/`](docs/tasks/) now holds three more, written after an
-audit of that work. **[07](docs/tasks/07-audit-defects.md) comes first and is not optional polish** —
-it fixes two reproduced defects in what 04–06 shipped: the analysis pass reads the file as it was
-*before* the recipe ran (so `rewriteTime` writes confidently wrong `M73` markers whenever an earlier
-step changes speed), and `preheat` can emit a standby that cancels its own pre-heat while the run
-report claims success. [08](docs/tasks/08-arc-welding.md) is arc welding;
-[09](docs/tasks/09-flow-and-clamping.md) finishes phase 12. Phases 13–15 remain deliberately
-unspecified — see the work-order queue's own note on why.
+**Next:** tasks 01–07 are done. [`docs/tasks/`](docs/tasks/) holds two more, both ready:
+[08](docs/tasks/08-arc-welding.md) is arc welding; [09](docs/tasks/09-flow-and-clamping.md) finishes
+phase 12. Phases 13–15 remain deliberately unspecified — see the work-order queue's own note on why.
 
 ---
 
@@ -388,10 +379,16 @@ remaining-time is right. That is a reason to install the plugin all by itself.
   top-level fields of the same name).
 - ✅ `FileAnalysis.timeSource`/`estimatedSeconds`, shown in the inspector next to the slicer's own
   print-time estimate.
-- ✅ The `rewriteTime` step, rewriting existing `M73` markers in place from the model. A small
-  dedicated pre-pass in `transfer.ts` totals the file's time before the main pass reaches the first
-  marker — phase 9 will fold this into its general second-pass mechanism rather than this staying a
-  one-off.
+- ✅ The `rewriteTime` step, rewriting existing `M73` markers in place from the model — originally
+  via a one-off pre-pass in `transfer.ts`, since folded into phase 9's general analysis pass (see
+  that phase's own notes).
+- ✅ **Fixed in task 07** (defect E): `machineLimits` filled in whatever it could find and stayed
+  silent about the rest, so a partly-configured machine (an axis missing `acceleration`, no
+  `move.motionSystems` and no deprecated fallback either) got an estimate labelled "from this
+  machine's limits" that was really `TimeEstimator` quietly falling back to `distance / feedrate` for
+  the missing pieces. `machineSnapshot.ts` now also exposes `machineLimitsComplete` (sharing one pass
+  over the model with `machineLimits` so the two definitions cannot drift apart), and the inspector
+  says "limits are incomplete" rather than presenting a partial estimate as fully machine-specific.
 
 ### Phase 9 — the analysis pass *(unlocks 11, 14)* *(done)*
 
@@ -423,6 +420,13 @@ turns into a pile of special cases.
   instruction — it had already drifted to three near-identical copies once.
 - ✅ `rewriteTime` (phase 8) migrated onto this seam as its first real consumer, replacing the
   one-off pre-pass task 04 had built and explicitly flagged as temporary.
+- ✅ **Fixed in task 07**: the first version ran the analysis pass over the raw downloaded blob —
+  the file *before* the recipe's own steps had touched it — so a step's collector saw a different
+  file than the one its own `onLine` would actually receive. `processFile` now runs one sub-pass per
+  collector-declaring step, each through a throwaway `Pipeline` built from only the steps ordered
+  before it (`recipe.ts`'s `buildPrefixTransforms`), and collector ids are namespaced by step index
+  (`` `${id}#${stepIndex}` ``) so two instances of the same step type in one recipe no longer collide
+  on one shared result. See `docs/tasks/07-audit-defects.md`, defect A.
 
 ### Phase 10 — fan audit and per-feature override *(done)*
 
@@ -466,9 +470,21 @@ extrusion rather than a visible error.
 - ✅ The `preheat` step (`model/steps/preheat.ts`) — a `PreheatCollector` (this task's first real use
   of the phase-9 analysis pass) gathers every tool change and its position on the time axis ahead of
   the transform pass; `planPreheats` (pure, independently tested) turns that into an ordered list of
-  `M568 A2`/`A1` insertions, handling every edge case the task specified: clamping to file start,
-  never contradicting a pending pre-heat with a standby command, skipping a change the file already
-  pre-heats, and reporting a heater with no standby gap, no tuned model, or an unreachable target.
+  `M568 A2`/`A1` insertions, handling every edge case the task specified: clamping to the earliest
+  legitimate point, never contradicting a pending pre-heat with a standby command, skipping a change
+  the file already pre-heats, and reporting a heater with no standby gap, no tuned model, or an
+  unreachable target.
+- ✅ **Fixed in task 07**: the first version's standby guard inspected only insertions already
+  pushed and compared `atSeconds >= changeTime`, so it could not see a pre-heat for a *later*
+  occurrence of the same tool and could never fire at all for one clamped to time 0 — a clamped
+  pre-heat could be immediately cancelled by a standby, with the run report still claiming success.
+  `planPreheats` is now two-phase (every pre-heat computed before any standby is decided). The same
+  fix also corrected where a clamp lands: it used to clamp to line 0 regardless of content, which
+  could set a tool active *above* the line that first states its active temperature; it now clamps
+  to the earliest point that temperature is actually known (an explicit `M568`/`G10`, or the tool's
+  own first selection), gated by line sequence rather than elapsed time alone, since the setup line
+  and everything around it share zero elapsed time. See `docs/tasks/07-audit-defects.md`, defects
+  B and C.
 
 ### Phase 12 — machine-aware checks and rewrites *(partly done)*
 

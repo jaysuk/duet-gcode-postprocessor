@@ -4,23 +4,6 @@ Each file here is a self-contained task, written so an agent with no memory of h
 pick it up and do it correctly. **Read this file first, then [CLAUDE.md](../../CLAUDE.md)** — the
 four non-negotiables there are binding, not background.
 
-## Start here: [07 — defect pass on 04–06](07-audit-defects.md)
-
-> Tasks 04–06 shipped two defects that make those features actively untrustworthy, not merely
-> imperfect. **Fix them before building anything else.**
->
-> - `rewriteTime` writes `M73` print-time markers computed from the file as it was *before* the
->   recipe ran. A recipe that changes speed emits byte-identical markers — verified: quartering every
->   feedrate ahead of it changes nothing. DWC trusts `M73` completely, so this is worse than not
->   rewriting at all. `preheat`'s time axis has the same root cause.
-> - `preheat` can emit a standby that cancels its own pre-heat, then report success. On the committed
->   two-tool fixture the third tool change arrives on standby while the report claims three
->   successful pre-heats.
->
-> Both are reproduced in the work order — run the reproductions first and watch them fail. Tasks 08
-> and 09 both rest on that same time axis, so doing either first means building on a known-bad
-> foundation.
-
 ## The queue
 
 | # | Task | Ready? | Depends on |
@@ -31,12 +14,9 @@ four non-negotiables there are binding, not background.
 | [04](04-move-time-model.md) | Move-time model and `M73` rewrite | **Done** | — |
 | [05](05-analysis-pass.md) | Two-pass processing, so a step can see what is coming | **Done** | 04 (uses it as the first consumer) |
 | [06](06-preheat.md) | Predictive pre-heat before a tool change | **Done** — step 1's verification confirmed both assumptions against RRF source and the wiki; see `src/model/preheat.ts`'s module comment | 04, 05 |
-| [07](07-audit-defects.md) | **Defect pass on 04–06** — the analysis pass reads the wrong file, and pre-heat cancels its own work | ⏳ **DO THIS FIRST** — every defect has a reproduction | 04, 05, 06 |
-| [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | 🔒 **Blocked on 07** — spec is complete; RRF's arc behaviour verified against source | 07 |
-| [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | 🔒 **Blocked on 07** — spec is complete | 04, 07 |
-
-08 and 09 are fully specified and could be started on their own; they are marked blocked because both
-consume the time axis 07 repairs, and neither is worth building twice.
+| [07](07-audit-defects.md) | Defect pass on 04–06 — the analysis pass read the wrong file, and pre-heat could cancel its own work | **Done** — every reproduction in the work order now fails before the fix and passes after it | 04, 05, 06 |
+| [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | **Ready** — RRF's arc behaviour verified against source | 07 |
+| [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Ready** | 04, 07 |
 
 **Not yet specified**, and deliberately so — writing them now would be guessing. See
 [PLAN.md](../../PLAN.md) §8 for the roadmap and [feature-ideas.md](../feature-ideas.md) for the

@@ -34,42 +34,102 @@ function run(input: string, tools: Array<ToolConfig> = TOOLS, config: Record<str
 	return runStepsWithAnalysis([transform], collectors, input);
 }
 
-describe("preheat step", () => {
-	it("inserts one M568 A2 ahead of each tool change on the two-tool fixture", () => {
-		const { output } = run(loadFixture("two-tool"));
-		const lines = output.split("\n");
-		const tIndex = (code: string) => lines.findIndex((l) => l.trim() === code);
-		const changeIndices = lines
-			.map((l, i) => ({ l, i }))
-			.filter(({ l }) => /^T\d+$/.test(l.trim()))
-			.map(({ i }) => i);
+type HeaterState = "off" | "standby" | "active" | "unknown";
 
-		expect(changeIndices.length).toBeGreaterThanOrEqual(3);
-		expect(lines.some((l) => /^M568 P\d+ A2$/.test(l.trim()))).toBe(true);
-
-		// Every M568 ...A2 line for a given tool appears strictly before that tool's own T-command
-		for (const line of lines) {
-			const m = /^M568 P(\d+) A2$/.exec(line.trim());
-			if (m === null) continue;
-			const preheatIndex = lines.indexOf(line);
-			const ownChangeIndex = lines.findIndex((l, i) => i > preheatIndex && l.trim() === `T${m[1]}`);
-			if (ownChangeIndex !== -1) expect(preheatIndex).toBeLessThan(ownChangeIndex);
+/**
+ * Walk the output and track each tool's heater state through the `M568 A<n>` commands, recording
+ * the state at every `T` selection — the invariant that actually matters (every tool ACTIVE when
+ * selected), rather than the exact line position of any one inserted command. This is what caught
+ * defect B in the original audit: the earlier assertions here (`toContain("M568 P0 A1")`,
+ * `lines[0] === "M568 P0 A2"`) passed *because of* the bug.
+ */
+function traceToolStates(output: string): Array<{ tool: number; lineIndex: number; state: HeaterState }> {
+	const state = new Map<number, HeaterState>();
+	const rows: Array<{ tool: number; lineIndex: number; state: HeaterState }> = [];
+	const lines = output.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i].trim();
+		const pre = /^M568 P(\d+) A(\d)$/.exec(line);
+		if (pre !== null) {
+			const tool = Number(pre[1]);
+			state.set(tool, pre[2] === "2" ? "active" : pre[2] === "1" ? "standby" : "off");
+			continue;
 		}
-		void tIndex;
+		const sel = /^T(\d+)$/.exec(line);
+		if (sel !== null) {
+			rows.push({ tool: Number(sel[1]), lineIndex: i, state: state.get(Number(sel[1])) ?? "unknown" });
+		}
+	}
+	return rows;
+}
+
+/** Line index of the first `M568 P<tool>` carrying an `R` or `S` parameter — the file's own
+ *  temperature setup for that tool. */
+function tempSetupLine(output: string, tool: number): number {
+	const lines = output.split("\n");
+	return lines.findIndex((l) => {
+		const m = new RegExp(`^M568 P${tool}\\b`).exec(l.trim());
+		return m !== null && /[RS]-?\d/.test(l);
+	});
+}
+
+describe("preheat step", () => {
+	it("on a fixture with genuine lead, every tool is ACTIVE at every selection", () => {
+		const { output } = run(loadFixture("two-tool-long"));
+		const trace = traceToolStates(output);
+		expect(trace.length).toBeGreaterThanOrEqual(3);
+		for (const row of trace) expect(row.state).toBe("active");
 	});
 
-	it("clamps the very first tool change to the start of the file, since nothing prints before it, and warns", () => {
-		const { output, pipeline } = run(loadFixture("two-tool"));
-		const lines = output.split("\n");
-		// "Clamp to the start of the file" is literal: the insertion lands on the very first line,
-		// not merely somewhere ahead of the T-command
-		expect(lines[0].trim()).toBe("M568 P0 A2");
-		expect(pipeline.stats.warnings.some((w) => w.includes("clamped"))).toBe(true);
+	it("never emits a pre-heat before the file's own temperature setup for that tool", () => {
+		for (const fixture of ["two-tool", "two-tool-long"]) {
+			const { output } = run(loadFixture(fixture));
+			const lines = output.split("\n");
+			lines.forEach((line, i) => {
+				const m = /^M568 P(\d+) A2$/.exec(line.trim());
+				if (m === null) return;
+				const setupLine = tempSetupLine(output, Number(m[1]));
+				expect(setupLine).toBeGreaterThanOrEqual(0);
+				expect(i).toBeGreaterThanOrEqual(setupLine);
+			});
+		}
 	});
 
-	it("returns the outgoing tool to standby once the incoming one is pre-heating", () => {
-		const { output } = run(loadFixture("two-tool"));
+	it("returns the outgoing tool to standby once the incoming one is genuinely pre-heating", () => {
+		const { output } = run(loadFixture("two-tool-long"));
 		expect(output).toContain("M568 P0 A1");
+		expect(output).toContain("M568 P1 A1");
+	});
+
+	it("reports a pre-heated count matching the number of pre-heats that actually survive", () => {
+		const { output, pipeline } = run(loadFixture("two-tool-long"));
+		const emitted = output.split("\n").filter((l) => /^M568 P\d+ A2$/.test(l.trim())).length;
+		const reported = pipeline.stats.warnings.find((w) => w.startsWith("Pre-heated"));
+		expect(reported).toBeDefined();
+		const n = Number(/^Pre-heated (\d+)/.exec(reported!)?.[1]);
+		expect(n).toBe(emitted);
+	});
+
+	it("on the short fixture, where nothing has enough lead, drops or clamps rather than misbehaving", () => {
+		// This fixture spans only ~20s total while every heat-up needs far more — the regression case
+		// for defects B and C: everything is either clamped to the earliest legitimate point or
+		// dropped for having none at all, but the invariant (ACTIVE at every selection, or explicitly
+		// reported as not pre-heated) must still hold
+		const { output, pipeline } = run(loadFixture("two-tool"));
+		const trace = traceToolStates(output);
+		for (const row of trace) {
+			// A selection is only allowed to be non-ACTIVE if the step said, in its report, that this
+			// change could not be pre-heated at all
+			if (row.state !== "active") {
+				expect(pipeline.stats.warnings.some((w) => w.includes("could not be pre-heated"))).toBe(true);
+			}
+		}
+		// The pathologically short fixture is exactly the case defect C's "no legitimate lead" and
+		// defect C's "never stack two pre-heats at once" branches exist for
+		expect(
+			pipeline.stats.warnings.some((w) => w.includes("could not be pre-heated"))
+			|| pipeline.stats.warnings.some((w) => w.includes("was dropped")),
+		).toBe(true);
 	});
 
 	it("does nothing and says so for a file that only ever selects one tool", () => {
@@ -81,6 +141,7 @@ describe("preheat step", () => {
 
 	it("does not duplicate a pre-heat the file already has for that tool", () => {
 		const input = [
+			"M568 P0 R140 S200", "M568 P1 R140 S205",
 			"G28", "G90", "M83", "T0",
 			"G1 X10 Y10 E1 F1800", "G1 X100 Y10 E1 F1800", "G1 X100 Y100 E1 F1800",
 			"M568 P1 A2",
@@ -98,8 +159,8 @@ describe("preheat step", () => {
 		const stepConfig = defaultConfig("preheat");
 		const transform = preheatStep.create(stepConfig as never, ctx);
 		const collectors = preheatStep.analysis?.(stepConfig as never, ctx) ?? [];
-		const { output, pipeline } = runStepsWithAnalysis([transform], collectors, loadFixture("two-tool"));
-		expect(output).toBe(loadFixture("two-tool"));
+		const { output, pipeline } = runStepsWithAnalysis([transform], collectors, loadFixture("two-tool-long"));
+		expect(output).toBe(loadFixture("two-tool-long"));
 		expect(pipeline.stats.warnings.some((w) => w.includes("motion limits"))).toBe(true);
 	});
 });
