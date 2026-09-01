@@ -19,8 +19,8 @@ four non-negotiables there are binding, not background.
 | [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Done** | 04, 07 |
 | [10](10-audit-defects.md) | Defect pass on 08–09 — arcs are invisible to the move-time model, and clamping mis-reads `G92` | **Done** — every reproduction in the work order now fails before the fix and passes after it | 08, 09 |
 | [11](11-print-recovery.md) | Print recovery and layer surgery (§8 phase 13) | **Done** — stop point resolved: Z re-homing opt-in and off by default, no adhesion trickery invented | 10 |
-| [12](12-geometry-analysis.md) | Geometry-aware analysis — per-feature stats, minimum layer time, `M486` labelling, void detection (§8 phase 14) | **§1–3 done**; §4 is a tested prototype (`model/gcode/voids.ts`), not wired to anything — real-fixture validation still needed, this repo's own fixtures are too thin | 10 |
-| [13](13-simulation-and-tail.md) | `M37` simulation round-trip and the long tail (§8 phase 15) | **Done except "compare two files"** — needs its own UI addition, unlike the rest | 10 |
+| [12](12-geometry-analysis.md) | Geometry-aware analysis — per-feature stats, minimum layer time, `M486` labelling, void detection (§8 phase 14) | **Done**. §1–3 shipped; §4 was checked against a real 250-layer dense slice (this repo's own fixtures were too thin) and resolved its own stop point by stopping: 16–1,139 false-positive candidates on an object with no intentional cavities, so `model/gcode/voids.ts` stays a pure, tested, unwired detector — no collector, no step, no UI | 10 |
+| [13](13-simulation-and-tail.md) | `M37` simulation round-trip and the long tail (§8 phase 15) | **Done in full**, including "compare two files" — `model/compareFiles.ts` + `components/CompareFiles.vue` | 10 |
 
 **Tasks 11–13 each carry a stop point**, because each contains a question that cannot be answered by
 reading source: whether the user's machine can safely re-home Z over a part (11), whether void

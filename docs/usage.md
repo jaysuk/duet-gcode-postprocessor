@@ -521,9 +521,22 @@ anything and does not take anywhere near the length of the real print — RepRap
 fast as it can compute the file, not in real time. It is refused outright (nothing is sent) if the
 machine is already printing, simulating, resuming or pausing.
 
-The result is shown next to this plugin's own estimate; it is not written back into the file
-automatically. To use it, re-run "Rewrite print time" — the comparison is the point, not a silent
-rewrite.
+The result is shown next to this plugin's own estimate; the comparison is the point, not a silent
+rewrite. It is not currently possible to write the simulated figure into the file's own `M73`
+markers — "Rewrite M73 print time" always recomputes from this machine's own motion limits, not
+from a simulated total, so re-running it after a simulation produces the same model-based estimate
+as before, not the simulated one.
+
+### Comparing two files
+
+The **Compare** tab answers "what actually changed" between two files as facts, not as a wall of
+G-code — pick any two files (neither has to be the one selected on the left) and analyse each one to
+see their time, filament, temperatures and limits side by side, with the rows that actually differ
+highlighted. Useful for checking what a recipe changed at a glance without reading the line diff, or
+for comparing two slicer profiles of the same model.
+
+This is a comparison of each file's own analysis, not a line-by-line text diff — a file with every
+line renumbered but the same geometry compares as identical here, which is the point.
 
 ---
 

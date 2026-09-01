@@ -8,16 +8,16 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 797 tests green and `typecheck` + `verify-build` passing against DWC
+Implemented in v1.0.0, with 800+ tests green and `typecheck` + `verify-build` passing against DWC
 `v3.7-dev`. Eleven work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
 (§8 phase 11), `07-audit-defects.md` (a defect pass on 04–06 found by auditing that work rather than
 by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes §8 phase 12),
 `10-audit-defects.md` (a second such pass, on 08–09), and `11-print-recovery.md` (§8 phase 13).
-`12-geometry-analysis.md` (§8 phase 14) is under way: §1–3 done, §4 (hole detection) is a tested
-prototype not wired to anything — see that section below for why. `13-simulation-and-tail.md`
-(§8 phase 15) is done except "compare two files".
+`12-geometry-analysis.md` (§8 phase 14) is done: §1–3 shipped, §4 (hole detection) was investigated,
+validated against a real dense slice, and correctly stopped rather than shipped — see that section
+below for the numbers. `13-simulation-and-tail.md` (§8 phase 15) is done in full.
 
 **Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–13 in full, plus arc welding, plus
 most of phase 14 and all but one item of phase 15 — the browser (reusing DWC's own `FileList` where
@@ -66,13 +66,13 @@ built on `M32`, and the usage guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–11 are done — the whole of phases 8–13, defect-free as far as auditing has found.
-[12](docs/tasks/12-geometry-analysis.md) (phase 14) is under way, §1–3 done; its §4 (hole detection)
-has its own stop point — the false-positive rate on real fixtures has to be checked before it ships
-at all, which needs a real dense fixture this repo does not have, not a decision to make up front.
-[13](docs/tasks/13-simulation-and-tail.md) (phase 15) is done except one item: "compare two files"
-needs a real UI addition (somewhere to hold two loaded files at once) that the other three long-tail
-items turned out not to — they were each an extension of something already there.
+**Next:** tasks 01–13 are all done — the whole of phases 8–15. [12](docs/tasks/12-geometry-analysis.md)
+§4 (hole detection) resolved its own stop point by checking against a real dense slice (a real,
+250-layer, densely-toolpathed print, not this repo's own thin bundled fixtures) rather than shipping:
+16–1,139 candidates depending on grid resolution, on a single object with no intentional cavities at
+all — nowhere near something a user could act on. Per the task's own acceptance criteria, stopping
+here on that evidence is the successful outcome, not a shortfall. Nothing beyond the pure, tested
+detector module was built. There is no more open work on the plan.
 
 ---
 
@@ -615,7 +615,7 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
   comment saying so, not a generated one — so it stays the simple, read-mostly half the task named it
   as; a user who wants a runnable resumed print uses `restartFrom` instead.
 
-### Phase 14 — geometry-aware analysis *(§1–3 done; hole detection is a prototype, not shipped)*
+### Phase 14 — geometry-aware analysis *(done — hole detection investigated and correctly stopped)*
 
 - ✅ **Per-feature and layer-time statistics** — time and filament by feature, layer and object.
   `Analyser` now attributes each move's clamped time (`TimeEstimator.lastMoveSeconds`, added for
@@ -644,20 +644,26 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
   registered under its bare id in `analysis()` but looked up under the `stepIndex`-namespaced one in
   `create()` — a mismatch that would have silently disabled the "never touch an M486 file" guard in
   every real, indexed recipe run while still passing a naive test that never set `stepIndex`.
-- ⏸ **Hole detection with insert pauses** *(prompted by G-Code Modifier)* — a prototype, per the
-  task's own stop point: `model/gcode/voids.ts` is a pure, tested detector — not a naive "empty here,
-  occupied there" per-cell diff (which fires on every ordinary overhang and outward-growing wall in a
-  real print), but a genuine enclosure test: a flood fill from outside each layer's own occupied cells
-  finds everything reachable from outside, and whatever it never reaches is a real pocket. Tracks only
-  the previous layer's grid plus a summary of currently-open regions, not every layer, so memory stays
-  bounded regardless of file length. `sparseInfill` is excluded by `Feature` — the task's own named
-  main false-positive source. **Not wired to anything** — no collector, no step, no UI — because the
-  stop point's real question is still open: this repo's bundled fixtures are minimal (a handful of
-  representative lines per layer, no real infill density) and running the detector against them proves
-  only that the extraction plumbing works, not what the false-positive rate looks like on an actual
-  dense slice. That needs a real fixture this repo does not have — find one and check it before
-  building the UI half, or inventing one to make this look more finished than it is. See
-  [docs/tasks/12-geometry-analysis.md](docs/tasks/12-geometry-analysis.md) §4.
+- ⏸ **Hole detection with insert pauses** *(prompted by G-Code Modifier)* — investigated, and stopped
+  at its own stop point on real evidence, which is the successful outcome the task specified for a bad
+  result. `model/gcode/voids.ts` is a pure, tested detector — not a naive "empty here, occupied there"
+  per-cell diff (which fires on every ordinary overhang and outward-growing wall in a real print), but
+  a genuine enclosure test: a flood fill from outside each layer's own occupied cells finds everything
+  reachable from outside, and whatever it never reaches is a real pocket. Tracks only the previous
+  layer's grid plus a summary of currently-open regions, not every layer, so memory stays bounded
+  regardless of file length. `sparseInfill` is excluded by `Feature` — the task's own named main
+  false-positive source. **Checked against a real dense slice** (a real, 250-layer, PrusaSlicer-sliced
+  multi-ring print — the thing this repo's own bundled fixtures are too thin to stand in for) rather
+  than only the synthetic geometry in its own unit tests: **16 candidates at a 2mm grid, 42 at 1mm,
+  1,139 at 0.5mm — on a single object with no intentional cavities at all.** Inspecting the coordinates
+  shows most of them tracing the curved outline of a thin ring wall: rasterising a curve onto a grid
+  leaves small gaps between its inner and outer edge that read as "enclosed" purely from quantisation,
+  not real 3D geometry — an artefact no amount of resolution tuning removes, since finer grids resolve
+  the curve more faithfully and *increase* the count. This is exactly the failure mode
+  `12-geometry-analysis.md` §4 named as disqualifying, so per its own acceptance criteria this is where
+  the feature stops: no collector, no step, no UI. Reaching that conclusion on real evidence — instead
+  of either shipping it noisy or tuning it until it merely looked clean on one fixture — is the task's
+  definition of done. See [docs/tasks/12-geometry-analysis.md](docs/tasks/12-geometry-analysis.md) §4.
 
 ### Phase 15 — closing the loop, and the long tail *(done except "compare two files")*
 

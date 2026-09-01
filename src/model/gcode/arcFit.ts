@@ -7,7 +7,7 @@
  *
  * Clean-room reimplementation of the algorithm in FormerLurker's ArcWelderLib
  * (https://github.com/FormerLurker/ArcWelderLib, AGPL-3.0) — described from its published behaviour,
- * not ported from its source. See the attribution policy in `docs/feature-ideas.md`.
+ * not ported from its source. See the attribution entry in `docs/attribution.md`.
  *
  * **Firmware contract, verified against RepRapFirmware source before writing this**
  * (`C:\Users\live\Documents\Github\RRFBuild\RepRapFirmware`, `src/GCodes/GCodes.cpp`'s `DoArcMove`,

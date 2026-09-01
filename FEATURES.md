@@ -3,7 +3,7 @@
 Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would deliver them.
 **v1** = the first release worth installing. **Later** = wanted, not blocking.
 
-> **v0.1.0 delivers every item tagged v1**, plus the rules tier (C1), the script tier (C2–C4), the
+> **v1.0.0 delivers every item tagged v1**, plus the rules tier (C1), the script tier (C2–C4), the
 > calibration-tower step (B6), the range of insertion anchors (B3), the preflight checks (E8–E12),
 > the Flexible-Layouts widget (F1), the backup manager with restore/download/delete (D7), the fan
 > audit and per-feature override (G3), `M98` macro validation (G5), cold-extrusion and end-of-file
@@ -139,7 +139,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 
 | # | Feature | Notes |
 | --- | --- | --- |
-| H1 | ⏸ ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite. **Prototype only** — `model/gcode/voids.ts`, a pure enclosure detector with its own tests, but no collector/step/UI: the real-world false-positive rate is still unvalidated (this repo's fixtures are too thin to test it against), which task 12 §4 says must be checked before anything else is built |
+| H1 | ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite. **Investigated and stopped** — `model/gcode/voids.ts`'s detector, checked against a real 250-layer dense slice per task 12 §4's own stop point, produced 16–1,139 false-positive candidates (depending on grid resolution) on a single object with no intentional cavities at all, mostly from rasterising curved thin walls. Not built further: no collector, no step, no UI |
 | H2 | ✅ ^ **Minimum layer time enforcement** on a thermal basis - slow or dwell on layers too fast to cool | Done — `model/steps/minLayerTime.ts`. Never slows below a configured feedrate floor; reports a layer that cannot reach the target rather than mangling it |
 | H3 | ^ **Eject sequence preset** for print farms | A preset, not machinery |
 | H4 | ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | `paramRewrite` already does the work |

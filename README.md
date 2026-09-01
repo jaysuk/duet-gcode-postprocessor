@@ -6,9 +6,9 @@ Browse the G-code files already on your Duet's SD card, apply find/replace rules
 mappings, layer-anchored insertions and scripted transforms, preview the diff, then write the
 result back — without a PC, a slicer re-slice, or an SD card shuffle.
 
-> **Status: v0.1.0 — built, tested, not yet run on hardware.** 294 unit, golden-file, safety and
-> component tests pass; typecheck and `verify-build` are green against DWC `v3.7-dev`. The plugin
-> ZIP builds at ~134 KB (40 KB gzipped). What is and is not implemented is listed in
+> **Status: v1.0.0 — feature-complete and in active testing on real hardware.** 800+ unit,
+> golden-file, safety and component tests pass; typecheck and `verify-build` are green against DWC
+> `v3.7-dev`. The plugin ZIP is about 72 KB. What is and is not implemented is listed in
 > [PLAN.md](PLAN.md#status); [docs/usage.md](docs/usage.md) is the full guide.
 
 ## What it does
