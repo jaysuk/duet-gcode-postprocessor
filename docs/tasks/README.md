@@ -17,12 +17,21 @@ four non-negotiables there are binding, not background.
 | [07](07-audit-defects.md) | Defect pass on 04–06 — the analysis pass read the wrong file, and pre-heat could cancel its own work | **Done** — every reproduction in the work order now fails before the fix and passes after it | 04, 05, 06 |
 | [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | **Done** | 07 |
 | [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Done** | 04, 07 |
+| [10](10-audit-defects.md) | Defect pass on 08–09 — arcs are invisible to the move-time model, and clamping mis-reads `G92` | **Ready — do this first** | 08, 09 |
+| [11](11-print-recovery.md) | Print recovery and layer surgery (§8 phase 13) | Ready **after 10**; has a stop point | 10 |
+| [12](12-geometry-analysis.md) | Geometry-aware analysis — per-feature stats, minimum layer time, `M486` labelling, void detection (§8 phase 14) | Ready **after 10**; §4 has a stop point | 10 |
+| [13](13-simulation-and-tail.md) | `M37` simulation round-trip and the long tail (§8 phase 15) | Ready **after 10**; has a stop point | 10 |
 
-**Not yet specified**, and deliberately so — writing them now would be guessing. See
-[PLAN.md](../../PLAN.md) §8 for the roadmap and [feature-ideas.md](../feature-ideas.md) for the
-design sketches: print recovery and layer surgery (phase 13), geometry-aware analysis including hole
-detection (phase 14), the simulation round-trip and the long tail (phase 15). They need the earlier
-phases in place, and most need a hardware session first.
+**Task 10 blocks 11–13.** Its finding A — `TimeEstimator` gives a `G2`/`G3` arc zero time — undermines
+the move-time model that all three later tasks measure against, and task 08 shipped a step whose whole
+purpose is to produce arcs. Fixing it after building on top of it means re-testing everything in
+between.
+
+**Tasks 11–13 each carry a stop point**, because each contains a question that cannot be answered by
+reading source: whether the user's machine can safely re-home Z over a part (11), whether void
+detection's false-positive rate is low enough to show anyone (12), and what `M37` simulation actually
+costs the user in machine time (13). Resolving a stop point by picking the convenient answer is worse
+than not doing the task — **stop and report**, as the section at the bottom of this file says.
 
 ## What a work order here must contain
 

@@ -53,8 +53,13 @@ clamped-vs-unclamped time comparison in the inspector, and the usage guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–09 are done — the whole of phases 8–12. Phases 13–15 remain deliberately
-unspecified — see the work-order queue's own note on why: they need a hardware session first.
+**Next:** tasks 01–09 are done — the whole of phases 8–12. [`docs/tasks/`](docs/tasks/) now holds four
+more: [10](docs/tasks/10-audit-defects.md) is a defect pass on 08–09 and **blocks the rest**, because
+its finding A (`TimeEstimator` gives a `G2`/`G3` arc zero time, so every estimate is wrong on a curved
+or welded file) undermines the model phases 13–15 all measure against. Then
+[11](docs/tasks/11-print-recovery.md) (phase 13), [12](docs/tasks/12-geometry-analysis.md) (phase 14)
+and [13](docs/tasks/13-simulation-and-tail.md) (phase 15). Each of 11–13 carries an explicit stop
+point for the question in it that source alone cannot answer.
 
 ---
 
