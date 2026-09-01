@@ -8,7 +8,7 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 757 tests green and `typecheck` + `verify-build` passing against DWC
+Implemented in v0.1.0, with 797 tests green and `typecheck` + `verify-build` passing against DWC
 `v3.7-dev`. Eleven work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
@@ -17,29 +17,31 @@ by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes 
 `10-audit-defects.md` (a second such pass, on 08–09), and `11-print-recovery.md` (§8 phase 13).
 `12-geometry-analysis.md` (§8 phase 14) is under way: §1–3 done, §4 (hole detection) is a tested
 prototype not wired to anything — see that section below for why. `13-simulation-and-tail.md`
-(§8 phase 15) is under way too: the `M37` round-trip is done, the rest of it is not started.
+(§8 phase 15) is done except "compare two files".
 
 **Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–13 in full, plus arc welding, plus
-most of phases 14–15 — the browser (reusing DWC's own `FileList` where available, with a
-self-contained fallback), the inspector and its preflight checks, the streaming engine and safe write
-path, seventeen step types, recipes with import/export and board-backed storage, the diff preview,
-the Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI,
-feature-type normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98`
-macro validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
-(`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a machine-aware move-time
-model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
-`M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
-whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
-`M307` heater model, an `arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, a
-volumetric-flow audit that never assumes a filament diameter or invents a flow ceiling, a
-`clampFeedrate` step and a matching clamped-vs-unclamped time comparison in the inspector, an
+most of phase 14 and all but one item of phase 15 — the browser (reusing DWC's own `FileList` where
+available, with a self-contained fallback), the inspector and its preflight checks, the streaming
+engine and safe write path, seventeen step types, recipes with import/export and board-backed
+storage, the diff preview, the Flexible-Layouts widget, self-update, a backup index with a
+restore/download/delete UI, feature-type normalisation across slicers, a fan-speed audit, a
+fan-by-feature override step, `M98` macro validation, cold-extrusion and end-of-file hygiene checks,
+a `commandMap` condition (`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a
+machine-aware move-time model with an inspector estimate alongside the slicer's own, a `rewriteTime`
+step that recomputes `M73` markers from it, an opt-in second read-only pass over the file for steps
+that need to see a whole-file fact before the transform pass reaches it, a predictive pre-heat step
+using RRF's own `M307` heater model, an `arcWeld` step that collapses curved `G1` runs into
+`G2`/`G3`, a volumetric-flow audit that never assumes a filament diameter or invents a flow ceiling,
+a `clampFeedrate` step and a matching clamped-vs-unclamped time comparison in the inspector, an
 arc-length model shared by the time estimate and the flow audit so neither treats a curve as its own
 chord, a per-feature/per-layer/per-object time-and-filament breakdown, a `minLayerTime` step that
 slows or dwells on a layer too fast to cool, an `objectLabels` step that converts Klipper's
 `EXCLUDE_OBJECT` markers to `M486`, an `extractRange` step for pulling out or splitting a layer
 range, a `restartFrom` step that reconstructs machine state to resume a failed print without
-reprinting from scratch, an `M37` simulation round-trip — the first thing in this plugin that talks
-to the printer rather than only its file system — and the usage guide.
+reprinting from scratch, an `M37` simulation round-trip, per-step conditions evaluated against the
+file's own slicer metadata (which metadata-driven parameters are built from, rather than needing
+their own step), a plain-English one-paragraph file summary, an "apply and start the job" action
+built on `M32`, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -68,10 +70,9 @@ filename (D4 — the field exists and is stored, nothing consumes it), and run h
 [12](docs/tasks/12-geometry-analysis.md) (phase 14) is under way, §1–3 done; its §4 (hole detection)
 has its own stop point — the false-positive rate on real fixtures has to be checked before it ships
 at all, which needs a real dense fixture this repo does not have, not a decision to make up front.
-[13](docs/tasks/13-simulation-and-tail.md) (phase 15) is under way too: its `M37` round-trip is done —
-the stop point turned out to resolve in its favour, not against it, once checked against RepRapFirmware
-source rather than assumed — and its remaining items (metadata-driven parameters, conditional steps,
-the long tail) have not been started.
+[13](docs/tasks/13-simulation-and-tail.md) (phase 15) is done except one item: "compare two files"
+needs a real UI addition (somewhere to hold two loaded files at once) that the other three long-tail
+items turned out not to — they were each an extension of something already there.
 
 ---
 
@@ -658,7 +659,7 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
   building the UI half, or inventing one to make this look more finished than it is. See
   [docs/tasks/12-geometry-analysis.md](docs/tasks/12-geometry-analysis.md) §4.
 
-### Phase 15 — closing the loop, and the long tail *(M37 round-trip done; the rest not started)*
+### Phase 15 — closing the loop, and the long tail *(done except "compare two files")*
 
 - ✅ **The stop point, resolved — and more favourably than it looked.** `docs/tasks/13-simulation-and-tail.md`
   worried simulation might block the machine for the print's full duration; RepRapFirmware source says
@@ -679,11 +680,37 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
   action showing the result next to the plugin's own estimate; writing it back into `M73` is a manual
   follow-on (re-run "Rewrite print time"), not automatic, matching the task's own framing of the
   comparison as the product and the rewrite as opt-in.
-- **Metadata-driven parameters** — pressure advance, retraction and temperature offsets from a table
-  keyed on the file's own `filament_type`.
-- **Conditional steps** — run a step only when a condition on the file holds.
-- **Compare two files**, **plain-English file summary**, **apply and start the job**, and the
-  remaining long tail in FEATURES.md §H.
+- ✅ **Conditional steps** — `model/stepCondition.ts`'s `StepCondition`, evaluated once per file
+  against `SlicerMetadata` before the transform pass starts, deliberately not `FileAnalysis`-aware:
+  that would mean every run with a conditional step pays for a full analysis pass whether or not
+  `ProcessOptions.analyse` was requested, and in practice `totalLayers`/`layerHeight` already cover
+  the common "how big is this file" questions when the slicer states them. `RecipeStep` gained an
+  optional `condition` array (ANDed); `effectiveSteps` takes the metadata as an optional second
+  argument and drops a step whose condition fails — omitted entirely by `recipeHash` and the plain
+  step list, for whom a condition changes whether a run fires, not the recipe's own structure. A
+  removed step does not occupy a `stepIndex` slot, the same rule `enabled` already follows (task 07's
+  defect A, checked again here with its own test). `processFile` reports a skipped step by name and
+  reason in `stats.warnings`, so "the step did nothing" is visible rather than indistinguishable from
+  "nothing needed doing". Edited in `RecipeEditor.vue` as a JSON array, the same convention the
+  `rules` step's own condition list already established, rather than a bespoke builder UI.
+- ✅ **Metadata-driven parameters** — no new step, per the task's own steer: combine a condition with
+  an existing step (add "Rewrite a parameter" once per filament, each gated by its own
+  `filament_type` condition) — documented in `docs/usage.md` with a worked example, since the
+  mechanism above already covers it entirely.
+- ✅ **Plain-English file summary** — `model/summary.ts`'s `summariseFile`, a pure function building
+  one sentence from `FileAnalysis` alone; omits a clause entirely rather than guessing when a fact is
+  unknown (an unrecognised slicer, no layers, no flow figure). Shown at the top of the inspector.
+- ✅ **Apply and start the job** — `model/io/applyAndStart.ts`, now that `sendCode` exists: applies via
+  the existing `processFile`, then sends `M32 "<target>"` — RepRapFirmware's own "select and start SD
+  print" (verified against `GCodes2.cpp`'s M-code `case 32`, which itself refuses if a file is already
+  printing). Refuses before applying anything if the machine is busy, and again right before `M32`
+  itself since status can change in between; never available for a dry run. A checkbox in the existing
+  Apply confirmation, not a separate action — starting a file that was only previewed rather than
+  actually applied would run something never confirmed.
+- **Compare two files** and the remaining long tail in FEATURES.md §H — not started. Comparing two
+  files' own `FileAnalysis` (not a text diff) is the one item here still worth its own task: it needs
+  a place in the UI to hold two loaded files at once, which is a real UI addition, not an extension of
+  something that already exists the way the other three items above turned out to be.
 
 ### Not scheduled
 

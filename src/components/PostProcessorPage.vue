@@ -185,11 +185,19 @@
 						added {{ lastRun.stats.linesAdded.toLocaleString() }} and removed
 						{{ lastRun.stats.linesRemoved.toLocaleString() }}.
 					</p>
+
+					<v-checkbox v-model="startAfterApply" label="Start printing immediately after"
+								density="compact" hide-details class="mt-2" />
+					<p v-if="startAfterApply" class="text-caption text-medium-emphasis mt-1">
+						Sends <code>M32</code> for the written file once it is on the SD card. Refused if the
+						machine is already printing, simulating, resuming or pausing.
+					</p>
 				</v-card-text>
 				<v-card-actions>
 					<v-spacer />
 					<v-btn text="Cancel" @click="confirmOpen = false" />
-					<v-btn text="Apply" color="primary" @click="confirmApply" />
+					<v-btn :text="startAfterApply ? 'Apply and start' : 'Apply'" color="primary"
+						   @click="confirmApply" />
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
@@ -225,6 +233,7 @@ import { createGateway } from "../dwc/gateway";
 import { installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs } from "../dwc/machineSnapshot";
 import { scriptsTrusted, setScriptsTrusted, trustedRecipes, useRecipes } from "../dwc/recipeStore";
 import { DOCS_URL, LS_SELECTED_FILE, PLUGIN_MANIFEST_ID } from "../model/constants";
+import { applyAndStart } from "../model/io/applyAndStart";
 import { blocking, checkSafety, planOutput, type OutputMode, type SafetyIssue } from "../model/io/plan";
 import { CancelledError, processFile, type ProcessResult, type ProgressUpdate } from "../model/io/transfer";
 import { usesScripts, validateRecipe, type Recipe } from "../model/recipe";
@@ -242,6 +251,7 @@ const docsUrl = DOCS_URL;
 const tab = ref("recipe");
 const aboutOpen = ref(false);
 const confirmOpen = ref(false);
+const startAfterApply = ref(false);
 const selectedPath = ref<string | null>(readStoredPath());
 const outputMode = ref<OutputMode>("alongside");
 const suffix = ref(".pp");
@@ -334,6 +344,7 @@ watch(selectedPath, (value) => {
 	lastRun.value = null;
 	applied.value = null;
 	runError.value = null;
+	startAfterApply.value = false;
 	try {
 		if (value === null) localStorage.removeItem(LS_SELECTED_FILE);
 		else localStorage.setItem(LS_SELECTED_FILE, value);
@@ -425,20 +436,24 @@ async function run(dryRun: boolean): Promise<void> {
 	progress.value = { phase: "downloading", fraction: 0 };
 	signal = { aborted: false };
 
+	const runOptions = {
+		gateway: createGateway(),
+		sourcePath: selectedPath.value,
+		recipe: recipe.value,
+		plan: plan.value,
+		pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
+		scriptsTrusted: scriptsTrusted(recipe.value.id),
+		dryRun,
+		signal,
+		limits: machineLimits(machineStore.model),
+		toolHeaters: toolHeaterConfigs(machineStore.model),
+		onProgress: (update: ProgressUpdate) => { progress.value = update; },
+	};
+
 	try {
-		const result = await processFile({
-			gateway: createGateway(),
-			sourcePath: selectedPath.value,
-			recipe: recipe.value,
-			plan: plan.value,
-			pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
-			scriptsTrusted: scriptsTrusted(recipe.value.id),
-			dryRun,
-			signal,
-			limits: machineLimits(machineStore.model),
-			toolHeaters: toolHeaterConfigs(machineStore.model),
-			onProgress: (update) => { progress.value = update; },
-		});
+		const result = !dryRun && startAfterApply.value
+			? await applyAndStart({ ...runOptions, machineStatus: () => machineStatus(machineStore.model) })
+			: await processFile(runOptions);
 		lastRun.value = result;
 		if (dryRun) {
 			tab.value = "preview";
@@ -447,7 +462,7 @@ async function run(dryRun: boolean): Promise<void> {
 			uiStore.makeNotification(
 				LogLevel.success,
 				"G-code Post-Processor",
-				`Wrote ${result.targetPath}`,
+				startAfterApply.value ? `Wrote and started printing ${result.targetPath}` : `Wrote ${result.targetPath}`,
 			);
 		}
 	} catch (e) {

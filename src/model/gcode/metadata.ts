@@ -132,7 +132,10 @@ export function parseMetadata(head: string, tail = ""): SlicerMetadata {
 	return meta;
 }
 
-function normaliseKey(key: string): string {
+/** Lower-cased, spaces collapsed to underscores — the same normalisation every key in
+ *  `SlicerMetadata.values` has already had applied, so a caller matching against it (a recipe-step
+ *  condition, for one) does not have to duplicate the rule to be lenient about how it was typed. */
+export function normaliseKey(key: string): string {
 	return key.trim().toLowerCase().replace(/\s+/g, "_");
 }
 

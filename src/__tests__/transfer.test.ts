@@ -58,6 +58,35 @@ describe("processFile", () => {
 		expect(result.stats.linesChanged).toBe(3);
 	});
 
+	it("skips a step whose condition is not met, and reports it as skipped rather than silently doing nothing", async () => {
+		// SAMPLE's own header identifies it as PrusaSlicer
+		const conditional: Recipe = {
+			...createRecipe("Conditional"),
+			steps: [{
+				uid: newUid(), type: "findReplace", enabled: true, config: { find: "F1800", replace: "F900" },
+				condition: [{ key: "slicer", op: "eq", value: "Cura" }],
+			}],
+		};
+		const result = await run(gateway, { recipe: conditional });
+		const written = gateway.files.get(SOURCE)!;
+		expect(written).toContain("F1800"); // untouched — the step never ran
+		expect(result.stats.warnings.some((w) => w.includes("condition not met"))).toBe(true);
+	});
+
+	it("runs a step whose condition is met", async () => {
+		const conditional: Recipe = {
+			...createRecipe("Conditional"),
+			steps: [{
+				uid: newUid(), type: "findReplace", enabled: true, config: { find: "F1800", replace: "F900" },
+				condition: [{ key: "slicer", op: "eq", value: "PrusaSlicer" }],
+			}],
+		};
+		const result = await run(gateway, { recipe: conditional });
+		const written = gateway.files.get(SOURCE)!;
+		expect(written).toContain("F900");
+		expect(result.stats.warnings.some((w) => w.includes("condition not met"))).toBe(false);
+	});
+
 	it("backs up, records it in the index, uploads to a temp name, then moves — in that order", async () => {
 		await run(gateway);
 		const order = gateway.log.filter((l) => !l.startsWith("download"));

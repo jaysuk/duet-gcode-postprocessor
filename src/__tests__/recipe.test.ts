@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
 	alreadyProcessed, buildTransforms, collectorsFor, createRecipe, effectiveSteps, exportRecipe,
-	findStamps, hashString, importRecipe, makeStamp, matchesFilter, newUid, recipeHash, usesScripts,
-	validateRecipe, type Recipe,
+	findStamps, hashString, importRecipe, makeStamp, matchesFilter, newUid, recipeHash,
+	skippedByCondition, usesScripts, validateRecipe, type Recipe,
 } from "../model/recipe";
 import { findPreset, PRESETS } from "../model/presets";
+import { emptyMetadata } from "../model/gcode/metadata";
 import type { MachineLimits } from "../model/gcode/timeModel";
 import { runToString } from "../model/pipeline";
 import { StepConfigError } from "../model/steps/types";
@@ -18,11 +19,13 @@ const LIMITS: MachineLimits = {
 	travelAccel: 1500,
 };
 
-function recipeWith(steps: Array<{ type: string; config?: Record<string, unknown>; enabled?: boolean }>): Recipe {
+function recipeWith(steps: Array<{
+	type: string; config?: Record<string, unknown>; enabled?: boolean; condition?: Recipe["steps"][number]["condition"];
+}>): Recipe {
 	return {
 		...createRecipe("Test"),
 		steps: steps.map((s) => ({
-			uid: newUid(), type: s.type, enabled: s.enabled !== false, config: s.config ?? {},
+			uid: newUid(), type: s.type, enabled: s.enabled !== false, config: s.config ?? {}, condition: s.condition,
 		})),
 	};
 }
@@ -63,6 +66,63 @@ describe("effectiveSteps", () => {
 		const steps = effectiveSteps(recipe);
 		expect(steps).toHaveLength(1);
 		expect(steps[0].config.caseSensitive).toBe(true);
+	});
+
+	it("ignores a step's condition when no metadata is given — structure, not a specific file", () => {
+		const recipe = recipeWith([
+			{ type: "findReplace", config: { find: "a" }, condition: [{ key: "slicer", op: "eq", value: "Cura" }] },
+		]);
+		expect(effectiveSteps(recipe)).toHaveLength(1);
+	});
+
+	it("drops a step whose condition is not met by the given metadata", () => {
+		const recipe = recipeWith([
+			{ type: "findReplace", config: { find: "a" }, condition: [{ key: "slicer", op: "eq", value: "Cura" }] },
+		]);
+		const meta = { ...emptyMetadata(), slicer: "PrusaSlicer" as const };
+		expect(effectiveSteps(recipe, meta)).toHaveLength(0);
+	});
+
+	it("keeps a step whose condition is met", () => {
+		const recipe = recipeWith([
+			{ type: "findReplace", config: { find: "a" }, condition: [{ key: "slicer", op: "eq", value: "Cura" }] },
+		]);
+		const meta = { ...emptyMetadata(), slicer: "Cura" as const };
+		expect(effectiveSteps(recipe, meta)).toHaveLength(1);
+	});
+});
+
+describe("skippedByCondition", () => {
+	it("is empty when nothing has a condition", () => {
+		const recipe = recipeWith([{ type: "findReplace", config: { find: "a" } }]);
+		expect(skippedByCondition(recipe, emptyMetadata())).toEqual([]);
+	});
+
+	it("is empty when every condition is met", () => {
+		const recipe = recipeWith([
+			{ type: "findReplace", config: { find: "a" }, condition: [{ key: "slicer", op: "eq", value: "Cura" }] },
+		]);
+		expect(skippedByCondition(recipe, { ...emptyMetadata(), slicer: "Cura" as const })).toEqual([]);
+	});
+
+	it("names the step and the reason when a condition is not met", () => {
+		const recipe = recipeWith([
+			{ type: "findReplace", config: { find: "a" }, condition: [{ key: "slicer", op: "eq", value: "Cura" }] },
+		]);
+		const results = skippedByCondition(recipe, { ...emptyMetadata(), slicer: "PrusaSlicer" as const });
+		expect(results).toHaveLength(1);
+		expect(results[0].reason).toContain("Find and replace");
+		expect(results[0].reason).toContain("slicer = Cura");
+	});
+
+	it("does not report a disabled step as skipped-by-condition — it is simply disabled", () => {
+		const recipe = recipeWith([
+			{
+				type: "findReplace", config: { find: "a" }, enabled: false,
+				condition: [{ key: "slicer", op: "eq", value: "Cura" }],
+			},
+		]);
+		expect(skippedByCondition(recipe, emptyMetadata())).toEqual([]);
 	});
 });
 
@@ -126,6 +186,23 @@ describe("collectorsFor", () => {
 	it("returns nothing when no enabled step declares a collector", () => {
 		const recipe = recipeWith([{ type: "findReplace", config: { find: "x" } }]);
 		expect(collectorsFor(recipe, { scriptsTrusted: false, machineLimits: LIMITS })).toEqual([]);
+	});
+
+	it("a step a condition removes does not occupy an index slot, the same as a disabled one", () => {
+		const recipe: Recipe = {
+			...createRecipe("condition indices"),
+			steps: [
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+				{
+					uid: newUid(), type: "findReplace", enabled: true, config: { find: "x" },
+					condition: [{ key: "slicer", op: "eq", value: "Cura" }],
+				},
+				{ uid: newUid(), type: "rewriteTime", enabled: true, config: {} },
+			],
+		};
+		const meta = { ...emptyMetadata(), slicer: "PrusaSlicer" as const }; // condition not met
+		const groups = collectorsFor(recipe, { scriptsTrusted: false, machineLimits: LIMITS }, meta);
+		expect(groups.map((g) => g.stepIndex)).toEqual([0, 1]);
 	});
 
 	it("returns nothing for a collector-capable step that has nothing to collect against", () => {

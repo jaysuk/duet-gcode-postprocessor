@@ -27,7 +27,7 @@ import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
 import type { ToolConfig } from "../preheat";
 import {
 	alreadyProcessed, buildPrefixTransforms, buildTransforms, collectorsFor, findStamps, makeStamp,
-	type Recipe, type Stamp,
+	skippedByCondition, type Recipe, type Stamp,
 } from "../recipe";
 import type { StepFactoryContext } from "../steps/types";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
@@ -235,14 +235,14 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	// receive, not the untouched source (see docs/tasks/07-audit-defects.md, defect A). A recipe with
 	// one collector-declaring step — the overwhelming common case — costs exactly one extra pass,
 	// same as before this fix.
-	const collectorGroups = collectorsFor(recipe, factoryCtx);
+	const collectorGroups = collectorsFor(recipe, factoryCtx, meta);
 	const analysisResultsMut = new Map<string, unknown>();
 	let analysisMs: number | null = null;
 	if (collectorGroups.length > 0) {
 		const analysisStarted = Date.now();
 		report({ phase: "analysing", fraction: 0 });
 		for (const group of collectorGroups) {
-			const prefixTransforms = buildPrefixTransforms(recipe, group.stepIndex, factoryCtx);
+			const prefixTransforms = buildPrefixTransforms(recipe, group.stepIndex, factoryCtx, meta);
 			// Empty analysisResults: an earlier collector-declaring step's own result is not yet
 			// available while this prefix pipeline runs (that step's sub-pass hasn't merged yet, and
 			// even if it had, this prefix's onStart fires before the merge loop below reaches it).
@@ -280,7 +280,7 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	}
 	const analysisResults: ReadonlyMap<string, unknown> = analysisResultsMut;
 
-	const transforms = buildTransforms(recipe, factoryCtx);
+	const transforms = buildTransforms(recipe, factoryCtx, meta);
 	const pipeline = new Pipeline({
 		transforms,
 		meta,
@@ -289,6 +289,10 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 		stampLine: options.dryRun ? null : makeStamp(recipe, options.pluginVersion, options.now),
 		analysisResults,
 	});
+	// A step a condition removed never became a Transform at all, so the pipeline itself has no idea
+	// it existed — reported here instead, where the recipe and the metadata that decided it are both
+	// still in scope, so "skipped" is visible rather than indistinguishable from "did nothing".
+	for (const { reason } of skippedByCondition(recipe, meta)) pipeline.stats.warnings.push(reason);
 	const analyser = options.analyse === true ? new Analyser(meta) : null;
 
 	const parts: Array<BlobPart> = [];

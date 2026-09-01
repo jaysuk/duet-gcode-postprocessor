@@ -121,6 +121,13 @@
 					<v-text-field :model-value="step.note ?? ''" label="Note (optional)" density="compact"
 								  hide-details class="mb-3"
 								  @update:model-value="(v: string) => setStep(index, { note: v })" />
+					<v-text-field :model-value="conditionText(step)"
+								  label="Only run if... (JSON array, optional)" density="compact"
+								  :error-messages="conditionError(step)" class="mb-3"
+								  placeholder='[{"key":"filament_type","op":"eq","value":"PETG"}]'
+								  hint='Matched against the file&#39;s own slicer metadata. See docs/usage.md.'
+								  persistent-hint
+								  @update:model-value="(v: string) => setCondition(index, v)" />
 					<StepFields :definition="definitionFor(step.type)!" :config="step.config"
 								:errors="stepErrors(step.uid)"
 								@update:config="(config) => setStep(index, { config })" />
@@ -187,6 +194,7 @@ import {
 	type Recipe, type RecipeStep,
 } from "../model/recipe";
 import { defaultConfig, getStepDefinition, STEP_DEFINITIONS } from "../model/steps/registry";
+import type { StepCondition } from "../model/stepCondition";
 
 const props = defineProps<{
 	recipe: Recipe | null;
@@ -221,6 +229,42 @@ function definitionFor(type: string) {
 
 function stepErrors(uid: string): Array<string> {
 	return problems.value.filter((p) => p.stepUid === uid).map((p) => p.message);
+}
+
+// Edited as raw JSON text (the same convention the "rules" step's own condition list already uses)
+// rather than a bespoke condition-builder UI — keyed by step uid so one step's malformed edit does
+// not affect another's while it is mid-typo.
+const conditionErrors = ref<Record<string, string>>({});
+
+function conditionText(step: RecipeStep): string {
+	return step.condition === undefined || step.condition.length === 0 ? "" : JSON.stringify(step.condition);
+}
+
+function conditionError(step: RecipeStep): Array<string> {
+	const message = conditionErrors.value[step.uid];
+	return message ? [message] : [];
+}
+
+function setCondition(index: number, text: string): void {
+	if (props.recipe === null) return;
+	const uid = props.recipe.steps[index].uid;
+	if (text.trim() === "") {
+		conditionErrors.value = { ...conditionErrors.value, [uid]: "" };
+		setStep(index, { condition: undefined });
+		return;
+	}
+	try {
+		const parsed: unknown = JSON.parse(text);
+		if (!Array.isArray(parsed)) throw new Error("Must be a JSON array of conditions");
+		for (const c of parsed as Array<Partial<StepCondition>>) {
+			if (typeof c.key !== "string" || c.key === "") throw new Error('Each condition needs a "key"');
+			if (typeof c.op !== "string") throw new Error('Each condition needs an "op"');
+		}
+		conditionErrors.value = { ...conditionErrors.value, [uid]: "" };
+		setStep(index, { condition: parsed as Array<StepCondition> });
+	} catch (e) {
+		conditionErrors.value = { ...conditionErrors.value, [uid]: (e as Error).message };
+	}
 }
 
 function patch(changes: Partial<Recipe>): void {

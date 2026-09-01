@@ -82,6 +82,8 @@
 			</div>
 
 			<template v-if="analysis !== null">
+				<p class="text-body-2 text-medium-emphasis mb-3">{{ plainEnglishSummary }}</p>
+
 				<v-alert v-if="stamps.length > 0" type="info" variant="tonal" density="compact" class="mb-3">
 					<div v-for="(stamp, index) in stamps" :key="index">
 						Already post-processed with <strong>{{ stamp.recipe }}</strong>
@@ -239,6 +241,7 @@ import { BUSY_STATES, formatBytes } from "../model/io/plan";
 import { simulateFile } from "../model/io/simulate";
 import { CancelledError, inspectFile, type ProgressUpdate } from "../model/io/transfer";
 import type { Stamp } from "../model/recipe";
+import { summariseFile } from "../model/summary";
 
 const props = defineProps<{ path: string | null }>();
 
@@ -332,6 +335,8 @@ const objectRows = computed(() => (analysis.value?.objectStats ?? []).map((o) =>
 	seconds: o.seconds,
 	filamentMm: o.filamentMm,
 })));
+
+const plainEnglishSummary = computed(() => (analysis.value === null ? "" : summariseFile(analysis.value)));
 
 const stats = computed(() => {
 	const a = analysis.value;

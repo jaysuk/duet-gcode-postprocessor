@@ -32,6 +32,43 @@ Recipes are stored on the board, so they follow the printer rather than the brow
 a phone and they are there. (On an older DWC without the plugin-settings API they fall back to
 browser storage; the "Export as JSON" action is the way to move them either way.)
 
+### Conditions — only run a step for certain files
+
+Every step has an optional **"Only run if..."** field — a JSON array of conditions, checked once
+against the file's own slicer metadata before the recipe runs at all. A step whose condition is not
+met is skipped entirely for that file: it never sees a line, and the run report says so ("skipped:
+condition not met") rather than leaving you to wonder why nothing changed.
+
+```json
+[{ "key": "filament_type", "op": "eq", "value": "PETG" }]
+```
+
+- **`key`** — a slicer metadata field. A handful of well-known ones (`slicer`, `slicerVersion`,
+  `totalLayers`, `layerHeight`, `filamentMm`, `filamentDiameterMm`, `printTimeSeconds`) are typed;
+  anything else is looked up in the file's own settings block the same way the inspector's "Slicer
+  settings found" panel shows it (so `filament_type`, `nozzle_diameter`, `first_layer_temperature`,
+  whatever your slicer states, all work) — matched leniently, the same way the raw key is: lower-cased,
+  spaces to underscores.
+- **`op`** — `eq`, `neq`, `contains`, `gt`, `lt`, `gte`, `lte`, `exists`, `notExists`.
+- **`value`** — compared case-insensitively for text. Omit for `exists`/`notExists`.
+
+Multiple conditions in the array all have to hold (AND). This is deliberately metadata-only, not
+aware of the fuller per-file analysis (layer count, tools used, and so on beyond what the slicer
+itself states) — metadata is already read before a single line of the file is processed, so a
+condition costs nothing extra to check, and in practice `totalLayers`/`layerHeight` already cover the
+common "how big is this file" questions whenever the slicer states them.
+
+**This is also how to do metadata-driven parameters** — different pressure advance, retraction or
+temperature per filament, without a dedicated step: add the same step (say, "Rewrite a parameter") to
+the recipe once per filament, each with its own condition —
+
+```json
+// Step 1: condition [{"key":"filament_type","op":"eq","value":"PETG"}], scale F by 0.9
+// Step 2: condition [{"key":"filament_type","op":"eq","value":"PLA"}], scale F by 1.0
+```
+
+— and only the one whose filament matches actually runs.
+
 ### Find and replace
 
 The workhorse, and deliberately compatible with PrusaSlicer's **G-code Substitutions**: the same
@@ -422,6 +459,10 @@ From **⋮ → Add a bundled preset**:
 
 The **Inspect** tab reads the file once, without writing anything, and reports:
 
+- A one-paragraph, plain-English summary — slicer, layer count and height, tools, the print-time
+  estimate and which source it came from, filament length, peak flow, labelled objects — built
+  entirely from the same facts as the rest of the panel below, so it never says anything the numbers
+  do not already back up
 - Slicer and version, print time (the slicer's own figure **and** an estimate for this specific
   machine, computed from its real speed/acceleration/jerk limits, plus which of the two sources it
   used — see "Rewrite print time" below), filament, layer height and count
@@ -493,6 +534,12 @@ rewrite.
 | **As a new file next to the original** (default) | `benchy.gcode` → `benchy.pp.gcode`. The suffix is editable. |
 | **Into another folder** | Keeps the name, writes into a folder you choose |
 | **Over the original** | Overwrites, after copying the original to `0:/postproc/backups/` with a timestamp |
+
+Ticking **"Start printing immediately after"** in the Apply confirmation sends `M32` for the written
+file once it is safely on the SD card — the same command DWC's own file browser uses to start a
+print. Refused if the machine is already printing, simulating, resuming or pausing, both before
+anything is applied and again right before the `M32` itself, since the machine's state can change in
+between. Never available for a preview — only a real Apply writes a file worth starting.
 
 ### What protects you
 

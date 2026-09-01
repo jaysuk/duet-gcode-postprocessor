@@ -26,7 +26,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | A4 | **Dialect detection** — flags a file as RRF-flavoured, Marlin-flavoured or Klipper-flavoured from the commands it actually uses | 1 · v1 |
 | A5 | **Command histogram** — which G/M codes appear and how often; the fastest way to spot something the firmware will reject | 1 · v1 |
 | A6 | **Header/footer viewer** and a raw line viewer with jump-to-layer and jump-to-line | 1 · v1 |
-| A7 | **Compare two files** — diff a post-processed file against its backup, or two slices of the same model | Later |
+| A7 | **Compare two files** — diff a post-processed file against its backup, or two slices of the same model | Later — the one item left in PLAN.md §8 phase 15; needs a UI place to hold two loaded files at once, unlike the rest of that phase |
 | A8 | **Layer slider preview** using DWC's existing G-code viewer plugin if installed | Later |
 
 ## B. Transformations
@@ -128,6 +128,8 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | G10 | ✅ **`M37` simulation round-trip** — the firmware's own time estimate | Done — `model/io/simulate.ts`, `FileGateway.sendCode` (the first thing in this plugin that talks to the printer). Shows the result next to the plugin's own estimate; writing it back into `M73` is a manual follow-on (re-run "Rewrite print time"), not automatic |
 | G11 | ✅ **Extract or split a layer range** into a standalone file | Done — `model/steps/extractRange.ts`. A split is two extractions with adjoining ranges; not state-reconstructing (that's G4) — the result is a partial file for debugging or splitting, not a runnable print |
 | G12 | ✅ **Per-feature and layer-time statistics** | Done — `model/analysis.ts` (`featureStats`, `slowestLayers`, `objectStats`), rendered in `FileInspector.vue`. Time needs machine limits; filament does not |
+| G13 | ✅ **Conditional steps** — run a step only when a condition on the file's own slicer metadata holds | Done — `model/stepCondition.ts`, `RecipeStep.condition`. Metadata-only, not `FileAnalysis`-aware — see PLAN.md §8 phase 15 for why. A skipped step is named in the run report, not silently absent |
+| G14 | ✅ **Apply and start the job** — offer to start the resulting file printing once it is written | Done — `model/io/applyAndStart.ts`, built on `M32` (verified against RepRapFirmware source). A checkbox on the existing Apply confirmation, never available for a dry run |
 
 ## H. Longer-term candidates
 
@@ -143,7 +145,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 | H4 | ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | `paramRewrite` already does the work |
 | H5 | ^ **G-code command palette with click-to-insert** in the insert and rules editors | Cheapest route may be the upstream Monaco ask |
 | H6 | ^ **Geometric warp-risk notes** - large flat first layers, tall thin features, high-shrinkage material | Information-level only; no pretence of prediction |
-| H7 | **Pressure advance (and other parameters) per filament**, from the file's own metadata | A table keyed on `filament_type` |
+| H7 | ✅ **Pressure advance (and other parameters) per filament**, from the file's own metadata | Done — no dedicated table/step; G13's conditional steps already cover it, one existing step added per filament, each gated by its own `filament_type` condition. Documented with a worked example in `docs/usage.md` |
 | H8 | ✅ **Marlin tool-scoped temperatures** - `M104 S200 T1` becomes `M568 P1 S200` | Done — `commandMap`'s `onlyWithParam` |
 | H9 | **Tool renumbering** - remap T0 to T2 without mangling comments and `M568 P0` | |
 | H10 | **Z-hop injection** on travels above a length threshold | |
@@ -151,7 +153,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 | H12 | **Bed-temperature ramp** after the first N layers | |
 | H13 | **`M291` confirmation gates** at chosen points | Print-farm workflows |
 | H14 | **Timelapse trigger on each object's top layer only** | Needs `M486` tracking |
-| H15 | **Plain-English file summary** generated from the analysis | |
+| H15 | ✅ **Plain-English file summary** generated from the analysis | Done — `model/summary.ts`'s `summariseFile`, shown at the top of the inspector |
 | H16 | **Integrate with DWC's G-code viewer** - jump it to the layer under discussion | Rather than building a second 3D engine |
 
 ## Proposed v1 scope

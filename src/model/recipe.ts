@@ -9,11 +9,13 @@
  */
 
 import type { AnalysisCollector } from "./analysisPass";
+import type { SlicerMetadata } from "./gcode/metadata";
 import { getStepDefinition } from "./steps/registry";
 import {
 	StepConfigError, validateStep, withDefaults,
 	type StepFactoryContext, type Transform,
 } from "./steps/types";
+import { describeStepConditions, stepConditionsMet, type StepCondition } from "./stepCondition";
 
 export interface RecipeStep {
 	/** Stable per-step id so the UI can key a list through reordering. */
@@ -24,6 +26,12 @@ export interface RecipeStep {
 	note?: string;
 	enabled: boolean;
 	config: Record<string, unknown>;
+	/**
+	 * Whole-file conditions, ANDed, evaluated once against the slicer's own metadata before the
+	 * transform pass starts — "only run this step if the file is PETG". Undefined or empty always
+	 * runs. See `stepCondition.ts` for why this is metadata-only, not `FileAnalysis`-aware.
+	 */
+	condition?: Array<StepCondition>;
 }
 
 export interface Recipe {
@@ -50,11 +58,20 @@ export function newUid(): string {
 	return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
-/** Enabled steps only, with defaults filled in — the exact configuration that will run. */
-export function effectiveSteps(recipe: Recipe): Array<RecipeStep> {
+/**
+ * Enabled steps only, with defaults filled in — the exact configuration that will run.
+ *
+ * `meta` is optional and, when given, additionally drops a step whose own `condition` is not met by
+ * this file — omitted entirely for callers with no file in hand (`recipeHash`, the UI's own step
+ * list), for whom a condition does not change the recipe's *structure*, only whether one run of it
+ * fires. A step a condition removes never occupies a `stepIndex` slot, the same rule `enabled`
+ * already follows — see `collectorsFor`'s own doc comment and task 07's defect A for why that matters.
+ */
+export function effectiveSteps(recipe: Recipe, meta?: SlicerMetadata): Array<RecipeStep> {
 	const result: Array<RecipeStep> = [];
 	for (const step of recipe.steps) {
 		if (!step.enabled) continue;
+		if (meta !== undefined && !stepConditionsMet(step.condition, meta)) continue;
 		const def = getStepDefinition(step.type);
 		if (def === null) continue;
 		result.push({ ...step, config: withDefaults(def, step.config) });
@@ -117,9 +134,9 @@ export interface CollectorGroup {
  * start, grouped by which step declared them. Empty when none do — the common case, and the reason
  * `processFile` can skip the whole analysis pass rather than always paying for it.
  */
-export function collectorsFor(recipe: Recipe, ctx: StepFactoryContext): Array<CollectorGroup> {
+export function collectorsFor(recipe: Recipe, ctx: StepFactoryContext, meta?: SlicerMetadata): Array<CollectorGroup> {
 	const groups: Array<CollectorGroup> = [];
-	const steps = effectiveSteps(recipe);
+	const steps = effectiveSteps(recipe, meta);
 	for (let i = 0; i < steps.length; i++) {
 		const def = getStepDefinition(steps[i].type);
 		if (def === null || def.analysis === undefined) continue;
@@ -155,17 +172,37 @@ function buildTransformsForSteps(steps: Array<RecipeStep>, ctx: StepFactoryConte
  * Instantiate the transforms for a run. Throws {@link StepConfigError} with a message naming the
  * step when one refuses to build (a bad regex, an untrusted script).
  */
-export function buildTransforms(recipe: Recipe, ctx: StepFactoryContext): Array<Transform> {
-	return buildTransformsForSteps(effectiveSteps(recipe), ctx);
+export function buildTransforms(recipe: Recipe, ctx: StepFactoryContext, meta?: SlicerMetadata): Array<Transform> {
+	return buildTransformsForSteps(effectiveSteps(recipe, meta), ctx);
 }
 
 /**
  * Transforms for just the steps ordered before `stepIndex` in the recipe's enabled-step list — what
  * an analysis sub-pass runs to see what its own collector-declaring step will actually receive. Only
- * `processFile` calls this.
+ * `processFile` calls this. `meta` must be the same value passed to whichever `collectorsFor` call
+ * produced `stepIndex`, or the two will not agree on what that index even refers to.
  */
-export function buildPrefixTransforms(recipe: Recipe, stepIndex: number, ctx: StepFactoryContext): Array<Transform> {
-	return buildTransformsForSteps(effectiveSteps(recipe).slice(0, stepIndex), ctx);
+export function buildPrefixTransforms(recipe: Recipe, stepIndex: number, ctx: StepFactoryContext, meta?: SlicerMetadata): Array<Transform> {
+	return buildTransformsForSteps(effectiveSteps(recipe, meta).slice(0, stepIndex), ctx);
+}
+
+/**
+ * Enabled steps a condition removed for this file, with a human-readable reason — for a run report
+ * that says "skipped", not silence. Steps with an unknown type are not included here; that is a
+ * different, pre-existing problem `validateRecipe` already reports.
+ */
+export function skippedByCondition(recipe: Recipe, meta: SlicerMetadata): Array<{ step: RecipeStep; reason: string }> {
+	const skipped: Array<{ step: RecipeStep; reason: string }> = [];
+	for (const step of recipe.steps) {
+		if (!step.enabled) continue;
+		if (step.condition === undefined || step.condition.length === 0) continue;
+		if (!stepConditionsMet(step.condition, meta)) {
+			const def = getStepDefinition(step.type);
+			const label = def !== null ? def.label : step.type;
+			skipped.push({ step, reason: `${label}: condition not met (${describeStepConditions(step.condition)})` });
+		}
+	}
+	return skipped;
 }
 
 // #region Identity stamp
