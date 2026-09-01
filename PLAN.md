@@ -50,9 +50,14 @@ whole-file fact before the transform pass reaches it, a predictive pre-heat step
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** every work order in [`docs/tasks/`](docs/tasks/) is done. §8 below records what each phase
-delivered; anything still unbuilt there (phases 13–15) is deliberately unspecified — see the
-work-order queue's own note on why.
+**Next:** tasks 01–06 are done; [`docs/tasks/`](docs/tasks/) now holds three more, written after an
+audit of that work. **[07](docs/tasks/07-audit-defects.md) comes first and is not optional polish** —
+it fixes two reproduced defects in what 04–06 shipped: the analysis pass reads the file as it was
+*before* the recipe ran (so `rewriteTime` writes confidently wrong `M73` markers whenever an earlier
+step changes speed), and `preheat` can emit a standby that cancels its own pre-heat while the run
+report claims success. [08](docs/tasks/08-arc-welding.md) is arc welding;
+[09](docs/tasks/09-flow-and-clamping.md) finishes phase 12. Phases 13–15 remain deliberately
+unspecified — see the work-order queue's own note on why.
 
 ---
 
@@ -466,14 +471,32 @@ Individually small, collectively the thing that stops failed prints:
 
 - ✅ **Validate `M98` macro references** against the SD card — catches a typo that would otherwise
   stop the print at layer 40, and this plugin's own insert steps add macro calls.
-- **Volumetric flow-rate audit** — mm³/s demanded versus what the hot end can melt. *(Not done — needs
-  the move-time model from phase 8 to say anything useful about time.)*
+- **Volumetric flow-rate audit** — mm³/s demanded versus what the hot end can melt. *(Not done, now
+  unblocked by phase 8 — specced in [docs/tasks/09-flow-and-clamping.md](docs/tasks/09-flow-and-clamping.md).)*
 - **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how
   much time that adds. RRF clamps silently today, so prints simply take longer than promised.
-  *(Not done, same dependency.)*
+  *(Not done, same task.)*
 - ✅ **Cold-extrusion detection** and end-of-file hygiene (heaters left on, fan running, motors live).
 - ✅ **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
   `M568 P1 S200`. Was a real gap in the Marlin preset, and a silent mistranslation.
+
+### Arc welding — `G1` runs into `G2`/`G3` arcs
+
+Out of the dependency sequence below (it needs only the task-07 defect pass), but worth doing early:
+it is the one item here that improves *every* curved file, and it is a well-defined published
+algorithm rather than a research problem. Specced in
+[docs/tasks/08-arc-welding.md](docs/tasks/08-arc-welding.md).
+
+A slicer approximates curves with hundreds of short `G1` moves; RepRapFirmware executes real arcs.
+Welding those runs back into `G2`/`G3` typically removes 50–80% of the lines in a curved file and
+hands the planner a smooth path instead of a polyline. RRF's own source explicitly loosens its arc
+radius tolerance *because of* ArcWelder output (`MaxNonCncRadiusError = 0.05 mm`), so this is a
+transformation the firmware already expects to receive.
+
+The interesting constraint is architectural rather than geometric: a step cannot retract lines it has
+already emitted, so arc welding is the first step that must **withhold** lines — returning `null`
+while it buffers a candidate run and emitting the arc when the run closes. That is within the
+existing `Transform` contract, but it is the first use of it, and `onEnd` must flush.
 
 ### Phase 13 — print recovery and surgery
 

@@ -48,7 +48,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | B13 | **Cooling / fan overrides by layer range** — superseded by the more useful by-*feature* override, done in phase 10 (`fanByFeature` step) | 3 |
 | B14 | **Marlin-to-RRF preset** — a curated, documented mapping bundle for the ~20 commands that actually differ (explicitly not a general translator) | 3 |
 | B15 | **Z-offset / mesh injection** — insert or replace `G31`, `G29 S1`, baby-stepping at the top of a file | 3 |
-| B16 | **Arc welding / unwelding** (G1 runs ↔ G2/G3) | Later |
+| B16 | **Arc welding** (G1 runs → G2/G3) — specced in [docs/tasks/08-arc-welding.md](docs/tasks/08-arc-welding.md); RRF executes arcs natively and its source explicitly accommodates ArcWelder output. Un-welding is a separate, later task | Next |
 | B17 | **Retraction rewriting** — convert firmware retraction to explicit E moves or vice versa | Later |
 
 ## C. Scripting

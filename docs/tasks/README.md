@@ -14,6 +14,15 @@ four non-negotiables there are binding, not background.
 | [04](04-move-time-model.md) | Move-time model and `M73` rewrite | **Done** | — |
 | [05](05-analysis-pass.md) | Two-pass processing, so a step can see what is coming | **Done** | 04 (uses it as the first consumer) |
 | [06](06-preheat.md) | Predictive pre-heat before a tool change | **Done** — step 1's verification confirmed both assumptions against RRF source and the wiki; see `src/model/preheat.ts`'s module comment | 04, 05 |
+| [07](07-audit-defects.md) | Defect pass on 04–06 — the analysis pass reads the wrong file, and pre-heat cancels its own work | **Ready** — every defect has a reproduction | 04, 05, 06 |
+| [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | **Ready** — RRF's arc behaviour verified against source | 07 |
+| [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Ready** | 04, 07 |
+
+**Do 07 first.** It is not polish: `rewriteTime` currently writes print-time markers computed from
+the file as it was *before* the recipe ran, so a recipe that changes speed produces markers that are
+confidently wrong, and `preheat` can emit a standby that cancels its own pre-heat while reporting
+success. Both are reproduced in that work order. Building 08 or 09 on top of that first is building
+on a known-bad time axis.
 
 **Not yet specified**, and deliberately so — writing them now would be guessing. See
 [PLAN.md](../../PLAN.md) §8 for the roadmap and [feature-ideas.md](../feature-ideas.md) for the
