@@ -264,6 +264,10 @@ function estimatedTimeLabel(a: FileAnalysis): string {
 // docs/tasks/07-audit-defects.md, defect E. A missing axis limit falls back to "no limit" in the
 // model, which would silently understate clamping rather than just being imprecise about it, so
 // this comparison is not safe to show even with a caveat.
+// Stated purely as a difference, never restating a total (task 10 finding F): "Print time (this
+// machine)" above can be sourced from the file's own M73 markers rather than this model, and a
+// restated clampedSeconds total here could visibly disagree with it for no reason a reader could
+// see. The difference itself does not have that problem — it is the same figure either way.
 const clampingLabel = computed(() => {
 	const a = analysis.value;
 	if (a === null || !limitsWereComplete.value) return null;
@@ -271,8 +275,8 @@ const clampingLabel = computed(() => {
 	const extra = a.clampedSeconds - a.unclampedSeconds;
 	if (extra <= 0) return null;
 	const moveCount = a.clampedMoveCount.toLocaleString();
-	return `${formatDuration(a.clampedSeconds)} — ${formatDuration(extra)} of that is this machine `
-		+ `clamping ${moveCount} move${a.clampedMoveCount === 1 ? "" : "s"} that ask for more than its limits.`;
+	return `This machine's limits add about ${formatDuration(extra)} to this file, `
+		+ `across ${moveCount} move${a.clampedMoveCount === 1 ? "" : "s"} that ask for more than it can do.`;
 });
 
 function formatDuration(seconds: number): string {

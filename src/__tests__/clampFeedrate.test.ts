@@ -88,10 +88,49 @@ describe("clampFeedrate", () => {
 		expect(pipeline.stats.warnings.some((w) => w.includes("not available"))).toBe(true);
 	});
 
-	it("leaves a Z-only or E-only move alone", () => {
-		const input = ["G1 Z10 F30000", "M83", "G1 E-5 F30000"].join("\n");
+	it("clamps a Z-only move against Z's own limit (task 10 finding D)", () => {
+		// Z's limit is 20 mm/s = 1200 mm/min
+		const { output } = run({}, "G1 Z10 F30000");
+		expect(output).toBe("G1 Z10 F1200");
+	});
+
+	it("clamps an E-only move against E's own limit, gated by applyToMoves like any other move", () => {
+		// E's limit is 50 mm/s = 3000 mm/min; a retraction (negative E) is a travel move
+		const input = ["M83", "G1 E-5 F30000"].join("\n");
+		const { output } = run({ applyToMoves: "printing" }, input);
+		expect(output.split("\n")[1]).toBe(input.split("\n")[1]); // retraction is travel, not printing: untouched
+		const clamped = run({ applyToMoves: "travel" }, input).output;
+		expect(clamped.split("\n")[1]).toBe("G1 E-5 F3000");
+	});
+
+	it("leaves a move already at exactly Z's or E's limit byte-identical", () => {
+		const input = ["G1 Z10 F1200", "M83", "G1 E-5 F3000"].join("\n");
 		const { output } = run({}, input);
 		expect(output).toBe(input);
+	});
+
+	it("tracks G92 as an absolute position set, not a move to clamp (task 10 finding C)", () => {
+		const input = ["G92 X0 Y0 E0", "G1 X10 F24000"].join("\n");
+		const { output } = run({}, input);
+		expect(output.split("\n")[0]).toBe("G92 X0 Y0 E0"); // never rewritten
+		expect(output.split("\n")[1]).toBe("G1 X10 F12000"); // still correctly clamped afterwards
+	});
+
+	it("keeps tracking extrusion across a G92 E0, as an absolute-E file emits constantly", () => {
+		const input = ["M82", "G1 X10 E5 F24000", "G92 E0", "G1 X20 E0.5 F24000"].join("\n");
+		const out = run({ applyToMoves: "printing" }, input).output.split("\n");
+		// Both moves extrude and both are above X's 12000 mm/min limit
+		expect([out[1], out[3]]).toEqual(["G1 X10 E5 F12000", "G1 X20 E0.5 F12000"]);
+	});
+
+	it("G92 sets a tracked axis absolutely even under G91, not by adding to the current position", () => {
+		const input = ["G90", "G1 X50 F1200", "G91", "G92 X0", "G90", "G1 X50 F24000"].join("\n");
+		const { output } = run({}, input);
+		// Correct: G92 resets X to 0 regardless of the active G91, so the final absolute move to X50
+		// is a real 50mm move and gets clamped. If G92 wrongly went through the relative-move path
+		// (current + value = 50 + 0 = 50, unchanged), the final move would compute a zero-length dx
+		// against the stale X50 and be left untouched at F24000 — a real move silently not clamped.
+		expect(output.split("\n")[5]).toBe("G1 X50 F12000");
 	});
 
 	describe("alsoClampAcceleration", () => {

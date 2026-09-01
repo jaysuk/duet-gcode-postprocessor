@@ -8,12 +8,13 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 626 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. Nine work orders in `docs/tasks/` are complete: `01-defects.md`,
+Implemented in v0.1.0, with 646 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. Ten work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
 (§8 phase 11), `07-audit-defects.md` (a defect pass on 04–06 found by auditing that work rather than
-by a hardware report), `08-arc-welding.md`, and `09-flow-and-clamping.md` (finishes §8 phase 12).
+by a hardware report), `08-arc-welding.md`, `09-flow-and-clamping.md` (finishes §8 phase 12), and
+`10-audit-defects.md` (a second such pass, on 08–09).
 
 **Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–12 in full, plus arc welding — the
 browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
@@ -28,12 +29,8 @@ second read-only pass over the file for steps that need to see a whole-file fact
 transform pass reaches it, a predictive pre-heat step using RRF's own `M307` heater model, an
 `arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, a volumetric-flow audit that never
 assumes a filament diameter or invents a flow ceiling, a `clampFeedrate` step and a matching
-clamped-vs-unclamped time comparison in the inspector, and the usage guide.
-
-**Known defects, open.** Auditing tasks 08 and 09 found six, each with a reproduction that fails on
-`main` today — see [task 10](docs/tasks/10-audit-defects.md). The one that matters: `TimeEstimator`
-gives a `G2`/`G3` arc **zero** time, so the print-time estimate, `rewriteTime`'s `M73` markers and
-`preheat`'s placement are all wrong on a curved or welded file. Task 10 blocks tasks 11–13.
+clamped-vs-unclamped time comparison in the inspector, an arc-length model shared by the time
+estimate and the flow audit so neither treats a curve as its own chord, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -58,13 +55,11 @@ gives a `G2`/`G3` arc **zero** time, so the print-time estimate, `rewriteTime`'s
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–09 are done — the whole of phases 8–12. [`docs/tasks/`](docs/tasks/) now holds four
-more: [10](docs/tasks/10-audit-defects.md) is a defect pass on 08–09 and **blocks the rest**, because
-its finding A (`TimeEstimator` gives a `G2`/`G3` arc zero time, so every estimate is wrong on a curved
-or welded file) undermines the model phases 13–15 all measure against. Then
-[11](docs/tasks/11-print-recovery.md) (phase 13), [12](docs/tasks/12-geometry-analysis.md) (phase 14)
-and [13](docs/tasks/13-simulation-and-tail.md) (phase 15). Each of 11–13 carries an explicit stop
-point for the question in it that source alone cannot answer.
+**Next:** tasks 01–10 are done — the whole of phases 8–12, defect-free as far as auditing has found.
+[`docs/tasks/`](docs/tasks/) holds three more: [11](docs/tasks/11-print-recovery.md) (phase 13),
+[12](docs/tasks/12-geometry-analysis.md) (phase 14) and
+[13](docs/tasks/13-simulation-and-tail.md) (phase 15). Each carries an explicit stop point for a
+question in it that source alone cannot answer.
 
 ---
 
@@ -371,14 +366,16 @@ feature tables are in [FEATURES.md](FEATURES.md) §G–H.
 Ordered by dependency, not by appeal. The first two are infrastructure that four later features
 need, and building them late means building the later features twice.
 
-### Phase 8 — the move-time model *(unlocks 11, 12)* *(done — but see the defect below)*
+### Phase 8 — the move-time model *(unlocks 11, 12)* *(done)*
 
-> ⚠️ **Known defect, open — [task 10](docs/tasks/10-audit-defects.md) finding A.** `TimeEstimator`
-> returns early for anything that is not `G0`/`G1`, so a `G2`/`G3` arc contributes **zero** time. Every
-> estimate below is therefore wrong on a curved file — badly wrong on one `arcWeld` has processed, and
-> wrong on any file from PrusaSlicer 2.8+/Orca with arc fitting on. This also breaks `rewriteTime`'s
-> `M73` output and `preheat`'s placement, both of which read this model. Fix before building anything
-> else on it.
+- ✅ **Fixed in task 10, finding A**: `TimeEstimator` returned early for anything that was not
+  `G0`/`G1`, so a `G2`/`G3` arc contributed zero time — badly wrong on a file `arcWeld` had processed,
+  and on any file from PrusaSlicer 2.8+/Orca with arc fitting on, which also fed a wrong total into
+  `rewriteTime`'s `M73` output and `preheat`'s placement. `gcode/arcFit.ts` gained `arcSweepAngle`/
+  `arcMoveLength`, verified against RepRapFirmware's own `GCodes::DoArcMove` (the `wholeCircle`/
+  `totalArc` computation, including the "identical start and end point is a full circle regardless of
+  direction" case) rather than derived from first principles, and `TimeEstimator` now uses it for the
+  XY branch instead of the chord.
 
 A per-move time estimate using **this machine's** `move.axes[].speed`/`acceleration`/`jerk` and
 `move.printingAcceleration`/`travelAcceleration`, rather than the slicer's profile for a printer it
@@ -504,15 +501,20 @@ extrusion rather than a visible error.
   and everything around it share zero elapsed time. See `docs/tasks/07-audit-defects.md`, defects
   B and C.
 
-### Phase 12 — machine-aware checks and rewrites *(done — but see the defects below)*
+### Phase 12 — machine-aware checks and rewrites *(done)*
 
-> ⚠️ **Known defects, open — [task 10](docs/tasks/10-audit-defects.md) findings B–F.** The flow figure
-> uses an arc's chord rather than its length (B); `clampFeedrate` loses extrusion tracking across
-> `G92 E0`, so an absolute-E printing move reads as travel and is silently skipped (C); the inspector
-> counts clamped Z-only and E-only moves the step will never fix, so "add the step to remove the
-> difference" does not hold (D); and two `unclampedSeconds` doc comments describe an implementation
-> that was deliberately changed during task 09 (E), plus a clamping panel that can contradict the stat
-> beside it (F).
+- ✅ **Fixed in task 10, findings B–F**: the flow figure measured an arc's chord instead of its length
+  (B, same fix as phase 8's finding A, shared via `arcFit.ts`); `clampFeedrate` lost extrusion
+  tracking across `G92 E0` because it never handled `G92` at all, so an absolute-extrusion file's
+  printing moves after the first one silently read as travel (C, `G92` is now tracked as an absolute
+  set regardless of `G90`/`G91`); the step clamped only XY moves while the inspector's own count
+  included Z-only and E-only ones, so "add this step to remove the difference" did not hold (D, the
+  step now clamps Z-only and E-only moves against their own limits too, gated by `applyToMoves` like
+  any other move); `unclampedSeconds`' doc comments described an earlier, instant-acceleration version
+  of the figure rather than the one actually shipped (E, corrected — see that getter's own comment for
+  why the two are not interchangeable); and the inspector's clamping panel restated a total that could
+  visibly disagree with an M73-sourced print-time stat shown right above it (F, now phrased as a pure
+  difference, which cannot disagree with anything).
 
 Individually small, collectively the thing that stops failed prints:
 
@@ -537,13 +539,7 @@ Individually small, collectively the thing that stops failed prints:
 - ✅ **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
   `M568 P1 S200`. Was a real gap in the Marlin preset, and a silent mistranslation.
 
-### Arc welding — `G1` runs into `G2`/`G3` arcs *(done — but see the defect below)*
-
-> ⚠️ **Known defect, open — [task 10](docs/tasks/10-audit-defects.md) findings A and B.** The welding
-> itself is correct; what is not is everything that *reads* its output. The move-time model gives an
-> arc zero seconds, and the volumetric-flow figure measures an arc along its chord instead of its arc
-> length (so flow is over-stated, without limit as the sweep approaches a full circle). Welding a file
-> and then inspecting it currently produces a collapsed time estimate and an inflated flow figure.
+### Arc welding — `G1` runs into `G2`/`G3` arcs *(done)*
 
 A slicer approximates curves with hundreds of short `G1` moves; RepRapFirmware executes real arcs.
 Welding those runs back into `G2`/`G3` typically removes 50–80% of the lines in a curved file and
@@ -576,6 +572,10 @@ existing `Transform` contract, but it is the first use of it, and `onEnd` must f
 - ✅ `test/fixtures/arc-circle.gcode` (a full 90-point circle) collapses to a single `G3` plus a
   1-line residual — a 19-line replacement for 90 source lines — added to the golden-file matrix
   alongside a bundled "Weld curves into arcs" preset using ArcWelder's own defaults.
+- ✅ **Fixed in task 10, findings A and B**: the welding itself was always correct; what read its
+  output was not. The move-time model and the volumetric-flow figure both measured a welded arc along
+  its chord — zero seconds and an over-stated flow, respectively — until `arcFit.ts` gained the
+  `arcMoveLength` helper both now share.
 
 ### Phase 13 — print recovery and surgery
 

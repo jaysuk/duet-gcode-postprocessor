@@ -151,6 +151,42 @@ describe("TimeEstimator", () => {
 		expect(runLines(["M104 S210", "M140 S60"]).elapsed).toBe(0);
 	});
 
+	describe("arcs (task 10 finding A: an arc used to contribute zero time)", () => {
+		it("times a G2/G3 arc rather than treating it as zero-duration", () => {
+			// Half circle r=10 from (0,0) to (20,0) at F600 (10 mm/s): ~31.4mm of travel, so ~3s
+			const estimator = runLines(["G1 X0 Y0 F600", "G3 X20 Y0 I10 J0"]);
+			expect(estimator.elapsed).toBeGreaterThan(1);
+		});
+
+		it("gives a G2 and a G3 covering the same chord different times when the sweep differs", () => {
+			// From (10,0): G3 to (0,10) is a short (90 degree) arc; G2 to the same point is the long
+			// (270 degree) way round. Same chord, very different distance actually travelled.
+			const short = runLines(["G1 X10 Y0 F600", "G3 X0 Y10 I-10 J0"]).elapsed;
+			const long = runLines(["G1 X10 Y0 F600", "G2 X0 Y10 I-10 J0"]).elapsed;
+			expect(long).toBeGreaterThan(short);
+		});
+
+		it("gives a full-circle arc (identical start and end point) real, non-zero time", () => {
+			// The chord is exactly zero here; the move is not
+			const estimator = runLines(["G1 X10 Y0 F600", "G2 X10 Y0 I-10 J0"]);
+			expect(estimator.elapsed).toBeGreaterThan(1);
+		});
+
+		it("falls back to the chord for an R-format arc, rather than guessing a sweep", () => {
+			// Not zero (the chord is still a real distance) but does not attempt arc-length accuracy
+			const estimator = runLines(["G1 X0 Y0 F600", "G2 X20 Y0 R10"]);
+			expect(estimator.elapsed).toBeGreaterThan(0);
+		});
+
+		it("times an arc against the tighter of X and Y, using both even with no net Y displacement", () => {
+			const limits: MachineLimits = { ...LIMITS, maxSpeed: { ...LIMITS.maxSpeed, Y: 1 } };
+			// A full circle has zero net X and Y displacement but moves through both axes throughout
+			const withTightY = runLines(["G1 X10 Y0 F60000", "G2 X10 Y0 I-10 J0"], limits).elapsed;
+			const withLooseY = runLines(["G1 X10 Y0 F60000", "G2 X10 Y0 I-10 J0"], LIMITS).elapsed;
+			expect(withTightY).toBeGreaterThan(withLooseY);
+		});
+	});
+
 	describe("clamping report", () => {
 		it("matches unclamped when every move is within limits, and clamps nothing", () => {
 			const estimator = runLines(["G1 X100 Y0 F1200"]); // 20 mm/s, well under X's 200 mm/s limit

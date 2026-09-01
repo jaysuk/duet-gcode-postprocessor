@@ -203,3 +203,44 @@ export function arcRadiusWithinTolerance(
 	const endRadius = Math.hypot(endX - centreX, endY - centreY);
 	return Math.abs(endRadius - startRadius) <= MAX_NON_CNC_RADIUS_ERROR_MM;
 }
+
+/**
+ * The angle (radians, always in `[0, 2*PI]`) actually swept by a `G2`/`G3` move going from its start
+ * point around to its end point **the way the command travels**, not the shorter of the two possible
+ * directions — a chord-based distance is not the same thing, and using it understates both time and
+ * flow on anything but a very shallow arc. Mirrors RepRapFirmware's own computation exactly
+ * (`GCodes::DoArcMove`, `src/GCodes/GCodes.cpp` — the `wholeCircle`/`totalArc` block, verified against
+ * `C:\Users\live\Documents\Github\RRFBuild\RepRapFirmware`):
+ *
+ * - a start point identical to the end point is a full circle (`2*PI`) — RRF's own comment says
+ *   plainly "CNC machines usually do a full circle if the initial and final XY coordinates are the
+ *   same", regardless of direction;
+ * - otherwise it is the angle from the centre to the start minus the angle from the centre to the end
+ *   (or the reverse, for the other direction), wrapped into `[0, 2*PI)` by adding a full turn if that
+ *   subtraction came out negative — RRF does the identical wrap (`if (totalArc < 0.0) totalArc += TwoPi`).
+ */
+export function arcSweepAngle(
+	startX: number, startY: number, endX: number, endY: number, i: number, j: number, clockwise: boolean,
+): number {
+	if (startX === endX && startY === endY) return 2 * Math.PI;
+	const centreX = startX + i;
+	const centreY = startY + j;
+	const startAngle = Math.atan2(startY - centreY, startX - centreX);
+	const endAngle = Math.atan2(endY - centreY, endX - centreX);
+	let sweep = clockwise ? startAngle - endAngle : endAngle - startAngle;
+	if (sweep < 0) sweep += 2 * Math.PI;
+	return sweep;
+}
+
+/**
+ * Distance actually travelled by a `G2`/`G3` move — radius times the swept angle. **Not** the chord
+ * between its endpoints, which is what naively measuring `hypot(dx, dy)` gives and is wrong for
+ * anything but a very shallow arc (and wrong by an unbounded amount as the sweep approaches a full
+ * circle, where the chord tends to zero while the real distance does not).
+ */
+export function arcMoveLength(
+	startX: number, startY: number, endX: number, endY: number, i: number, j: number, clockwise: boolean,
+): number {
+	const radius = Math.hypot(i, j);
+	return radius * arcSweepAngle(startX, startY, endX, endY, i, j, clockwise);
+}

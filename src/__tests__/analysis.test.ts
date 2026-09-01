@@ -282,6 +282,14 @@ describe("analyseText", () => {
 			expect(analysis.timeSource).toBe("none");
 			expect(analysis.estimatedSeconds).toBeNull();
 		});
+
+		it("does not report a file made only of arcs as having nothing to time (task 10 finding A)", () => {
+			const arcs = analyseText(
+				["G1 X0 Y0 F600", "G3 X20 Y0 I10 J0", "G3 X0 Y0 I-10 J0"].join("\n"), undefined, LIMITS,
+			);
+			expect(arcs.timeSource).toBe("model");
+			expect(arcs.estimatedSeconds).toBeGreaterThan(1);
+		});
 	});
 
 	it("counts Klipper macros that are not G-code commands", () => {
@@ -331,6 +339,23 @@ describe("analyseText", () => {
 			const analysis = analyseText(["G1 X10 F3600 E1", "G1 X20 F3600 E3"].join("\n"), meta);
 			// Second move: 2mm E over 10mm travel, double the first move's rate
 			expect(analysis.peakFlowLine).toBe(2);
+		});
+
+		it("measures an arc along its arc length, not its chord (task 10 finding B)", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			// Half circle r=10 from (0,0) to (20,0): chord 20mm, true path ~31.4mm — same E over a
+			// longer real distance means genuinely lower flow, not the same figure as the straight line
+			const arc = analyseText("G1 X0 Y0 F600\nG3 X20 Y0 I10 J0 E1", meta);
+			const straight = analyseText("G1 X0 Y0 F600\nG1 X20 Y0 E1", meta);
+			expect(arc.peakFlowMm3PerSec).not.toBeNull();
+			expect(arc.peakFlowMm3PerSec).toBeLessThan(straight.peakFlowMm3PerSec as number);
+		});
+
+		it("gives a full-circle arc's flow a real (finite, non-infinite) figure despite a zero chord", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			const analysis = analyseText("G1 X10 Y0 F600\nG2 X10 Y0 I-10 J0 E1", meta);
+			expect(analysis.peakFlowMm3PerSec).not.toBeNull();
+			expect(Number.isFinite(analysis.peakFlowMm3PerSec)).toBe(true);
 		});
 
 		it("reads the slicer's own max_volumetric_speed when stated", () => {

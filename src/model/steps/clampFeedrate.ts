@@ -5,7 +5,16 @@
  *
  * **Per-axis-combination, not global.** An X-only move is checked against X's own limit, not the
  * tighter of X and Y — reuses `timeModel.ts`'s own `axisLetters`/`combinedAxisLimits` rather than a
- * second copy that could drift from the estimate the inspector already shows.
+ * second copy that could drift from the estimate the inspector already shows. A Z-only move (a lift)
+ * or an E-only move (a retraction or wipe) is checked against that axis's own limit in the same way
+ * — `TimeEstimator`'s clamped-move count already includes these (task 10 finding D), so this step
+ * must actually clamp them or the inspector's "adding this step removes the difference" claim is
+ * false for any file with fast Z or E moves.
+ *
+ * **`G92` is tracked, not skipped** (task 10 finding C). It sets a position absolutely regardless of
+ * `G90`/`G91`, and an absolute-extrusion file (Cura's default) emits `G92 E0` constantly — missing it
+ * makes every extrusion delta after the first one wrong, silently misclassifying real printing moves
+ * as travel under "printing moves only". `G92` is never itself rewritten.
  *
  * **Byte-identical when nothing needs clamping.** A move whose F is already within limits is
  * returned as `undefined` (unchanged), not reformatted — a diff should only ever show what actually
@@ -64,9 +73,10 @@ export const clampFeedrateStep: StepDefinition<ClampFeedrateConfig> = {
 
 		let x = 0;
 		let y = 0;
+		let z = 0;
 		let e = 0;
 		let clampedCount = 0;
-		let secondsSaved = 0;
+		let secondsAdded = 0;
 		let accelClamped = 0;
 
 		return {
@@ -74,6 +84,21 @@ export const clampFeedrateStep: StepDefinition<ClampFeedrateConfig> = {
 
 			onLine(lineCtx: LineContext, line: string): string | undefined {
 				const token = lineCtx.token;
+
+				if (token.letter === "G" && token.code === "G92") {
+					// Sets position absolutely, regardless of G90/G91 — must not go through applyAxis,
+					// which would add to the current position under G91. Never rewritten.
+					const params = parseParams(token.body);
+					const gx = paramNumber(params, "X");
+					const gy = paramNumber(params, "Y");
+					const gz = paramNumber(params, "Z");
+					const ge = paramNumber(params, "E");
+					if (gx !== null) x = gx;
+					if (gy !== null) y = gy;
+					if (gz !== null) z = gz;
+					if (ge !== null) e = ge;
+					return undefined;
+				}
 
 				if (config.alsoClampAcceleration && limits !== undefined && token.letter === "M" && token.code === "M204") {
 					const params = parseParams(token.body);
@@ -103,18 +128,20 @@ export const clampFeedrateStep: StepDefinition<ClampFeedrateConfig> = {
 				const relative = lineCtx.relativeMoves;
 				const prevX = x;
 				const prevY = y;
+				const prevZ = z;
 				const prevE = e;
 				const nextX = applyAxis(params, "X", x, relative);
 				const nextY = applyAxis(params, "Y", y, relative);
+				const nextZ = applyAxis(params, "Z", z, relative);
 				const nextE = applyAxis(params, "E", e, lineCtx.relativeE);
 				if (nextX !== null) x = nextX;
 				if (nextY !== null) y = nextY;
+				if (nextZ !== null) z = nextZ;
 				if (nextE !== null) e = nextE;
 
 				const dx = nextX !== null ? x - prevX : 0;
 				const dy = nextY !== null ? y - prevY : 0;
-				if (dx === 0 && dy === 0) return undefined; // Z-only, E-only, or a zero-length move: nothing to clamp here
-
+				const dz = nextZ !== null ? z - prevZ : 0;
 				const deltaE = e - prevE;
 				const isPrinting = deltaE > 0;
 				if (config.applyToMoves === "printing" && !isPrinting) return undefined;
@@ -124,14 +151,29 @@ export const clampFeedrateStep: StepDefinition<ClampFeedrateConfig> = {
 				if (f === null) return undefined; // no commanded feedrate on this line to clamp
 				const nominal = f / 60;
 
-				const involved: Array<string> = [];
-				if (nextX !== null) involved.push("X");
-				if (nextY !== null) involved.push("Y");
-				const { maxSpeed } = combinedAxisLimits(limits, involved);
+				// Same three mutually-exclusive cases as TimeEstimator.line: XY (per-axis-combination),
+				// then Z-only, then E-only — a diagonal XY+Z move is timed (and here, clamped) on its XY
+				// component only, matching the model this step is meant to make good on.
+				let maxSpeed: number;
+				let distance: number;
+				if (dx !== 0 || dy !== 0) {
+					const involved: Array<string> = [];
+					if (nextX !== null) involved.push("X");
+					if (nextY !== null) involved.push("Y");
+					maxSpeed = combinedAxisLimits(limits, involved).maxSpeed;
+					distance = Math.hypot(dx, dy);
+				} else if (dz !== 0) {
+					maxSpeed = limits.maxSpeed.Z ?? Infinity;
+					distance = Math.abs(dz);
+				} else if (deltaE !== 0) {
+					maxSpeed = limits.maxSpeed.E ?? Infinity;
+					distance = Math.abs(deltaE);
+				} else {
+					return undefined; // zero-length move: nothing to clamp
+				}
 				if (!Number.isFinite(maxSpeed) || nominal <= maxSpeed) return undefined;
 
-				const distance = Math.hypot(dx, dy);
-				if (distance > 0) secondsSaved += distance / maxSpeed - distance / nominal;
+				if (distance > 0) secondsAdded += distance / maxSpeed - distance / nominal;
 				clampedCount++;
 				const body = setParam(token.body, "F", formatNumber(maxSpeed * 60, 0));
 				return withBody(token, body);
@@ -145,7 +187,7 @@ export const clampFeedrateStep: StepDefinition<ClampFeedrateConfig> = {
 				if (clampedCount > 0) {
 					runCtx.warn(
 						`Clamped ${clampedCount} move${clampedCount === 1 ? "" : "s"} to this machine's speed `
-						+ `limit, adding about ${Math.round(secondsSaved)}s to the estimated print time.`,
+						+ `limit, adding about ${Math.round(secondsAdded)}s to the estimated print time.`,
 					);
 				}
 				if (accelClamped > 0) {

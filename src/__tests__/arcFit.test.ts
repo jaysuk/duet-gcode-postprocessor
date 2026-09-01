@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { arcRadiusWithinTolerance, tryFitArc, type ArcFitOptions, type FitPoint } from "../model/gcode/arcFit";
+import {
+	arcMoveLength, arcRadiusWithinTolerance, arcSweepAngle, tryFitArc, type ArcFitOptions, type FitPoint,
+} from "../model/gcode/arcFit";
 
 const OPTIONS: ArcFitOptions = { resolutionMm: 0.05, pathTolerancePercent: 5, maxRadiusMm: 9999 };
 
@@ -132,5 +134,49 @@ describe("arcRadiusWithinTolerance", () => {
 
 	it("rejects an end point that is not actually on the circle the centre and start describe", () => {
 		expect(arcRadiusWithinTolerance(0, 0, 100, 100, 10, 0)).toBe(false);
+	});
+});
+
+describe("arcSweepAngle", () => {
+	// Centre (0,0), start (10,0): I=-10, J=0 in every case below.
+	it("measures a G3 (anticlockwise) quarter circle as PI/2, not the chord", () => {
+		expect(arcSweepAngle(10, 0, 0, 10, -10, 0, false)).toBeCloseTo(Math.PI / 2, 9);
+	});
+
+	it("measures a G2 (clockwise) quarter circle the short way as PI/2", () => {
+		expect(arcSweepAngle(10, 0, 0, -10, -10, 0, true)).toBeCloseTo(Math.PI / 2, 9);
+	});
+
+	it("measures a G2 (clockwise) move to the same endpoint the LONG way as 3*PI/2", () => {
+		// Going clockwise from (10,0), (0,10) is reached only after 270 degrees, not the 90 degrees
+		// a G3 to the same point would take — direction is not merely cosmetic
+		expect(arcSweepAngle(10, 0, 0, 10, -10, 0, true)).toBeCloseTo((3 * Math.PI) / 2, 9);
+	});
+
+	it("gives the two directions between the same two points sweeps that add to a full turn", () => {
+		const cw = arcSweepAngle(10, 0, 0, 10, -10, 0, true);
+		const ccw = arcSweepAngle(10, 0, 0, 10, -10, 0, false);
+		expect(cw + ccw).toBeCloseTo(2 * Math.PI, 9);
+	});
+
+	it("treats a start point identical to the end point as a full circle, either direction", () => {
+		// Matches RRF's own "CNC machines usually do a full circle if the initial and final XY
+		// coordinates are the same" — the chord is zero, but the move is not
+		expect(arcSweepAngle(10, 0, 10, 0, -10, 0, true)).toBeCloseTo(2 * Math.PI, 9);
+		expect(arcSweepAngle(10, 0, 10, 0, -10, 0, false)).toBeCloseTo(2 * Math.PI, 9);
+	});
+});
+
+describe("arcMoveLength", () => {
+	it("is radius times the swept angle, not the chord between the endpoints", () => {
+		// Quarter circle, radius 10: length = 10 * PI/2, chord would be 10*sqrt(2) =~ 14.14
+		const length = arcMoveLength(10, 0, 0, 10, -10, 0, false);
+		expect(length).toBeCloseTo(10 * (Math.PI / 2), 9);
+		expect(length).toBeGreaterThan(Math.hypot(10, 10));
+	});
+
+	it("gives a full circle its full circumference, even though the chord is zero", () => {
+		const length = arcMoveLength(10, 0, 10, 0, -10, 0, true);
+		expect(length).toBeCloseTo(2 * Math.PI * 10, 9);
 	});
 });

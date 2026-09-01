@@ -5,6 +5,7 @@
  * as the pipeline so the chunked reader can feed either (or both) without knowing the difference.
  */
 
+import { arcMoveLength } from "./gcode/arcFit";
 import { bareMacroName, detectDialect, type DialectReport } from "./gcode/dialect";
 import { normaliseFeature, type Feature } from "./gcode/features";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
@@ -97,8 +98,10 @@ export interface FileAnalysis {
 	/** Seconds this machine will actually take, its limits applied. Null when no machine limits were
 	 *  supplied (the constructor's `limits` argument was omitted). */
 	clampedSeconds: number | null;
-	/** Seconds the file's own commanded feedrates would take with no speed or acceleration limit
-	 *  applied. Null under the same condition as `clampedSeconds` — it comes from the same pass. */
+	/** Seconds the file's own commanded feedrates would take with this machine's speed *ceiling*
+	 *  skipped, but its real acceleration and jerk still applied — see `TimeEstimator.unclampedSeconds`
+	 *  for why this is not simply "no limits at all" (task 10 finding E). Null under the same
+	 *  condition as `clampedSeconds` — it comes from the same pass. */
 	unclampedSeconds: number | null;
 	/** Moves whose commanded feedrate exceeded this machine's limit for the axes involved. 0 when no
 	 *  machine limits were supplied. */
@@ -250,7 +253,22 @@ export class Analyser {
 			const dx = x !== null ? this.x! - (prevX ?? 0) : 0;
 			const dy = y !== null ? this.y! - (prevY ?? 0) : 0;
 			const dz = z !== null && zBeforeLine !== null ? z - zBeforeLine : 0;
-			const distance = Math.hypot(dx, dy, dz);
+			// An arc's own length is not its chord (task 10 finding B) — same fallback rule as
+			// timeModel.ts: R-format and a missing/zero I+J are left on the chord rather than guessed.
+			let xyLength = Math.hypot(dx, dy);
+			if (code === "G2" || code === "G3") {
+				const i = paramNumber(params, "I");
+				const j = paramNumber(params, "J");
+				const r = paramNumber(params, "R");
+				if (r === null && i !== null && j !== null && (i !== 0 || j !== 0)) {
+					const startX = prevX ?? 0;
+					const startY = prevY ?? 0;
+					const endX = x !== null ? this.x! : startX;
+					const endY = y !== null ? this.y! : startY;
+					xyLength = arcMoveLength(startX, startY, endX, endY, i, j, code === "G2");
+				}
+			}
+			const distance = Math.hypot(xyLength, dz);
 			if (distance > 0) {
 				const flow = (deltaE / distance) * this.lastFeedrateMmPerSec * this.filamentArea;
 				if (this.peakFlowMm3PerSec === null || flow > this.peakFlowMm3PerSec) {

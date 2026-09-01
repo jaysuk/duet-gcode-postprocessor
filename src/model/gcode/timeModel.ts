@@ -24,6 +24,7 @@
  * for *this* machine, not firmware-exact.
  */
 
+import { arcMoveLength } from "./arcFit";
 import { paramNumber, parseParams, type Tokenised } from "./tokenise";
 import type { MachineState } from "./state";
 
@@ -145,9 +146,19 @@ export class TimeEstimator {
 		return this.seconds;
 	}
 
-	/** Seconds the file's own commanded feedrates would take with no speed or acceleration limit
-	 *  applied — distance over commanded speed, instantaneous acceleration assumed. Not "what this
-	 *  machine can do", but "what the file is asking for", which is the point of the comparison. */
+	/**
+	 * Seconds the file's own commanded feedrates would take, with this machine's real acceleration
+	 * and jerk still applied but its speed *ceiling* skipped — not, as an earlier version of this
+	 * comment said, "no acceleration limit, instantaneous acceleration assumed". That version and
+	 * this one are not the same figure: instant acceleration would make `unclampedSeconds` cheaper
+	 * to compute but wrong for the comparison this exists for, since a finite acceleration always
+	 * costs time the instant-acceleration figure does not — `clampedSeconds === unclampedSeconds`
+	 * would then be false even on a file within every limit, which is not what task 09 specified
+	 * (see `clampedMoveCount === 0` implying equality, tested in `timeModel.test.ts`). Skipping only
+	 * the speed cap is what isolates its cost alone. Not "what this machine can do", but "what the
+	 * file is asking for at a speed this machine could otherwise reach", which is the actual point of
+	 * the comparison — see task 10 finding E.
+	 */
 	get unclampedSeconds(): number {
 		return this.unclampedSecondsAcc;
 	}
@@ -160,7 +171,8 @@ export class TimeEstimator {
 
 	line(token: Tokenised, state: MachineState): void {
 		if (token.code === null || (token.letter !== "G")) return;
-		if (token.code !== "G0" && token.code !== "G1") return;
+		const isArc = token.code === "G2" || token.code === "G3";
+		if (token.code !== "G0" && token.code !== "G1" && !isArc) return;
 
 		const params = parseParams(token.body);
 		const relative = state.relativeMoves;
@@ -184,13 +196,31 @@ export class TimeEstimator {
 		const dz = delta(nextZ, this.z);
 		const de = delta(nextE, this.e);
 
-		const xyDistance = Math.hypot(dx, dy);
+		let xyDistance = Math.hypot(dx, dy);
+		if (isArc) {
+			// An arc's own length is not its chord — see arcMoveLength's own comment; understating it
+			// (or, for a full circle, treating it as zero because the chord is) is task 10's finding A.
+			// R-format arcs and a missing/zero I+J are left on the chord, deliberately: RRF's own
+			// R-format has a short/long-arc ambiguity `arcFit.ts` already declines to resolve, and a
+			// malformed I/J is the firmware's problem to reject, not this model's to guess at.
+			const i = paramNumber(params, "I");
+			const j = paramNumber(params, "J");
+			const r = paramNumber(params, "R");
+			if (r === null && i !== null && j !== null && (i !== 0 || j !== 0)) {
+				const startX = this.x ?? 0;
+				const startY = this.y ?? 0;
+				xyDistance = arcMoveLength(startX, startY, nextX ?? startX, nextY ?? startY, i, j, token.code === "G2");
+			}
+		}
 		const zDistance = Math.abs(dz);
 		const eDistance = Math.abs(de);
 		const nominal = this.lastFeedrate ?? this.limits.maxSpeed.X ?? 0;
 
 		if (xyDistance > 0) {
-			const involved = axisLetters(nextX, nextY);
+			// An arc moves through both axes throughout its sweep even when one has zero net
+			// displacement (a full circle's dx/dy are both zero) — axisLetters would wrongly see "no
+			// axes involved" for exactly that case, so an arc always uses both XY limits.
+			const involved = isArc ? ["X", "Y"] : axisLetters(nextX, nextY);
 			const { maxSpeed, maxAccel, jerk } = combinedAxisLimits(this.limits, involved);
 			const accel = this.limits.printAccel ?? maxAccel;
 			const cap = Number.isFinite(maxSpeed) ? maxSpeed : nominal;
