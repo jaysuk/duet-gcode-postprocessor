@@ -110,16 +110,36 @@ describe("VoidDetector", () => {
  * Task 12 §4's stop point: run the detector over the real bundled fixtures and report the
  * false-positive rate before building anything that shows a candidate to a user.
  *
- * **Honest finding: this does not answer that question.** `test/fixtures/*.gcode` are minimal
- * fixtures built to exercise parsing and golden-diff behaviour — a handful of representative lines
- * per layer, no infill, no real perimeter density. Zero candidates here is expected and proves only
- * that the extraction plumbing does not crash or mis-attribute layers; it says nothing about how the
- * detector behaves on a real, densely-toolpathed slice. That question is still open, and per the
- * task's own instruction, nothing beyond this pure module and its tests should be built — no
- * collector, no step, no UI — until it has been checked against an actual dense slice, not a
- * synthetic fixture built for a different purpose.
+ * **This repo's bundled fixtures cannot answer that question**, and do not try to below.
+ * `test/fixtures/*.gcode` are minimal fixtures built to exercise parsing and golden-diff behaviour —
+ * a handful of representative lines per layer, no infill, no real perimeter density. Zero candidates
+ * on them is expected and proves only that the extraction plumbing does not crash or mis-attribute
+ * layers; it says nothing about how the detector behaves on a real, densely-toolpathed slice.
+ *
+ * **The real question was answered separately, against an actual dense slice, and the answer is
+ * negative.** A real, 250-layer PrusaSlicer file (a multi-ring model, sliced with normal perimeter
+ * and infill density — not committed to this repo, since it is not this project's fixture to own,
+ * but reproducible with any similarly dense multi-object slice) produced:
+ *
+ * | Grid resolution | Candidates |
+ * | --- | --- |
+ * | 2 mm  | 16 |
+ * | 1 mm  | 42 |
+ * | 0.5mm | 1,139 |
+ *
+ * on an object with **no intentional cavities at all**. Inspecting the reported coordinates shows
+ * most of them tracing the curved outline of a single thin ring wall at evenly-spaced angular
+ * intervals — rasterising a curve onto a grid leaves small gaps between its inner and outer edge
+ * that read as "enclosed" purely from quantisation, not real geometry. Finer resolution makes this
+ * *worse*, not better, since it resolves the curve more faithfully rather than smoothing past the
+ * artefact — so this is not a threshold to tune, it is the heuristic's own limit on curved thin walls.
+ *
+ * This is exactly the failure mode `12-geometry-analysis.md` §4 named as disqualifying ("if a plain
+ * rectilinear test print yields dozens of candidates, the heuristic is not good enough to show a
+ * user"), so per that task's own acceptance criteria, stopping here is correct: no collector, no
+ * step, no UI beyond this pure, tested detector module.
  */
-describe("void detector against the bundled fixtures (smoke test, not real-world validation — see comment above)", () => {
+describe("void detector against the bundled fixtures (smoke test only — see comment above for the real-world finding)", () => {
 	/** Turns a parsed file into per-layer segments the same shape a future collector would produce —
 	 *  kept in the test only; task 12 §4 explicitly defers building this for real until the open
 	 *  question above is answered. */

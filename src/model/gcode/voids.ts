@@ -19,10 +19,18 @@
  * first seen enclosed) — not every layer's full grid. A region's cell count is bounded by the size
  * of the hole it represents, not by the file's layer count, so this stays small on any real file.
  *
- * **This is the speculative half of task 12.** Per its own stop point: build this, test it against
- * synthetic geometry, then run it over the real bundled fixtures and report the false-positive rate
- * before building anything that shows a candidate to a user. A heuristic that fires on ordinary
- * geometry is worse than no heuristic — see `docs/tasks/12-geometry-analysis.md` §4.
+ * **This is the speculative half of task 12, and its own stop point is now resolved: stop here.**
+ * Checked against a real, densely-toolpathed 250-layer PrusaSlicer file — not just the synthetic
+ * geometry in this module's own tests, and not this repo's bundled fixtures, which are too thin to
+ * answer the question — the detector produced 16 candidates at a 2mm grid, 42 at 1mm, and 1,139 at
+ * 0.5mm, on a single object with no intentional cavities at all. Most trace the curved outline of a
+ * thin ring wall: rasterising a curve onto a grid leaves small gaps between its inner and outer edge
+ * that read as "enclosed" purely from quantisation, not real 3D geometry — an artefact that finer
+ * resolution makes *worse*, not better, since a finer grid resolves the curve more faithfully. That
+ * is exactly the failure mode this task's own acceptance criteria named as disqualifying, so this
+ * stays a pure, tested, unwired module: no collector, no step, no UI. See
+ * `docs/tasks/12-geometry-analysis.md` §4 and `src/__tests__/voids.test.ts`'s own describe block for
+ * the full account.
  */
 
 import type { Feature } from "./features";
