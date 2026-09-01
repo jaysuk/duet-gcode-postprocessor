@@ -91,11 +91,26 @@ export function moveTime(input: {
 	return tAccel + tDecel;
 }
 
-function axisLetters(x: number | null, y: number | null): Array<string> {
+/** Which axis letters a line actually commands — an X-only move must be checked against X's own
+ *  limit, not the tighter of X and Y, which is why this is computed rather than assumed to be both. */
+export function axisLetters(x: number | null, y: number | null): Array<string> {
 	const letters: Array<string> = [];
 	if (x !== null) letters.push("X");
 	if (y !== null) letters.push("Y");
 	return letters;
+}
+
+/** The combined limit for one move's involved axes: the tightest of whichever axes it touches.
+ *  Shared by `TimeEstimator` and the `clampFeedrate` step so "per-axis-combination, not global" is
+ *  one implementation, not two that can drift apart. */
+export function combinedAxisLimits(
+	limits: MachineLimits, involved: Array<string>,
+): { maxSpeed: number; maxAccel: number; jerk: number } {
+	return {
+		maxSpeed: Math.min(...involved.map((a) => limits.maxSpeed[a] ?? Infinity)),
+		maxAccel: Math.min(...involved.map((a) => limits.maxAccel[a] ?? Infinity)),
+		jerk: Math.min(...involved.map((a) => limits.jerk[a] ?? 0)),
+	};
 }
 
 /**
@@ -109,6 +124,8 @@ function axisLetters(x: number | null, y: number | null): Array<string> {
  */
 export class TimeEstimator {
 	private seconds = 0;
+	private unclampedSecondsAcc = 0;
+	private clampedMovesAcc = 0;
 	private x: number | null = null;
 	private y: number | null = null;
 	private z: number | null = null;
@@ -119,6 +136,26 @@ export class TimeEstimator {
 
 	get elapsed(): number {
 		return this.seconds;
+	}
+
+	/** Seconds the machine will actually take, this machine's limits applied. Same value as
+	 *  {@link elapsed} — both names exist because callers computing a clamping report read more
+	 *  naturally against `unclampedSeconds` when both are named for what they are. */
+	get clampedSeconds(): number {
+		return this.seconds;
+	}
+
+	/** Seconds the file's own commanded feedrates would take with no speed or acceleration limit
+	 *  applied — distance over commanded speed, instantaneous acceleration assumed. Not "what this
+	 *  machine can do", but "what the file is asking for", which is the point of the comparison. */
+	get unclampedSeconds(): number {
+		return this.unclampedSecondsAcc;
+	}
+
+	/** Count of moves (not lines) whose commanded feedrate exceeded this machine's limit for the
+	 *  axes actually involved. */
+	get clampedMoveCount(): number {
+		return this.clampedMovesAcc;
 	}
 
 	line(token: Tokenised, state: MachineState): void {
@@ -154,13 +191,24 @@ export class TimeEstimator {
 
 		if (xyDistance > 0) {
 			const involved = axisLetters(nextX, nextY);
-			const maxSpeed = Math.min(...involved.map((a) => this.limits.maxSpeed[a] ?? Infinity));
-			const maxAccel = Math.min(...involved.map((a) => this.limits.maxAccel[a] ?? Infinity));
-			const jerk = Math.min(...involved.map((a) => this.limits.jerk[a] ?? 0));
+			const { maxSpeed, maxAccel, jerk } = combinedAxisLimits(this.limits, involved);
 			const accel = this.limits.printAccel ?? maxAccel;
+			const cap = Number.isFinite(maxSpeed) ? maxSpeed : nominal;
+			if (nominal > cap) this.clampedMovesAcc++;
 			this.seconds += moveTime({
 				distance: xyDistance,
-				nominalSpeed: Math.min(nominal, Number.isFinite(maxSpeed) ? maxSpeed : nominal),
+				nominalSpeed: Math.min(nominal, cap),
+				accel: Number.isFinite(accel) ? accel : maxAccel,
+				entrySpeed: jerk,
+				exitSpeed: jerk,
+			});
+			// Same accel/jerk as the clamped estimate above — the only thing "unclamped" ignores is
+			// the speed cap. Using the file's own uncapped nominal here (instead of `Math.min(nominal,
+			// cap)`) means the two are identical, not merely close, whenever nothing was actually
+			// clamped, which is what lets a caller trust `clampedMoveCount === 0` implies equality.
+			this.unclampedSecondsAcc += moveTime({
+				distance: xyDistance,
+				nominalSpeed: nominal,
 				accel: Number.isFinite(accel) ? accel : maxAccel,
 				entrySpeed: jerk,
 				exitSpeed: jerk,
@@ -168,9 +216,17 @@ export class TimeEstimator {
 		} else if (zDistance > 0) {
 			const maxSpeed = this.limits.maxSpeed.Z ?? nominal;
 			const accel = this.limits.printAccel ?? this.limits.maxAccel.Z ?? 0;
+			if (nominal > maxSpeed) this.clampedMovesAcc++;
 			this.seconds += moveTime({
 				distance: zDistance,
 				nominalSpeed: Math.min(nominal, maxSpeed),
+				accel,
+				entrySpeed: this.limits.jerk.Z ?? 0,
+				exitSpeed: this.limits.jerk.Z ?? 0,
+			});
+			this.unclampedSecondsAcc += moveTime({
+				distance: zDistance,
+				nominalSpeed: nominal,
 				accel,
 				entrySpeed: this.limits.jerk.Z ?? 0,
 				exitSpeed: this.limits.jerk.Z ?? 0,
@@ -179,9 +235,17 @@ export class TimeEstimator {
 			// An E-only move (a retraction, or a wipe): timed against the extruder's own limits
 			const maxSpeed = this.limits.maxSpeed.E ?? nominal;
 			const accel = this.limits.maxAccel.E ?? 0;
+			if (nominal > maxSpeed) this.clampedMovesAcc++;
 			this.seconds += moveTime({
 				distance: eDistance,
 				nominalSpeed: Math.min(nominal, maxSpeed),
+				accel,
+				entrySpeed: this.limits.jerk.E ?? 0,
+				exitSpeed: this.limits.jerk.E ?? 0,
+			});
+			this.unclampedSecondsAcc += moveTime({
+				distance: eDistance,
+				nominalSpeed: nominal,
 				accel,
 				entrySpeed: this.limits.jerk.E ?? 0,
 				exitSpeed: this.limits.jerk.E ?? 0,

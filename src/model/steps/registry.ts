@@ -7,6 +7,7 @@
  */
 
 import { arcWeldStep } from "./arcWeld";
+import { clampFeedrateStep } from "./clampFeedrate";
 import { commandMapStep } from "./commandMap";
 import { deleteLinesStep } from "./deleteLines";
 import { fanByFeatureStep } from "./fanByFeature";
@@ -32,6 +33,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	preheatStep,
 	rulesStep,
 	scriptStep,
+	clampFeedrateStep,
 	arcWeldStep,
 ] as unknown as Array<StepDefinition<never>>);
 

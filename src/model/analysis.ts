@@ -86,6 +86,23 @@ export interface FileAnalysis {
 	estimatedSeconds: number | null;
 	dialect: DialectReport;
 	meta: SlicerMetadata;
+	/** mm³/s of filament demanded, at the worst move in the file. Null when the file does not
+	 *  extrude, or when the filament diameter is unknown and cannot be assumed. */
+	peakFlowMm3PerSec: number | null;
+	/** 1-based source line of that move, for a report that can be acted on. Null iff the flow figure
+	 *  itself is null. */
+	peakFlowLine: number | null;
+	/** The slicer's own stated ceiling, when it states one. Null otherwise — never invented. */
+	statedMaxFlowMm3PerSec: number | null;
+	/** Seconds this machine will actually take, its limits applied. Null when no machine limits were
+	 *  supplied (the constructor's `limits` argument was omitted). */
+	clampedSeconds: number | null;
+	/** Seconds the file's own commanded feedrates would take with no speed or acceleration limit
+	 *  applied. Null under the same condition as `clampedSeconds` — it comes from the same pass. */
+	unclampedSeconds: number | null;
+	/** Moves whose commanded feedrate exceeded this machine's limit for the axes involved. 0 when no
+	 *  machine limits were supplied. */
+	clampedMoveCount: number;
 }
 
 export class Analyser {
@@ -118,6 +135,15 @@ export class Analyser {
 	private motorsAddressed = false;
 	private x: number | null = null;
 	private y: number | null = null;
+	private e: number | null = null;
+	/** Last commanded feedrate, mm/s — tracked independently of `MachineState.feedrate` because that
+	 *  field is only updated for G0/G1 (see `state.ts`), and flow must also see F on a G2/G3 arc. */
+	private lastFeedrateMmPerSec: number | null = null;
+	/** mm² cross-section of the filament, from the slicer's stated diameter. Null (and therefore every
+	 *  flow figure null) when the diameter is unknown — never assumed. */
+	private readonly filamentArea: number | null;
+	private peakFlowMm3PerSec: number | null = null;
+	private peakFlowLine: number | null = null;
 	private readonly timeEstimator: TimeEstimator | null;
 	/** True once an M73 with a parseable R has been seen — the file states its own time. */
 	private sawM73 = false;
@@ -128,6 +154,9 @@ export class Analyser {
 	constructor(private readonly meta: SlicerMetadata = emptyMetadata(), limits?: MachineLimits) {
 		this.state = createState({ geometricFallback: !meta.hasLayerMarkers });
 		this.timeEstimator = limits !== undefined ? new TimeEstimator(limits) : null;
+		this.filamentArea = meta.filamentDiameterMm !== null && meta.filamentDiameterMm > 0
+			? Math.PI * (meta.filamentDiameterMm / 2) ** 2
+			: null;
 	}
 
 	line(raw: string): void {
@@ -135,6 +164,7 @@ export class Analyser {
 		this.bytes += raw.length + 1;
 
 		const token = tokenise(raw);
+		const zBeforeLine = this.state.z;
 		advance(this.state, token);
 		this.timeEstimator?.line(token, this.state);
 		if (this.state.layer > this.maxLayer) this.maxLayer = this.state.layer;
@@ -155,39 +185,44 @@ export class Analyser {
 			return;
 		}
 		if (token.letter === "G") {
-			this.applyG(code, token.body);
+			this.applyG(code, token.body, zBeforeLine);
 			return;
 		}
 		this.applyM(code, token.body);
 	}
 
-	private applyG(code: string, body: string): void {
+	private applyG(code: string, body: string, zBeforeLine: number | null): void {
 		if (code === "G28") { this.homes = true; return; }
 		if (code !== "G0" && code !== "G1" && code !== "G2" && code !== "G3") return;
 
 		const params = parseParams(body);
 		const relative = this.state.relativeMoves;
+		const prevX = this.x;
+		const prevY = this.y;
 		const x = paramNumber(params, "X");
 		const y = paramNumber(params, "Y");
+		const eParam = paramNumber(params, "E");
 		const f = paramNumber(params, "F");
-		if (f !== null && (this.maxFeedrate === null || f > this.maxFeedrate)) this.maxFeedrate = f;
+		if (f !== null) {
+			if (this.maxFeedrate === null || f > this.maxFeedrate) this.maxFeedrate = f;
+			this.lastFeedrateMmPerSec = f / 60; // mm/min -> mm/s, once, at the boundary
+		}
 
 		if ((code === "G0" || code === "G1") && this.firstExtrusionLine === null) {
-			const e = paramNumber(params, "E");
 			// Positive in both modes: absolute E starts at 0 so a positive value is genuinely
 			// extruding, and in relative mode a retraction is a NEGATIVE E on the very same
 			// parameter — "non-zero" alone would wrongly catch that, so positive is what actually
 			// distinguishes "extrudes" from "retracts or holds" in either mode
-			if (e !== null && e > 0) this.firstExtrusionLine = this.lines;
+			if (eParam !== null && eParam > 0) this.firstExtrusionLine = this.lines;
 		}
 
 		if (x !== null) {
-			this.x = relative && this.x !== null ? this.x + x : x;
+			this.x = relative && prevX !== null ? prevX + x : x;
 			if (this.x < this.minX) this.minX = this.x;
 			if (this.x > this.maxX) this.maxX = this.x;
 		}
 		if (y !== null) {
-			this.y = relative && this.y !== null ? this.y + y : y;
+			this.y = relative && prevY !== null ? prevY + y : y;
 			if (this.y < this.minY) this.minY = this.y;
 			if (this.y > this.maxY) this.maxY = this.y;
 		}
@@ -195,6 +230,34 @@ export class Analyser {
 		if (z !== null) {
 			if (z < this.minZ) this.minZ = z;
 			if (z > this.maxZ) this.maxZ = z;
+		}
+
+		// Same delta convention as `timeModel.ts`: a move's first mention of an axis has no previous
+		// position to diff against, so it contributes zero distance on that axis rather than being
+		// dropped — rare in practice (the file's very first move), and never the flow peak.
+		let deltaE = 0;
+		if (eParam !== null) {
+			if (this.state.relativeE) {
+				deltaE = eParam;
+				this.e = (this.e ?? 0) + eParam;
+			} else {
+				const prevE = this.e ?? 0;
+				this.e = eParam;
+				deltaE = eParam - prevE;
+			}
+		}
+		if (deltaE > 0 && this.filamentArea !== null && this.lastFeedrateMmPerSec !== null && this.lastFeedrateMmPerSec > 0) {
+			const dx = x !== null ? this.x! - (prevX ?? 0) : 0;
+			const dy = y !== null ? this.y! - (prevY ?? 0) : 0;
+			const dz = z !== null && zBeforeLine !== null ? z - zBeforeLine : 0;
+			const distance = Math.hypot(dx, dy, dz);
+			if (distance > 0) {
+				const flow = (deltaE / distance) * this.lastFeedrateMmPerSec * this.filamentArea;
+				if (this.peakFlowMm3PerSec === null || flow > this.peakFlowMm3PerSec) {
+					this.peakFlowMm3PerSec = flow;
+					this.peakFlowLine = this.lines;
+				}
+			}
 		}
 	}
 
@@ -358,6 +421,12 @@ export class Analyser {
 			estimatedSeconds,
 			dialect: detectDialect(this.counts),
 			meta: this.meta,
+			peakFlowMm3PerSec: this.peakFlowMm3PerSec,
+			peakFlowLine: this.peakFlowLine,
+			statedMaxFlowMm3PerSec: this.meta.maxVolumetricSpeedMm3PerSec,
+			clampedSeconds: this.timeEstimator?.clampedSeconds ?? null,
+			unclampedSeconds: this.timeEstimator?.unclampedSeconds ?? null,
+			clampedMoveCount: this.timeEstimator?.clampedMoveCount ?? 0,
 		};
 	}
 }

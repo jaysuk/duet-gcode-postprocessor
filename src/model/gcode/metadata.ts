@@ -25,6 +25,12 @@ export interface SlicerMetadata {
 	filamentMm: number | null;
 	/** Layer height in mm when stated, else null. */
 	layerHeight: number | null;
+	/** Filament diameter in mm when stated, else null. Never assume 1.75 — a file that does not
+	 *  state it leaves anything derived from it (volumetric flow) unknowable, not guessable. */
+	filamentDiameterMm: number | null;
+	/** The slicer's own volumetric flow ceiling (mm³/s) when it states one, else null. `0` is
+	 *  PrusaSlicer/OrcaSlicer's own convention for "no limit", not a real ceiling of zero. */
+	maxVolumetricSpeedMm3PerSec: number | null;
 	/** True when the file carries an embedded base64 thumbnail block. */
 	hasThumbnail: boolean;
 	/**
@@ -43,6 +49,8 @@ export function emptyMetadata(): SlicerMetadata {
 		printTimeSeconds: null,
 		filamentMm: null,
 		layerHeight: null,
+		filamentDiameterMm: null,
+		maxVolumetricSpeedMm3PerSec: null,
 		hasThumbnail: false,
 		hasLayerMarkers: false,
 	};
@@ -116,6 +124,11 @@ export function parseMetadata(head: string, tail = ""): SlicerMetadata {
 	meta.filamentMm = firstNumber(meta, [
 		"filament_used_mm", "filament_used_[mm]", "filament_length", "filament_used",
 	]);
+	meta.filamentDiameterMm = firstNumber(meta, ["filament_diameter", "filamentdiameter"]);
+	// PrusaSlicer/OrcaSlicer use 0 as "no limit" for this setting, not a literal zero ceiling —
+	// treating it as a stated maximum would turn every extruding move into a flow warning
+	const statedMaxFlow = firstNumber(meta, ["max_volumetric_speed"]);
+	meta.maxVolumetricSpeedMm3PerSec = statedMaxFlow !== null && statedMaxFlow > 0 ? statedMaxFlow : null;
 	return meta;
 }
 

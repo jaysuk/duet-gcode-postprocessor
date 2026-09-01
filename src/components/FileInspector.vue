@@ -55,6 +55,10 @@
 					</v-col>
 				</v-row>
 
+				<v-alert v-if="clampingLabel !== null" type="info" variant="tonal" density="compact" class="mt-3">
+					{{ clampingLabel }}
+				</v-alert>
+
 				<v-expansion-panels variant="accordion" class="mt-4">
 					<v-expansion-panel title="Preflight checks">
 						<v-expansion-panel-text>
@@ -255,6 +259,21 @@ function estimatedTimeLabel(a: FileAnalysis): string {
 		default: return duration;
 	}
 }
+
+// Suppressed entirely (not merely caveated) when this machine's limits are incomplete — see
+// docs/tasks/07-audit-defects.md, defect E. A missing axis limit falls back to "no limit" in the
+// model, which would silently understate clamping rather than just being imprecise about it, so
+// this comparison is not safe to show even with a caveat.
+const clampingLabel = computed(() => {
+	const a = analysis.value;
+	if (a === null || !limitsWereComplete.value) return null;
+	if (a.clampedMoveCount <= 0 || a.clampedSeconds === null || a.unclampedSeconds === null) return null;
+	const extra = a.clampedSeconds - a.unclampedSeconds;
+	if (extra <= 0) return null;
+	const moveCount = a.clampedMoveCount.toLocaleString();
+	return `${formatDuration(a.clampedSeconds)} — ${formatDuration(extra)} of that is this machine `
+		+ `clamping ${moveCount} move${a.clampedMoveCount === 1 ? "" : "s"} that ask for more than its limits.`;
+});
 
 function formatDuration(seconds: number): string {
 	const h = Math.floor(seconds / 3600);

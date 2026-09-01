@@ -16,7 +16,7 @@ four non-negotiables there are binding, not background.
 | [06](06-preheat.md) | Predictive pre-heat before a tool change | **Done** — step 1's verification confirmed both assumptions against RRF source and the wiki; see `src/model/preheat.ts`'s module comment | 04, 05 |
 | [07](07-audit-defects.md) | Defect pass on 04–06 — the analysis pass read the wrong file, and pre-heat could cancel its own work | **Done** — every reproduction in the work order now fails before the fix and passes after it | 04, 05, 06 |
 | [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | **Done** | 07 |
-| [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Ready** | 04, 07 |
+| [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Done** | 04, 07 |
 
 **Not yet specified**, and deliberately so — writing them now would be guessing. See
 [PLAN.md](../../PLAN.md) §8 for the roadmap and [feature-ideas.md](../feature-ideas.md) for the

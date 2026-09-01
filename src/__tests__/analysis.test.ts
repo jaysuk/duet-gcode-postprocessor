@@ -293,6 +293,60 @@ describe("analyseText", () => {
 	it("returns null extents for a file with no coordinates", () => {
 		expect(analyseText("; nothing here\nM104 S200").extents).toBeNull();
 	});
+
+	describe("volumetric flow", () => {
+		it("computes flow from the metadata's filament diameter", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			const analysis = analyseText("G1 X10 F3600 E1", meta);
+			const area = Math.PI * (1.75 / 2) ** 2;
+			const expected = area * (1 / 10) * 60; // 1mm E over 10mm travel at 60 mm/s
+			expect(analysis.peakFlowMm3PerSec).toBeCloseTo(expected, 6);
+			expect(analysis.peakFlowLine).toBe(1);
+		});
+
+		it("is null when the file does not extrude", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			const analysis = analyseText("G1 X10 F3600", meta);
+			expect(analysis.peakFlowMm3PerSec).toBeNull();
+			expect(analysis.peakFlowLine).toBeNull();
+		});
+
+		it("is null when the filament diameter is unknown, rather than assumed", () => {
+			const analysis = analyseText("G1 X10 F3600 E1");
+			expect(analysis.peakFlowMm3PerSec).toBeNull();
+			expect(analysis.peakFlowLine).toBeNull();
+		});
+
+		it("gives a different figure for the same E at a different filament diameter", () => {
+			const gcode = "G1 X10 F3600 E1";
+			const thin = analyseText(gcode, parseMetadata("; filament_diameter = 1.75")).peakFlowMm3PerSec;
+			const thick = analyseText(gcode, parseMetadata("; filament_diameter = 2.85")).peakFlowMm3PerSec;
+			expect(thin).not.toBeNull();
+			expect(thick).not.toBeNull();
+			expect(thick).toBeGreaterThan(thin as number);
+		});
+
+		it("reports the line of the worst move, not the first extruding one", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			const analysis = analyseText(["G1 X10 F3600 E1", "G1 X20 F3600 E3"].join("\n"), meta);
+			// Second move: 2mm E over 10mm travel, double the first move's rate
+			expect(analysis.peakFlowLine).toBe(2);
+		});
+
+		it("reads the slicer's own max_volumetric_speed when stated", () => {
+			const meta = parseMetadata("; max_volumetric_speed = 10");
+			expect(analyseText("G28", meta).statedMaxFlowMm3PerSec).toBe(10);
+		});
+
+		it("is null when the slicer states no ceiling", () => {
+			expect(analyseText("G28").statedMaxFlowMm3PerSec).toBeNull();
+		});
+
+		it("treats a stated 0 as \"no limit\" (PrusaSlicer/OrcaSlicer's own convention), not a real ceiling", () => {
+			const meta = parseMetadata("; max_volumetric_speed = 0");
+			expect(analyseText("G28", meta).statedMaxFlowMm3PerSec).toBeNull();
+		});
+	});
 });
 
 describe("detectDialect", () => {
@@ -439,6 +493,37 @@ describe("preflight checks", () => {
 			const results = runChecks(analyseText("G28\nT0\nG1 X1\nM106 S255\nM104 S210\nM107\nM104 S0\nM84"), MACHINE);
 			const hygieneCodes = ["structure:heatersLeftOn", "structure:fanLeftRunning", "structure:motorsLeftEnergised"];
 			expect(results.some((r) => hygieneCodes.includes(r.code))).toBe(false);
+		});
+	});
+
+	describe("volumetric flow", () => {
+		it("reports an informational line whenever a flow figure exists", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			const results = runChecks(analyseText("G28\nG1 X10 F3600 E1", meta), MACHINE);
+			expect(results.some((r) => r.code === "flow:peak" && r.level === "info")).toBe(true);
+		});
+
+		it("reports nothing about flow when the filament diameter is unknown", () => {
+			const results = runChecks(analyseText("G28\nG1 X10 F3600 E1"), MACHINE);
+			expect(results.some((r) => r.code.startsWith("flow:"))).toBe(false);
+		});
+
+		it("warns when the file exceeds its own stated ceiling", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75\n; max_volumetric_speed = 1");
+			const results = runChecks(analyseText("G28\nG1 X10 F3600 E1", meta), MACHINE);
+			expect(results.some((r) => r.code === "flow:exceedsStated" && r.level === "warning")).toBe(true);
+		});
+
+		it("never warns without a stated ceiling, however high the flow", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75");
+			const results = runChecks(analyseText("G28\nG1 X10 F30000 E10", meta), MACHINE);
+			expect(results.some((r) => r.code === "flow:exceedsStated")).toBe(false);
+		});
+
+		it("does not warn when the stated ceiling is not exceeded", () => {
+			const meta = parseMetadata("; filament_diameter = 1.75\n; max_volumetric_speed = 100");
+			const results = runChecks(analyseText("G28\nG1 X10 F3600 E1", meta), MACHINE);
+			expect(results.some((r) => r.code === "flow:exceedsStated")).toBe(false);
 		});
 	});
 });

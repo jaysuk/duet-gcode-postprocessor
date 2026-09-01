@@ -150,4 +150,38 @@ describe("TimeEstimator", () => {
 	it("is zero for a file with no moves at all", () => {
 		expect(runLines(["M104 S210", "M140 S60"]).elapsed).toBe(0);
 	});
+
+	describe("clamping report", () => {
+		it("matches unclamped when every move is within limits, and clamps nothing", () => {
+			const estimator = runLines(["G1 X100 Y0 F1200"]); // 20 mm/s, well under X's 200 mm/s limit
+			expect(estimator.clampedSeconds).toBeCloseTo(estimator.unclampedSeconds, 6);
+			expect(estimator.clampedMoveCount).toBe(0);
+		});
+
+		it("takes measurably longer clamped than unclamped when a move asks for double the limit", () => {
+			// X's own limit is 200 mm/s (12000 mm/min); ask for double that
+			const estimator = runLines(["G1 X1000 F24000"]);
+			expect(estimator.clampedSeconds).toBeGreaterThan(estimator.unclampedSeconds);
+			expect(estimator.clampedMoveCount).toBe(1);
+		});
+
+		it("counts moves, not lines — a non-move line never increments the count", () => {
+			const estimator = runLines(["G1 X1000 F24000", "M104 S210", "G28"]);
+			expect(estimator.clampedMoveCount).toBe(1);
+		});
+
+		it("clamps an X-only move against X's own limit, not the tighter of X and Y", () => {
+			const limits: MachineLimits = { ...LIMITS, maxSpeed: { ...LIMITS.maxSpeed, Y: 1 } };
+			// X-only, well within X's 200 mm/s limit; Y's tiny limit must not apply since Y never moved
+			const estimator = runLines(["G1 X100 F6000"], limits);
+			expect(estimator.clampedMoveCount).toBe(0);
+		});
+
+		it("unclampedSeconds ignores this machine's limits entirely", () => {
+			const tight: MachineLimits = { ...LIMITS, maxSpeed: { ...LIMITS.maxSpeed, X: 1 } };
+			const loose = runLines(["G1 X100 F6000"], LIMITS).unclampedSeconds;
+			const withTightLimit = runLines(["G1 X100 F6000"], tight).unclampedSeconds;
+			expect(withTightLimit).toBeCloseTo(loose, 6);
+		});
+	});
 });

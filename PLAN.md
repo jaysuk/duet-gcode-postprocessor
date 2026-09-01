@@ -8,26 +8,27 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 591 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. Eight work orders in `docs/tasks/` are complete: `01-defects.md`,
+Implemented in v0.1.0, with 626 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. Nine work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
 (§8 phase 11), `07-audit-defects.md` (a defect pass on 04–06 found by auditing that work rather than
-by a hardware report) and `08-arc-welding.md`.
+by a hardware report), `08-arc-welding.md`, and `09-flow-and-clamping.md` (finishes §8 phase 12).
 
-**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–9 and 11, plus phase 10, plus most of
-phase 12, plus arc welding — the browser (reusing DWC's own `FileList` where available, with a
-self-contained fallback), the inspector and its preflight checks, the streaming engine and safe write
-path, twelve step types, recipes with import/export and board-backed storage, the diff preview, the
-Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
-normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
-validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
-(`onlyWithParam`) that fixed a real mistranslation in the Marlin preset, a machine-aware move-time
-model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
-`M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
-whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
-`M307` heater model, an `arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, and the usage
-guide.
+**Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–12 in full, plus arc welding — the
+browser (reusing DWC's own `FileList` where available, with a self-contained fallback), the
+inspector and its preflight checks, the streaming engine and safe write path, thirteen step types,
+recipes with import/export and board-backed storage, the diff preview, the Flexible-Layouts widget,
+self-update, a backup index with a restore/download/delete UI, feature-type normalisation across
+slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro validation, cold-extrusion
+and end-of-file hygiene checks, a `commandMap` condition (`onlyWithParam`) that fixed a real
+mistranslation in the Marlin preset, a machine-aware move-time model with an inspector estimate
+alongside the slicer's own, a `rewriteTime` step that recomputes `M73` markers from it, an opt-in
+second read-only pass over the file for steps that need to see a whole-file fact before the
+transform pass reaches it, a predictive pre-heat step using RRF's own `M307` heater model, an
+`arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, a volumetric-flow audit that never
+assumes a filament diameter or invents a flow ceiling, a `clampFeedrate` step and a matching
+clamped-vs-unclamped time comparison in the inspector, and the usage guide.
 
 **Deviations from the plan, and why:**
 
@@ -52,9 +53,8 @@ guide.
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–08 are done. [`docs/tasks/`](docs/tasks/) holds one more, ready:
-[09](docs/tasks/09-flow-and-clamping.md) finishes phase 12. Phases 13–15 remain deliberately
-unspecified — see the work-order queue's own note on why.
+**Next:** tasks 01–09 are done — the whole of phases 8–12. Phases 13–15 remain deliberately
+unspecified — see the work-order queue's own note on why: they need a hardware session first.
 
 ---
 
@@ -487,17 +487,27 @@ extrusion rather than a visible error.
   and everything around it share zero elapsed time. See `docs/tasks/07-audit-defects.md`, defects
   B and C.
 
-### Phase 12 — machine-aware checks and rewrites *(partly done)*
+### Phase 12 — machine-aware checks and rewrites *(done)*
 
 Individually small, collectively the thing that stops failed prints:
 
 - ✅ **Validate `M98` macro references** against the SD card — catches a typo that would otherwise
   stop the print at layer 40, and this plugin's own insert steps add macro calls.
-- **Volumetric flow-rate audit** — mm³/s demanded versus what the hot end can melt. *(Not done, now
-  unblocked by phase 8 — specced in [docs/tasks/09-flow-and-clamping.md](docs/tasks/09-flow-and-clamping.md).)*
-- **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how
-  much time that adds. RRF clamps silently today, so prints simply take longer than promised.
-  *(Not done, same task.)*
+- ✅ **Volumetric flow-rate audit** — `analysis.ts` computes mm³/s per move from the slicer's own
+  stated filament diameter (`meta.filamentDiameterMm`, never assumed), reporting the worst move and
+  its line; `checks.ts` warns only when the slicer *also* stated its own ceiling
+  (`max_volumetric_speed`, PrusaSlicer/Orca's `0` meaning "no limit" handled explicitly) and the file
+  exceeds it. No threshold is invented. See
+  [docs/tasks/09-flow-and-clamping.md](docs/tasks/09-flow-and-clamping.md).
+- ✅ **Feedrate clamping** to the machine's real limits — `steps/clampFeedrate.ts`, reusing
+  `timeModel.ts`'s own per-axis-combination limit lookup (`axisLetters`/`combinedAxisLimits`, now
+  exported for exactly this) rather than a second copy that could drift from the inspector's own
+  estimate. Reports how many moves were clamped and the added time; a move already within limits is
+  untouched. `TimeEstimator` grew a parallel unclamped accumulator and a clamped-move count so the
+  inspector can show "how much of the estimate is this machine's own limits" next to the two
+  print-time figures it already had; suppressed when this machine's limits are known incomplete (see
+  phase 9's finding E) rather than shown as fact. Acceleration clamping (`M204` against
+  `printAccel`/`travelAccel`) is included, off by default.
 - ✅ **Cold-extrusion detection** and end-of-file hygiene (heaters left on, fan running, motors live).
 - ✅ **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
   `M568 P1 S200`. Was a real gap in the Marlin preset, and a silent mistranslation.

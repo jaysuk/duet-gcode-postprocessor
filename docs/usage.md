@@ -221,6 +221,22 @@ targets `G1` — a find/replace, a rule — will not see a welded arc, and anyth
   printing nothing where the curve was. This is written for RepRapFirmware, which executes them
   natively.
 
+### Clamp feedrate to machine limits
+
+Rewrites a commanded `F` down to this machine's own speed limit for the axes actually involved, the
+same model the inspector already uses to estimate print time — this step is what closes the gap
+between "the inspector said clamping would add 14 minutes" and the file actually taking that long.
+An X-only move is checked against X's own limit, not the tighter of X and Y; a move already within
+limits is left byte-identical.
+
+- **Apply to** — printing moves, travel moves, or both (default). A move counts as "printing" when
+  it extrudes.
+- **Also clamp M204 acceleration** — off by default. When on, an `M204 P`/`T` asking for more than
+  this machine's own configured printing/travel acceleration is rewritten down to it.
+
+Needs this machine's motion limits, the same as "Rewrite print time" and "Predictive pre-heat" —
+without them the step does nothing and says so in the report.
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,
@@ -325,6 +341,9 @@ The **Inspect** tab reads the file once, without writing anything, and reports:
 - Slicer and version, print time (the slicer's own figure **and** an estimate for this specific
   machine, computed from its real speed/acceleration/jerk limits, plus which of the two sources it
   used — see "Rewrite print time" below), filament, layer height and count
+- When this machine's limits are known and complete: how much of that estimate is this machine
+  clamping moves that ask for more than it can do, and how many moves — see "Clamp feedrate to
+  machine limits" below
 - Line count, size, layer count, tools, temperatures, maximum feedrate, extrusion mode, `M486` objects
 - Motion extents in X, Y and Z
 - Detected **flavour** — RepRapFirmware, Marlin or Klipper — and what the evidence was
@@ -348,13 +367,17 @@ Most run against the machine's live object model:
 | Extrusion before anything waits for the hot end to reach temperature | Error, or Warning if some heating command exists |
 | Fans the file drives that do not exist | Warning |
 | No homing command anywhere in the file | Warning |
+| The file's peak volumetric flow exceeds the slicer's own stated `max_volumetric_speed` | Warning |
 | Heaters, the part fan or the motors never turned off at the end | Information |
 | No tool selected, no layer markers, slicer not recognised | Information |
+| Peak volumetric flow, when the slicer states a filament diameter | Information |
 
 Nothing machine-specific is checked while disconnected — a check that invents failures is worse
 than no check. The macro and cold-extrusion checks do not depend on the machine at all, so they
 still run offline; the macro check specifically needs the SD card, so it appears a moment after the
-rest of the inspection rather than holding it up.
+rest of the inspection rather than holding it up. The flow checks are also machine-independent —
+they never assume a filament diameter the slicer did not state, and never invent a flow ceiling the
+slicer did not state either.
 
 ---
 

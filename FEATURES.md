@@ -8,10 +8,10 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 > the Flexible-Layouts widget (F1), the backup manager with restore/download/delete (D7), the fan
 > audit and per-feature override (G3), `M98` macro validation (G5), cold-extrusion and end-of-file
 > hygiene checks (G8), the Marlin tool-scoped temperature fix (H8), the move-time model with the
-> `M73` rewrite (G1), predictive pre-heat before a tool change (G2), and arc welding (B16). Still
-> outstanding: auto-run on upload (D5), batch processing (D6), automatic recipe selection (D4), run
-> history (D8), the volumetric flow-rate audit and feedrate clamping (G6–G7, unblocked by G1 but not
-> yet built), and the "Later" items.
+> `M73` rewrite (G1), predictive pre-heat before a tool change (G2), arc welding (B16), and the
+> volumetric flow-rate audit with feedrate clamping (G6–G7). Still outstanding: auto-run on upload
+> (D5), batch processing (D6), automatic recipe selection (D4), run history (D8), and the "Later"
+> items.
 > See [PLAN.md](PLAN.md#status) for the deviations.
 
 ---
@@ -121,8 +121,8 @@ system — and so cannot be done by a slicer or by a desktop script. Designed in
 | G3 | ✅ **Fan audit and per-feature override** — every fan speed in the file by feature, and overrides for bridging, overhangs, external perimeters | Done — `model/gcode/features.ts`, `model/steps/fanByFeature.ts` |
 | G4 | **Restart from layer N** — rebuild a runnable file after a failure | Highest effort, highest value |
 | G5 | ✅ **Validate `M98` macro references** against the SD card | Done — `dwc/macroCheck.ts` |
-| G6 | **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt | |
-| G7 | **Feedrate and acceleration clamping** to the machine's real limits | |
+| G6 | ✅ **Volumetric flow-rate audit** — mm³/s demanded vs what the hot end can melt, from the slicer's own stated filament diameter, never assumed | Done — `model/analysis.ts`, `model/checks.ts` |
+| G7 | ✅ **Feedrate and acceleration clamping** to the machine's real limits, with an honest report of how much time that adds | Done — `model/steps/clampFeedrate.ts`, `model/gcode/timeModel.ts` |
 | G8 | ✅ **Cold-extrusion and end-of-file hygiene checks** | Done — `model/checks.ts` |
 | G9 | **`M486` object labelling**, including from Klipper `EXCLUDE_OBJECT` | Makes DWC cancel-object work on more files |
 | G10 | **`M37` simulation round-trip** — the firmware's own time estimate, written back into `M73` | |

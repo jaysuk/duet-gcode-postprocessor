@@ -58,6 +58,7 @@ export function runChecks(analysis: FileAnalysis, machine: MachineSnapshot): Arr
 		...checkTemperatures(analysis, machine),
 		...checkFans(analysis, machine),
 		...checkStructure(analysis),
+		...checkFlow(analysis),
 	];
 	const order: Record<CheckLevel, number> = { error: 0, warning: 1, info: 2 };
 	return results.sort((a, b) => order[a.level] - order[b.level]);
@@ -165,6 +166,30 @@ function checkFans(analysis: FileAnalysis, machine: MachineSnapshot): Array<Chec
 		title: "The file drives a fan that is not configured",
 		detail: `M106 P${missing.join(", P")} used, but this machine has ${machine.fanCount} fan${machine.fanCount === 1 ? "" : "s"} (P0${machine.fanCount > 1 ? `–P${machine.fanCount - 1}` : ""}).`,
 	}];
+}
+
+/**
+ * Volumetric flow: informational whenever a figure exists at all (this analysis is machine-
+ * independent — it never proposes its own ceiling), a warning only when the slicer stated its own
+ * ceiling and the file exceeds it. Never invents a threshold to warn against.
+ */
+function checkFlow(analysis: FileAnalysis): Array<CheckResult> {
+	if (analysis.peakFlowMm3PerSec === null) return [];
+	const results: Array<CheckResult> = [{
+		level: "info",
+		code: "flow:peak",
+		title: "Peak volumetric flow",
+		detail: `The busiest move asks for ${analysis.peakFlowMm3PerSec.toFixed(2)} mm³/s of filament, at line ${analysis.peakFlowLine}.`,
+	}];
+	if (analysis.statedMaxFlowMm3PerSec !== null && analysis.peakFlowMm3PerSec > analysis.statedMaxFlowMm3PerSec) {
+		results.push({
+			level: "warning",
+			code: "flow:exceedsStated",
+			title: "The file exceeds its own stated maximum flow",
+			detail: `The slicer's own ceiling is ${analysis.statedMaxFlowMm3PerSec} mm³/s, but line ${analysis.peakFlowLine} asks for ${analysis.peakFlowMm3PerSec.toFixed(2)} mm³/s.`,
+		});
+	}
+	return results;
 }
 
 function checkStructure(analysis: FileAnalysis): Array<CheckResult> {
