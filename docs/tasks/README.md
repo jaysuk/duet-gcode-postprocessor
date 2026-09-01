@@ -15,7 +15,7 @@ four non-negotiables there are binding, not background.
 | [05](05-analysis-pass.md) | Two-pass processing, so a step can see what is coming | **Done** | 04 (uses it as the first consumer) |
 | [06](06-preheat.md) | Predictive pre-heat before a tool change | **Done** — step 1's verification confirmed both assumptions against RRF source and the wiki; see `src/model/preheat.ts`'s module comment | 04, 05 |
 | [07](07-audit-defects.md) | Defect pass on 04–06 — the analysis pass read the wrong file, and pre-heat could cancel its own work | **Done** — every reproduction in the work order now fails before the fix and passes after it | 04, 05, 06 |
-| [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | **Ready** — RRF's arc behaviour verified against source | 07 |
+| [08](08-arc-welding.md) | Arc welding, `G0`/`G1` → `G2`/`G3` | **Done** | 07 |
 | [09](09-flow-and-clamping.md) | Volumetric flow audit and feedrate clamping (finishes §8 phase 12) | **Ready** | 04, 07 |
 
 **Not yet specified**, and deliberately so — writing them now would be guessing. See

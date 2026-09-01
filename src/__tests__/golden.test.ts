@@ -20,7 +20,7 @@ import { runToString } from "../model/pipeline";
 import { PRESETS } from "../model/presets";
 import { buildTransforms } from "../model/recipe";
 
-const FIXTURES = ["prusaslicer", "cura", "orcaslicer", "two-tool"] as const;
+const FIXTURES = ["prusaslicer", "cura", "orcaslicer", "two-tool", "arc-circle"] as const;
 
 function loadFixture(name: string): string {
 	return readFileSync(resolve(__dirname, "../../test/fixtures", `${name}.gcode`), "utf-8")
@@ -66,6 +66,15 @@ describe("fixtures parse as expected", () => {
 		const analysis = analyseText(text, meta);
 		expect(analysis.layers).toBe(3);
 		expect(analysis.tools).toEqual([0, 1]);
+	});
+
+	it("reads the arc-circle fixture (added for arc welding, task 08)", () => {
+		const text = loadFixture("arc-circle");
+		const meta = parseMetadata(text);
+		expect(meta.slicer).toBe("PrusaSlicer");
+		expect(meta.totalLayers).toBe(1);
+		const analysis = analyseText(text, meta);
+		expect(analysis.layers).toBe(1);
 	});
 });
 

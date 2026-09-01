@@ -8,17 +8,17 @@ card. Planning document: architecture, phased delivery, decisions and risks. Fea
 
 ## Status
 
-Implemented in v0.1.0, with 543 tests green and `typecheck` + `verify-build` passing against DWC
-`v3.7-dev`. Seven work orders in `docs/tasks/` are complete: `01-defects.md`,
+Implemented in v0.1.0, with 591 tests green and `typecheck` + `verify-build` passing against DWC
+`v3.7-dev`. Eight work orders in `docs/tasks/` are complete: `01-defects.md`,
 `02-fan-audit-and-override.md` (§8 phase 10), `03-machine-aware-checks.md` (§8 phase 12, partially),
 `04-move-time-model.md` (§8 phase 8), `05-analysis-pass.md` (§8 phase 9), `06-preheat.md`
-(§8 phase 11) and `07-audit-defects.md`, a defect pass on 04–06 found by auditing that work rather
-than by a hardware report.
+(§8 phase 11), `07-audit-defects.md` (a defect pass on 04–06 found by auditing that work rather than
+by a hardware report) and `08-arc-welding.md`.
 
 **Built:** phases 0–3 in full, plus most of 4–7, plus phases 8–9 and 11, plus phase 10, plus most of
-phase 12 — the browser (reusing DWC's own `FileList` where available, with a self-contained
-fallback), the inspector and its preflight checks, the streaming engine and safe write path, eleven
-step types, recipes with import/export and board-backed storage, the diff preview, the
+phase 12, plus arc welding — the browser (reusing DWC's own `FileList` where available, with a
+self-contained fallback), the inspector and its preflight checks, the streaming engine and safe write
+path, twelve step types, recipes with import/export and board-backed storage, the diff preview, the
 Flexible-Layouts widget, self-update, a backup index with a restore/download/delete UI, feature-type
 normalisation across slicers, a fan-speed audit, a fan-by-feature override step, `M98` macro
 validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condition
@@ -26,7 +26,8 @@ validation, cold-extrusion and end-of-file hygiene checks, a `commandMap` condit
 model with an inspector estimate alongside the slicer's own, a `rewriteTime` step that recomputes
 `M73` markers from it, an opt-in second read-only pass over the file for steps that need to see a
 whole-file fact before the transform pass reaches it, a predictive pre-heat step using RRF's own
-`M307` heater model, and the usage guide.
+`M307` heater model, an `arcWeld` step that collapses curved `G1` runs into `G2`/`G3`, and the usage
+guide.
 
 **Deviations from the plan, and why:**
 
@@ -51,9 +52,9 @@ whole-file fact before the transform pass reaches it, a predictive pre-heat step
 filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
 (backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
 
-**Next:** tasks 01–07 are done. [`docs/tasks/`](docs/tasks/) holds two more, both ready:
-[08](docs/tasks/08-arc-welding.md) is arc welding; [09](docs/tasks/09-flow-and-clamping.md) finishes
-phase 12. Phases 13–15 remain deliberately unspecified — see the work-order queue's own note on why.
+**Next:** tasks 01–08 are done. [`docs/tasks/`](docs/tasks/) holds one more, ready:
+[09](docs/tasks/09-flow-and-clamping.md) finishes phase 12. Phases 13–15 remain deliberately
+unspecified — see the work-order queue's own note on why.
 
 ---
 
@@ -501,12 +502,7 @@ Individually small, collectively the thing that stops failed prints:
 - ✅ **Marlin tool-scoped temperatures** — `M104 S200 T1` means tool 1 in Marlin; the RRF equivalent is
   `M568 P1 S200`. Was a real gap in the Marlin preset, and a silent mistranslation.
 
-### Arc welding — `G1` runs into `G2`/`G3` arcs
-
-Out of the dependency sequence below (it needs only the task-07 defect pass), but worth doing early:
-it is the one item here that improves *every* curved file, and it is a well-defined published
-algorithm rather than a research problem. Specced in
-[docs/tasks/08-arc-welding.md](docs/tasks/08-arc-welding.md).
+### Arc welding — `G1` runs into `G2`/`G3` arcs *(done)*
 
 A slicer approximates curves with hundreds of short `G1` moves; RepRapFirmware executes real arcs.
 Welding those runs back into `G2`/`G3` typically removes 50–80% of the lines in a curved file and
@@ -518,6 +514,27 @@ The interesting constraint is architectural rather than geometric: a step cannot
 already emitted, so arc welding is the first step that must **withhold** lines — returning `null`
 while it buffers a candidate run and emitting the arc when the run closes. That is within the
 existing `Transform` contract, but it is the first use of it, and `onEnd` must flush.
+
+- ✅ `model/gcode/arcFit.ts` — the pure geometry (`tryFitArc`, `arcRadiusWithinTolerance`), a
+  clean-room reimplementation of ArcWelderLib's published algorithm (see `docs/attribution.md`):
+  three-point circumcircle, radial-and-perpendicular deviation, arc-length-vs-polyline-length, all
+  independently tested with hand-checkable circles.
+- ✅ `model/steps/arcWeld.ts` — buffers a candidate run, tests it against `tryFitArc` as each point
+  arrives, and restarts the buffer *at* whichever point broke the run rather than discarding it, so a
+  feature/Z/rate boundary does not waste an otherwise weldable move. Breaks on every condition the
+  task specified; `F` is carried onto the arc rather than treated as a break, since RRF applies one
+  feedrate to the whole arc anyway.
+- ✅ A real defect caught by the step's own tests before this ever ran against a fixture: `onLine`
+  returning `undefined` to mean "withhold this line" — it means the opposite, "keep it as it was".
+  The fix is `null` for a withheld line's own return value, which is what the pipeline's own
+  `StepResult` contract actually says.
+- ✅ **The rounding trap named in the task did occur in practice** — the welded output on the new
+  curved fixture needed 4 decimal places on `I`/`J` to satisfy RRF's own radius check, not the 3 this
+  codebase otherwise defaults to; `buildArcCommand` escalates precision until the check passes rather
+  than emitting a move RRF would reject.
+- ✅ `test/fixtures/arc-circle.gcode` (a full 90-point circle) collapses to a single `G3` plus a
+  1-line residual — a 19-line replacement for 90 source lines — added to the golden-file matrix
+  alongside a bundled "Weld curves into arcs" preset using ArcWelder's own defaults.
 
 ### Phase 13 — print recovery and surgery
 

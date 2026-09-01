@@ -179,6 +179,48 @@ rest are dropped, also named in the report. A profile that already emits its own
 a tool is left alone rather than getting a second, redundant one. A file that only ever uses one tool
 is left untouched entirely.
 
+### Weld curves into arcs
+
+A slicer approximates every curve with hundreds of short straight `G1` moves. RepRapFirmware executes
+true arcs natively, so this step collapses a run of moves that trace a circle back into a single
+`G2`/`G3` — typically removing 50–80% of the lines in a curved file and handing the motion planner a
+smooth path instead of a polyline.
+
+The algorithm is a clean-room reimplementation of the one in
+[ArcWelderLib](https://github.com/FormerLurker/ArcWelderLib) (see `docs/attribution.md`), so its
+settings use the same names and defaults as that tool:
+
+- **Resolution** (default 0.05mm) — how far the fitted arc may deviate from the original path.
+- **Path tolerance** (default 5%) — how much the arc's own length may differ from the straight-line
+  path it replaces; this is what stops an arc that is geometrically plausible but goes the long way
+  round a circle.
+- **Maximum radius** (default 9999mm) — rejects a near-straight run rather than letting floating-point
+  noise turn it into an enormous arc.
+- **Minimum segments** (default 3) — fewest source moves worth replacing with one arc.
+- **Allow 3D arcs** — off by default; turn on for vase-mode prints where Z climbs steadily through a
+  curve (a helix), not just in the XY plane.
+- **Extrusion rate variance** (default 5%) — aborts a run if the filament-per-mm-of-travel changes too
+  much partway through, which would mean the line width was supposed to change and welding it into
+  one arc would flatten that out.
+
+A run breaks — ending whatever arc is in progress — on anything that is not a plain `G0`/`G1`, a
+change between extruding/retracting/travelling, a layer or slicer feature-type boundary, a zero-length
+move, or (unless allowed) a change in Z. A run shorter than the minimum segment count, or one whose
+rounded coordinates cannot be made to satisfy the firmware's own arc-radius check at any reasonable
+precision, is left as the original moves rather than dropped.
+
+**Put this step last.** It changes both line counts and coordinates, so anything after it that
+targets `G1` — a find/replace, a rule — will not see a welded arc, and anything that inserts lines
+(pre-heat) needs to run before this step sees the file, not after.
+
+**Two caveats worth knowing before turning this on:**
+
+- Most G-code *viewers* — including the slicer's own preview — render `G2`/`G3` badly or not at all.
+  The print is unaffected; the preview will look wrong.
+- Firmware that does not support arcs will either reject the file or silently skip the arc commands,
+  printing nothing where the curve was. This is written for RepRapFirmware, which executes them
+  natively.
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,
@@ -272,6 +314,7 @@ From **⋮ → Add a bundled preset**:
 | Strip thumbnails and comments | Can halve the file size, which matters on a slow SD card |
 | Hand the start sequence to the printer | Calls your own `print_start.g` at the first layer change |
 | Boost bridge cooling | Runs bridges and overhangs at full fan speed; everything else untouched |
+| Weld curves into arcs | Collapses runs of straight moves that trace a circle back into `G2`/`G3`, with ArcWelder's own default settings |
 
 ---
 

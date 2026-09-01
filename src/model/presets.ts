@@ -200,6 +200,24 @@ export const PRESETS: ReadonlyArray<Preset> = Object.freeze([
 			};
 		},
 	},
+	{
+		key: "weldArcs",
+		name: "Weld curves into arcs",
+		description: "Collapses runs of straight moves that trace a circle back into G2/G3, with ArcWelder's own defaults. Smaller files, smoother curves — but G2/G3 need firmware and viewer support.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Weld curves into arcs",
+				version: RECIPE_VERSION,
+				steps: [
+					step("arcWeld", {
+						resolutionMm: 0.05, pathTolerancePercent: 5, maxRadiusMm: 9999,
+						minSegments: 3, allow3dArcs: false, extrusionRateVariancePercent: 5,
+					}, "Runs last — nothing after this preset touches individual G1 moves"),
+				],
+			};
+		},
+	},
 ]);
 
 export function findPreset(key: string): Preset | null {

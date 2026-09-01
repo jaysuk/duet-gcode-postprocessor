@@ -6,6 +6,7 @@
  * so nothing else has to be touched and nothing can be half-added.
  */
 
+import { arcWeldStep } from "./arcWeld";
 import { commandMapStep } from "./commandMap";
 import { deleteLinesStep } from "./deleteLines";
 import { fanByFeatureStep } from "./fanByFeature";
@@ -31,6 +32,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	preheatStep,
 	rulesStep,
 	scriptStep,
+	arcWeldStep,
 ] as unknown as Array<StepDefinition<never>>);
 
 const BY_ID = new Map<string, StepDefinition<never>>(STEP_DEFINITIONS.map((d) => [d.id, d]));

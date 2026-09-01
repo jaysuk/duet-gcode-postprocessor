@@ -8,10 +8,10 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 > the Flexible-Layouts widget (F1), the backup manager with restore/download/delete (D7), the fan
 > audit and per-feature override (G3), `M98` macro validation (G5), cold-extrusion and end-of-file
 > hygiene checks (G8), the Marlin tool-scoped temperature fix (H8), the move-time model with the
-> `M73` rewrite (G1), and predictive pre-heat before a tool change (G2). Still outstanding: auto-run
-> on upload (D5), batch processing (D6), automatic recipe selection (D4), run history (D8), the
-> volumetric flow-rate audit and feedrate clamping (G6–G7, unblocked by G1 but not yet built), and
-> the "Later" items.
+> `M73` rewrite (G1), predictive pre-heat before a tool change (G2), and arc welding (B16). Still
+> outstanding: auto-run on upload (D5), batch processing (D6), automatic recipe selection (D4), run
+> history (D8), the volumetric flow-rate audit and feedrate clamping (G6–G7, unblocked by G1 but not
+> yet built), and the "Later" items.
 > See [PLAN.md](PLAN.md#status) for the deviations.
 
 ---
@@ -48,7 +48,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | B13 | **Cooling / fan overrides by layer range** — superseded by the more useful by-*feature* override, done in phase 10 (`fanByFeature` step) | 3 |
 | B14 | **Marlin-to-RRF preset** — a curated, documented mapping bundle for the ~20 commands that actually differ (explicitly not a general translator) | 3 |
 | B15 | **Z-offset / mesh injection** — insert or replace `G31`, `G29 S1`, baby-stepping at the top of a file | 3 |
-| B16 | **Arc welding** (G1 runs → G2/G3) — specced in [docs/tasks/08-arc-welding.md](docs/tasks/08-arc-welding.md); RRF executes arcs natively and its source explicitly accommodates ArcWelder output. Un-welding is a separate, later task | Next |
+| B16 | ✅ **Arc welding** (G1 runs → G2/G3) — Done — `model/gcode/arcFit.ts`, `model/steps/arcWeld.ts`; RRF executes arcs natively and its source explicitly accommodates ArcWelder output. Un-welding is a separate, later task | — |
 | B17 | **Retraction rewriting** — convert firmware retraction to explicit E moves or vice versa | Later |
 
 ## C. Scripting

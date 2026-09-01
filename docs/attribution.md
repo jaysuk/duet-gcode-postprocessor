@@ -43,6 +43,24 @@ re-deriving one — then: add the MIT notice to the file, add an entry to `THIRD
 and say plainly in the commit message which project it came from. Do not quietly upgrade "inspired
 by" into "adapted from" without the notice following.
 
+### ArcWelderLib — github.com/FormerLurker/ArcWelderLib
+
+**Licence:** AGPL-3.0. Not GPL-compatible in the direction that matters here — this plugin cannot
+incorporate ArcWelderLib source at all, at any size, which is exactly why the second row of the
+table above is the one that applies.
+
+The reference implementation of "weld runs of straight moves back into `G2`/`G3` arcs" — the
+algorithm `model/gcode/arcFit.ts` (task 08) implements. **Status: algorithm re-implemented from its
+published, described behaviour — the three-point circumcircle fit, the radial-and-perpendicular
+deviation test, the arc-length-versus-polyline-length check, the buffer-and-restart structure — not
+from reading or translating its source.** Our version is written from scratch against this plugin's
+own tokeniser, `LineContext` and `Transform` contract, which look nothing like ArcWelderLib's own
+C++ structure (a point buffer, a segmented-shape class hierarchy, a command-line tool). The
+firmware-facing numbers it must satisfy (RRF's centre-format `I`/`J` requirement, its 0.05mm radius
+tolerance) came from reading RepRapFirmware's own source directly, not from ArcWelderLib.
+
+Named in `arcFit.ts`'s module comment, per the rule above.
+
 ### PrusaSlicer, OrcaSlicer
 
 Behaviour we deliberately match rather than code we use: the semantics of *G-code Substitutions*
