@@ -101,6 +101,23 @@ export const PRESETS: ReadonlyArray<Preset> = Object.freeze([
 		},
 	},
 	{
+		key: "timelapsePerObject",
+		name: "Timelapse trigger per object",
+		description: "Calls a macro once per M486 object, right after that object's own top layer — not once per layer for a whole plate.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Timelapse trigger per object",
+				version: RECIPE_VERSION,
+				steps: [
+					step("timelapseTopLayer", {
+						macroPath: "0:/macros/timelapse.g",
+					}, "Needs the file to already carry M486 object labels — add \"Convert Klipper object markers\" before this if it does not"),
+				],
+			};
+		},
+	},
+	{
 		key: "pressureAdvanceTower",
 		name: "Pressure advance tower",
 		description: "Turns an already-sliced tower into a pressure-advance calibration print by sweeping M572 up the Z height.",
@@ -214,6 +231,102 @@ export const PRESETS: ReadonlyArray<Preset> = Object.freeze([
 						resolutionMm: 0.05, pathTolerancePercent: 5, maxRadiusMm: 9999,
 						minSegments: 3, allow3dArcs: false, extrusionRateVariancePercent: 5,
 					}, "Runs last — nothing after this preset touches individual G1 moves"),
+				],
+			};
+		},
+	},
+	{
+		key: "perLayerZOffset",
+		name: "Per-layer Z-offset",
+		description: "Nudges Z by a small amount from a chosen layer onward — first-layer squish after the fact, or a correction partway up an otherwise-good print.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Per-layer Z-offset",
+				version: RECIPE_VERSION,
+				steps: [
+					step("paramRewrite", {
+						commands: "G0, G1", param: "Z", op: "offset", value: -0.02,
+						min: 0, max: 0, decimals: 3, skipMissing: true,
+						layerFrom: 0, layerTo: -1,
+					}, "Change the starting layer (From layer) and the offset (Value) to suit — negative brings the nozzle closer to the bed. -1 in To layer means to the end of the file"),
+				],
+			};
+		},
+	},
+	{
+		key: "bedTemperatureRamp",
+		name: "Bed-temperature ramp",
+		description: "Drops the bed temperature by a few degrees after a chosen layer — common practice for reducing elephant foot, and for not holding a large bed at full temperature for the rest of a long print.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Bed-temperature ramp",
+				version: RECIPE_VERSION,
+				steps: [
+					step("insertAt", {
+						anchor: "layer", layer: 10, position: "after",
+						text: "M140 S55 ; lower bed temperature for the rest of the print",
+						interval: 1, offset: 0, z: 1, tolerance: 0.05, tool: -1,
+						pattern: "", regex: false, caseSensitive: true, percent: 50, once: false,
+					}, "Change the layer and the target temperature to suit. Uses M140, which sets the "
+						+ "temperature and returns immediately — never M190, which waits for the bed to "
+						+ "reach it and would stall the print with the nozzle sitting hot over the part"),
+				],
+			};
+		},
+	},
+	{
+		key: "ejectSequenceTemplate",
+		name: "Eject sequence (template)",
+		description: "A starting point for an end-of-print part-ejection routine, for print farms. Every move is commented out — this is a shape to edit for your own machine, not a ready sequence.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Eject sequence (template)",
+				version: RECIPE_VERSION,
+				steps: [
+					step("insertAt", {
+						anchor: "fileEnd", position: "after",
+						text: [
+							"; --- Eject sequence template: every line below is commented out ---",
+							"; Uncomment and check the coordinates for YOUR machine before using this.",
+							"; M400 ; wait for pending moves to finish",
+							"; G91 ; relative positioning",
+							"; G1 Z10 F600 ; lift the nozzle clear of the part",
+							"; G90 ; back to absolute positioning",
+							"; G1 X0 Y300 F6000 ; move the bed or gantry to the eject position",
+							"; M84 ; disable motors",
+						].join("\n"),
+						layer: 1, interval: 1, offset: 0, z: 1, tolerance: 0.05, tool: -1,
+						pattern: "", regex: false, caseSensitive: true, percent: 50, once: false,
+					}, "Every move is commented out on purpose — an eject routine is specific to your "
+						+ "own gantry and bed, and coordinates that suit someone else's machine could "
+						+ "crash into the frame or the bed on yours. Uncomment and check each line before using it"),
+				],
+			};
+		},
+	},
+	{
+		key: "confirmationGate",
+		name: "Confirmation gate at a layer",
+		description: "Pauses and waits for the user to confirm before continuing — check the bed, insert magnets, start a filament change.",
+		build(): Recipe {
+			return {
+				id: newUid(),
+				name: "Confirmation gate at a layer",
+				version: RECIPE_VERSION,
+				steps: [
+					step("insertAt", {
+						anchor: "layer", layer: 10, position: "before",
+						text: "M291 P\"Ready to continue?\" R\"Confirm\" S2",
+						interval: 1, offset: 0, z: 1, tolerance: 0.05, tool: -1,
+						pattern: "", regex: false, caseSensitive: true, percent: 50, once: false,
+					}, "M291 with S2 genuinely pauses the print on its own — verified against both "
+						+ "Duet3D/wiki-content (\"S2: ... blocking, send M292 to resume\") and RepRapFirmware's "
+						+ "own source (GCodes7.cpp's DoMessageBox: S2/S3 call gb.WaitForAcknowledgement, "
+						+ "halting that input channel's progress through the file until M292) — no M25 "
+						+ "needed. Change the layer, message and title to suit"),
 				],
 			};
 		},

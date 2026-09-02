@@ -458,6 +458,43 @@ describe("analyseText", () => {
 			expect(analysis.slowestLayers.length).toBeLessThanOrEqual(MAX_REPORTED_LAYERS);
 		});
 	});
+
+	describe("retractionStats", () => {
+		it("counts a relative-mode retraction", () => {
+			const analysis = analyseText(["T0", "M83", "G1 E-2 F1800"].join("\n"));
+			expect(analysis.retractionStats).toEqual([{ tool: 0, count: 1, totalMm: 2 }]);
+		});
+
+		it("counts an absolute-mode retraction as the delta, not the raw E value", () => {
+			const analysis = analyseText(["T0", "M82", "G1 E10 F1800", "G1 E8 F1800"].join("\n"));
+			expect(analysis.retractionStats).toEqual([{ tool: 0, count: 1, totalMm: 2 }]);
+		});
+
+		it("does not count G92 E0 as a retraction", () => {
+			const analysis = analyseText(["T0", "M82", "G1 E10 F1800", "G92 E0", "G1 E5 F1800"].join("\n"));
+			// G92 resets the datum to 0, then G1 E5 is a genuine extrusion (delta +5), not a retraction
+			expect(analysis.retractionStats).toEqual([]);
+		});
+
+		it("splits retractions per tool", () => {
+			const text = [
+				"M83",
+				"T0", "G1 E-1 F1800",
+				"T1", "G1 E-3 F1800", "G1 E-1 F1800",
+			].join("\n");
+			const analysis = analyseText(text);
+			expect(analysis.retractionStats).toEqual([
+				{ tool: 0, count: 1, totalMm: 1 },
+				{ tool: 1, count: 2, totalMm: 4 },
+			]);
+		});
+
+		it("does not attribute a retraction before any tool is selected to tool 0", () => {
+			const analysis = analyseText(["M83", "G1 E-1 F1800", "T0", "G1 E-1 F1800"].join("\n"));
+			// Only the second retraction (after T0) is counted
+			expect(analysis.retractionStats).toEqual([{ tool: 0, count: 1, totalMm: 1 }]);
+		});
+	});
 });
 
 describe("detectDialect", () => {

@@ -21,12 +21,16 @@ four non-negotiables there are binding, not background.
 | [11](11-print-recovery.md) | Print recovery and layer surgery (§8 phase 13) | **Done** — stop point resolved: Z re-homing opt-in and off by default, no adhesion trickery invented | 10 |
 | [12](12-geometry-analysis.md) | Geometry-aware analysis — per-feature stats, minimum layer time, `M486` labelling, void detection (§8 phase 14) | **Done**. §1–3 shipped; §4 was checked against a real 250-layer dense slice (this repo's own fixtures were too thin) and resolved its own stop point by stopping: 16–1,139 false-positive candidates on an object with no intentional cavities, so `model/gcode/voids.ts` stays a pure, tested, unwired detector — no collector, no step, no UI | 10 |
 | [13](13-simulation-and-tail.md) | `M37` simulation round-trip and the long tail (§8 phase 15) | **Done in full**, including "compare two files" — `model/compareFiles.ts` + `components/CompareFiles.vue` | 10 |
+| [14](14-scripting-engine-defects.md) | Defect pass on the scripting engines — the QuickJS sandbox's chunking bypassed downstream steps and wrecked the dry-run diff, and it re-serialised the whole metadata block per line (239× slower on a real file) | **Done** — every reproduction in the work order now fails before the fix and passes after it; sandboxed engine moved to one VM call per line, metadata hoisted once per run via `setMeta` | — (the work it audits is uncommitted, not shipped) |
+| [15](15-feature-backlog.md) | The remaining feature-ideas backlog — `{meta.*}` placeholders, retraction totals, four presets (H3/H4/H12/H13), tool renumbering, Z-hop + ooze control, per-object timelapse | **Done** — both stop points resolved against the wiki and RRF source and cited in the modules that depend on them; found and fixed a real G92-reset bug in `analysis.ts` and a pre-existing gap in `golden.test.ts` (it never ran the analysis pass, so no analysis-dependent step had ever been golden-tested) along the way | 14 |
 
-**Tasks 11–13 each carry a stop point**, because each contains a question that cannot be answered by
-reading source: whether the user's machine can safely re-home Z over a part (11), whether void
-detection's false-positive rate is low enough to show anyone (12), and what `M37` simulation actually
-costs the user in machine time (13). Resolving a stop point by picking the convenient answer is worse
-than not doing the task — **stop and report**, as the section at the bottom of this file says.
+**Tasks 11–13 and 15 carry stop points**, because each contains a question that cannot be answered by
+reading this codebase: whether the user's machine can safely re-home Z over a part (11), whether void
+detection's false-positive rate is low enough to show anyone (12), what `M37` simulation actually
+costs the user in machine time (13), and two firmware-behaviour questions in 15 (which commands' `P`
+parameter is a tool number rather than a fan index; whether `M291` on its own actually pauses a
+print). Resolving a stop point by picking the convenient answer is worse than not doing the task —
+**stop and report**, as the section at the bottom of this file says.
 
 ## What a work order here must contain
 

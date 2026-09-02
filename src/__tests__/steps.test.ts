@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { emptyMetadata, parseMetadata } from "../model/gcode/metadata";
 import { mapCommand, parseAddParams, parseLetters, parseParamMap } from "../model/steps/commandMap";
 import { applyOp } from "../model/steps/paramRewrite";
 import { bandForLayer, bandValue } from "../model/steps/rangeVary";
@@ -172,6 +173,24 @@ describe("insertAt", () => {
 	it("inserts multiple lines in order", () => {
 		const out = runStep("insertAt", { anchor: "fileStart", text: "; a\n; b\n; c" }, "G28");
 		expect(out.split("\n").slice(0, 3)).toEqual(["; a", "; b", "; c"]);
+	});
+
+	it("expands a typed {meta.*} field", () => {
+		// SAMPLE's own "; total layers count = 3" header line normalises to totalLayers = 3
+		const meta = parseMetadata(SAMPLE);
+		const out = runStep("insertAt", { anchor: "layer", layer: 1, text: "M117 of {meta.totalLayers}" }, SAMPLE, meta);
+		expect(out).toContain("M117 of 3");
+	});
+
+	it("expands a raw {meta.<key>} field from the normalised values map", () => {
+		const meta = { ...emptyMetadata(), values: new Map([["layer_height", "0.2"]]) };
+		const out = runStep("insertAt", { anchor: "layer", layer: 1, text: "; lh {meta.layer_height}" }, SAMPLE, meta);
+		expect(out).toContain("; lh 0.2");
+	});
+
+	it("leaves an unknown {meta.*} key literally intact, rather than expanding to empty", () => {
+		const out = runStep("insertAt", { anchor: "layer", layer: 1, text: "M104 S{meta.first_layer_temperature}" }, SAMPLE);
+		expect(out).toContain("M104 S{meta.first_layer_temperature}");
 	});
 });
 

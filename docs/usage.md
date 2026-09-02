@@ -126,7 +126,14 @@ Puts lines somewhere. The anchor decides where:
 - **At a percentage through the file** — by size, not by time
 - **Wherever a pattern matches**, optionally only the first time
 
-Inserted text may use `{layer}`, `{z}`, `{tool}`, `{line}`, `{file}`, `{feedrate}` and `{object}`.
+Inserted text may use `{layer}`, `{z}`, `{tool}`, `{line}`, `{file}`, `{feedrate}`, `{object}` and
+`{meta.<key>}` — a value from the file's own slicer metadata, e.g. `{meta.totalLayers}` for one of
+the handful of fields this plugin already understands by name, or `{meta.layer_height}` for anything
+else, read straight from the file's own `key = value` block with spaces collapsed to underscores
+(exactly how the "Slicer settings found" panel in the inspector lists it — copy the key from there).
+A `{meta.*}` whose key the file does not state is left in the output exactly as written, not silently
+dropped, so a mistyped or absent key is visible in the diff rather than producing a command missing
+a value it needed.
 
 ### Delete or disable lines
 
@@ -358,6 +365,71 @@ Nothing to configure. A file that already uses `M486` is left completely untouch
 converting anyway could assign a Klipper-derived index that collides with one the slicer already
 used itself.
 
+### Timelapse on each object's top layer
+
+The "Timelapse trigger every layer" preset fires a macro at every layer change — simple, and enough
+for a single-object print. On a plate of many objects that fires far more often than anyone wants
+frames for. This step instead needs the file to already carry `M486` object labels (pair it with
+"Convert Klipper object markers to M486" first if it does not have them), works out the highest layer
+each object actually extrudes on, and calls the macro once per object, right after that object's own
+last layer finishes — once, not once per object, when several objects happen to finish on the same
+layer. A file with no object labels at all is left untouched, with a warning, rather than silently
+falling back to firing on every layer.
+
+- **Macro to call** — via `M98`. Default: `0:/macros/timelapse.g`.
+
+### Renumber tools
+
+Remaps tool numbers for a file sliced against a different tool assignment — trivial to want on a
+toolchanger, and a plain find-and-replace on "T0" gets it wrong in two ways: it also rewrites T0
+inside a comment or an `M117` message, and it does nothing sensible with `M568 P0`. This step operates
+on parsed parameters instead, and rewrites the tool number wherever RepRapFirmware's own G-code
+dictionary confirms one actually appears: bare `T<n>` command lines, and the `P` parameter of
+`M563`/`M567`/`M568`/`M116`. It deliberately leaves `M106`/`M107`'s `P` alone (that is a **fan**
+index) and `M585`'s `P` alone (a **Z probe** number) — both reuse the same letter for something else
+entirely. It also leaves `G10` tool offsets alone: `G10`'s own `P` means a tool number in one form and
+a workplace coordinate system number in another, and reliably telling them apart needs more than this
+step attempts.
+
+- **Mapping** — comma-separated `old->new` pairs, e.g. `0->2, 1->0`. Every pair is resolved against
+  the file's *original* tool numbers at once, so `0->1, 1->0` is a genuine swap rather than every T0
+  becoming T1 and then, on the very next rule, turning straight back into T0. A tool number not
+  listed is left completely alone.
+
+### Z-hop on long travels
+
+Lifts the nozzle before a travel move longer than a threshold and lowers it again after, for a file
+sliced without a hop that is knocking over a tall or fragile part. Skips a travel that already has an
+explicit Z-rise on the line immediately before it (a slicer-emitted hop of its own), and skips the
+rest of the file entirely once it sees `G10`/`G11` — RepRapFirmware's own firmware retraction, which
+already performs whatever hop this machine's `M207` is configured with, invisible from the file's own
+text and not this plugin's to second-guess. Both kinds of skip are counted and reported, so "nothing
+changed" is distinguishable from "nothing needed to".
+
+- **Travel length threshold (mm)** — only travels at least this long get a hop. Default: 5.
+- **Hop height (mm)** — how far to lift, and lower again. Default: 0.4.
+
+Run this **before** "Weld curves into arcs" in the recipe — arc-welding changes line counts and
+coordinates outright, and this step needs to see the file's own original travel moves.
+
+### Ooze control on long travels
+
+The same travel-detection as "Z-hop", used to retract (and optionally cool) before a long travel
+instead of lifting for one — for a file sliced without any protection that is stringing across long
+travels. Skips a travel already preceded by a retraction on the line immediately before it, and skips
+the rest of the file once it sees `G10`/`G11`, for the same reason "Z-hop" does.
+
+- **Travel length threshold (mm)** — only travels at least this long get a retraction. Default: 5.
+- **Retraction length (mm)** — pulled back before the travel, pushed back after. This is on top of
+  anything the file already does elsewhere, not a replacement for it. Default: 0.4.
+- **Also drop temperature** — off by default. When on, lowers the hot end for the duration of the
+  travel and restores it afterwards — but only when the file has already commanded a temperature
+  earlier to restore to; without one, it still retracts but leaves temperature alone rather than
+  guessing at a value.
+- **Temperature drop (°C)** — Default: 10.
+
+Also run this **before** "Weld curves into arcs", for the same reason as "Z-hop".
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,
@@ -380,14 +452,53 @@ and because it is data rather than code it is diffable, shareable and cannot do 
 
 **Conditions:** `matches` (pattern, regex, caseSensitive, negate) · `command` (codes) ·
 `layer` (from, to) · `tool` · `z` (from, to) · `param` (letter, op: present/absent/gt/lt/eq, value) ·
-`comment` · `object` (name) · `feature` (name, from the slicer's `;TYPE:` comment).
+`comment` · `object` (name) · `feature` (name, from the slicer's `;TYPE:` comment) · `expr`
+(expression — a computed condition, true when the result is non-zero/`true`).
 
 **Actions:** `replace` (pattern, replacement) · `replaceLine` (text) · `setParam` · `scaleParam` ·
-`offsetParam` · `removeParam` · `insertBefore` · `insertAfter` · `appendComment` · `commentOut` ·
-`drop`.
+`offsetParam` · `setParamExpr` (letter, expression, decimals) · `removeParam` · `insertBefore` ·
+`insertAfter` · `appendComment` · `commentOut` · `drop`.
 
 All conditions in a rule must hold. Rules are evaluated in order and all matching rules apply,
 unless one sets `"stop": true`.
+
+#### Computed values with `expr` and `setParamExpr`
+
+For arithmetic a fixed factor or offset can't express — "slow proportionally to how many layers
+are left", "scale F but never below a floor" — without dropping to the JavaScript step. Both use
+the same safe expression evaluator (`+ - * / %`, comparisons, `&&`/`||`, parentheses, and functions
+like `abs`/`min`/`max`/`round` — no loops, no function calls back into your own code, nothing that
+touches the file or the network):
+
+```json
+[
+  {
+    "name": "Slow proportionally as the print nears the end",
+    "when": [
+      { "type": "command", "codes": ["G1"] },
+      { "type": "expr", "expression": "layer > totalLayers * 0.8" }
+    ],
+    "then": [
+      { "type": "setParamExpr", "letter": "F", "expression": "value * 0.9", "decimals": 0 }
+    ]
+  }
+]
+```
+
+The expression sees, as plain flat names (never `meta.totalLayers` — there is no member access):
+the current line's own parameters exactly as written (`F`, `X`, `Y`, `Z`, `E`, ...), `layer`, `tool`,
+`z`, `feedrate`, the handful of slicer metadata fields already available elsewhere in this plugin
+(`totalLayers`, `layerHeight`, `filamentMm`, `printTimeSeconds`) when the slicer states them, and —
+in `setParamExpr` only — `value`, the parameter's own current numeric value on this line (so
+`"value * 0.9"` means "90% of whatever F already is here", the same idea `scaleParam`'s `factor`
+already expresses without needing an expression at all).
+
+A malformed expression is rejected immediately when you save the recipe, with the parse error shown
+inline — never a silent no-op discovered later. A variable the current line doesn't have (asking
+for `F` on a line with no F, say) makes that one line fail gracefully: the `expr` condition is just
+false for that line, and `setParamExpr` leaves that line unchanged — the same "can't act on this
+line, so don't" behaviour `scaleParam`/`offsetParam` already have when their own target parameter is
+missing.
 
 ### JavaScript
 
@@ -419,21 +530,52 @@ Use `gcode.*` rather than your own regular expressions. It is the same tokeniser
 plugin uses, and it handles the cases that catch hand-written parsers out — a `;` inside a quoted
 `M291` string, expression parameters, line numbers and checksums.
 
+#### Two engines: Fast and Sandboxed
+
+The **Engine** field picks how your script actually runs. Existing recipes with no `Engine` set keep
+using **Fast** — nothing already saved changes behaviour.
+
+- **Fast** (default): compiles your code directly and runs it once per line. Quick, no download, but
+  only a guardrail against accidents (see below) — not a real sandbox.
+- **Sandboxed**: runs your code inside a real embedded JavaScript engine (QuickJS) that has no
+  network or browser globals *at all* — not shadowed, genuinely absent. Two trade-offs: a roughly
+  1 MB one-time download the first time a recipe using it runs in a given browser tab, and **around
+  15–20× the per-line cost of the Fast engine** (measured at 17× on a 20,000-line file carrying
+  typical slicer metadata — roughly 40 seconds on a million-line file, against about 2 on Fast).
+  That is the real price of a genuine boundary rather than a shadowed one; it is why Fast is still
+  the default, and why it is worth picking Sandboxed deliberately rather than by habit.
+  Lines are still processed strictly one at a time, in order, exactly like the Fast engine — nothing
+  about `state`, `emit`/`emitBefore`, or a later step in the same recipe behaves any differently.
+
+  The `gcode.*`/`state`/`emit`/`emitBefore`/`drop`/`log` API is identical on both engines, as are all
+  the `ctx` fields listed in the table above — so in practice a script moves between them unchanged.
+  The one difference: `ctx.meta.values` is a plain object in the Sandbox rather than a `Map` (use
+  `ctx.meta.values.layer_height`, not `.get("layer_height")`), and three rarely-used extras —
+  `ctx.token`, `ctx.sawLayerMarker`, `ctx.geometricFallback` — are not carried across the boundary at
+  all and read as `undefined`.
+
 #### About script safety — read this
 
 A script step will not run until you tick **"Trust scripts in this recipe"**, which is per browser
-session and never saved or imported. That is deliberate:
+session and never saved or imported. That is deliberate, and applies to both engines:
 
-**A script runs with the same privileges as the DWC page.** The network and storage globals
-(`fetch`, `XMLHttpRequest`, `WebSocket`, `localStorage`, …) are shadowed so calling them fails, but
-this is a guardrail against accidents, not a sandbox — determined code can get around it. Read any
-script you did not write before trusting it, exactly as you would a macro someone sent you.
+**On the Fast engine, a script runs with the same privileges as the DWC page.** The network and
+storage globals (`fetch`, `XMLHttpRequest`, `WebSocket`, `localStorage`, …) are shadowed so calling
+them fails, but this is a guardrail against accidents, not a sandbox — determined code can get around
+it. Read any script you did not write before trusting it, exactly as you would a macro someone sent
+you. **On the Sandboxed engine, that global object simply is not there to reach** — it is a real,
+separate JavaScript engine with nothing but the `gcode`/`ctx`/`state`/`emit`/`log` API you are handed.
+The trust checkbox still gates both, since a script's *correctness* (an infinite loop, a mistake that
+corrupts your file) is a real concern independent of network isolation.
 
-A watchdog aborts the run if the script averages more than its time budget per line, so an
-accidental infinite loop stops the run rather than hanging the browser.
+A watchdog aborts the run if the script takes too long — a running average per line on both engines,
+plus a hard per-line wall-clock backstop underneath it on Sandboxed (enforced by the engine's own
+interrupt hook, checked during execution rather than polled, and something the Fast engine's
+averaging genuinely cannot offer) — so an accidental infinite loop stops the run rather than hanging
+the browser either way.
 
-See [scripting-engines.md](scripting-engines.md) for what would make this a real sandbox, and for
-the plan to support actual Python.
+See [scripting-engines.md](scripting-engines.md) for the design behind the Sandboxed engine, and for
+the (separate, not yet built) plan to support actual Python.
 
 ---
 
@@ -452,6 +594,11 @@ From **⋮ → Add a bundled preset**:
 | Hand the start sequence to the printer | Calls your own `print_start.g` at the first layer change |
 | Boost bridge cooling | Runs bridges and overhangs at full fan speed; everything else untouched |
 | Weld curves into arcs | Collapses runs of straight moves that trace a circle back into `G2`/`G3`, with ArcWelder's own default settings |
+| Timelapse trigger per object | Calls a macro once per `M486` object, right after that object's own top layer — not once per layer for the whole plate |
+| Per-layer Z-offset | Nudges Z by a small amount from a chosen layer onward — first-layer squish after the fact, or a correction partway up a print |
+| Bed-temperature ramp | Drops the bed temperature after a chosen layer, via `M140` (never `M190`, which would stall the print waiting for it) |
+| Eject sequence (template) | A starting point for an end-of-print ejection routine — every move is commented out; edit the coordinates for your own machine before using it |
+| Confirmation gate at a layer | Pauses and waits for the user before a chosen layer, via a genuinely blocking `M291` — verified against both the wiki and the RepRapFirmware source, no `M25` needed |
 
 ---
 
@@ -480,6 +627,9 @@ The **Inspect** tab reads the file once, without writing anything, and reports:
   shows either way
 - **Time and filament by object**, when the file uses `M486` (directly, or converted from Klipper's
   `EXCLUDE_OBJECT` by that step)
+- **Retractions by tool** — count and total distance, a proxy for oozing and for wear. A retraction is
+  counted as its own event regardless of which E mode (`M82`/`M83`) the file uses, and a `G92 E0` reset
+  is never mistaken for one
 - Every slicer setting found in the header and footer
 - Whether the file has already been post-processed, by which recipe and when
 

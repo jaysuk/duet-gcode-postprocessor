@@ -117,6 +117,14 @@ export function usesScripts(recipe: Recipe): boolean {
 	return recipe.steps.some((s) => s.enabled && s.type === "script");
 }
 
+/** True when the recipe contains at least one enabled script step configured for the sandboxed
+ *  (QuickJS) engine — the signal `processFile` uses to decide whether it needs to await the
+ *  asynchronous QuickJS asset load before building this recipe's transforms, since `buildTransforms`
+ *  itself is synchronous. See `model/steps/quickjs/loader.ts`'s module comment. */
+export function usesSandboxedScript(recipe: Recipe): boolean {
+	return recipe.steps.some((s) => s.enabled && s.type === "script" && s.config.engine === "sandboxed");
+}
+
 /**
  * Collectors declared by one step, tagged with that step's position among the recipe's enabled
  * steps. The position is what lets `processFile` run each group's collectors against the *output*

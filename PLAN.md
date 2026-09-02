@@ -55,10 +55,14 @@ built on `M32`, and the usage guide.
    whole layer block, so a regex there can span lines. Supporting that means buffering a layer and
    splitting the step chain around block-mode steps, which roughly doubles the pipeline's
    complexity for a feature most rules do not use. Documented in `docs/usage.md`; deferred.
-3. **The script tier is a guardrail, not a sandbox.** The network globals are shadowed and a
-   watchdog catches runaway loops, but `new Function` code can still reach the real global object.
-   A trust gate stands in front of it. `docs/scripting-engines.md` sets out what a real sandbox
-   (QuickJS in WASM) and real Python (Pyodide) would take.
+3. **The script tier's default engine is a guardrail, not a sandbox** — network globals shadowed, a
+   watchdog for runaway loops, but `new Function` code can still reach the real global object. A
+   real sandbox now exists alongside it: `engine: "sandboxed"` runs the script inside an embedded
+   QuickJS VM with no network/DOM globals to begin with, a real memory limit and a real interrupt
+   handler, at the cost of a one-time asset download (`model/steps/quickjs/`). Both engines require
+   the same trust gate — see `docs/scripting-engines.md` for the design, and `docs/usage.md`'s
+   "JavaScript" section for the user-facing tradeoff. Real Python (Pyodide) is the one item from that
+   doc not yet built.
 4. **i18n is scaffolded, not applied.** The nav caption and widget strings go through
    `registerPluginMessages`; the rest of the UI is literal English.
 

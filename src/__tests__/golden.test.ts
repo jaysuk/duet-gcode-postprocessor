@@ -15,10 +15,12 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { analyseText } from "../model/analysis";
+import { AnalysisRunner } from "../model/analysisPass";
 import { parseMetadata } from "../model/gcode/metadata";
 import { runToString } from "../model/pipeline";
 import { PRESETS } from "../model/presets";
-import { buildTransforms } from "../model/recipe";
+import { buildTransforms, collectorsFor } from "../model/recipe";
+import type { StepFactoryContext } from "../model/steps/types";
 
 const FIXTURES = ["prusaslicer", "cura", "orcaslicer", "two-tool", "arc-circle", "arc-after-extrusion"] as const;
 
@@ -106,8 +108,29 @@ describe("golden output", () => {
 		const input = loadFixture(fixture);
 		const meta = parseMetadata(input);
 		const recipe = preset.build();
+		const ctx: StepFactoryContext = { scriptsTrusted: false };
+
+		// Mirrors io/transfer.ts's real analysis pass, simplified to one flat run over the raw input
+		// rather than a separate prefix pipeline per collector-declaring step (task 07's defect A) —
+		// safe here because no bundled preset has an earlier step that rewrites what a later
+		// collector-declaring step in the SAME preset would see. Costs nothing when no step in the
+		// recipe declares a collector, which was every preset until "Timelapse trigger per object".
+		const collectorGroups = collectorsFor(recipe, ctx, meta);
+		const analysisResults = collectorGroups.length === 0
+			? undefined
+			: (() => {
+				const runner = new AnalysisRunner({
+					collectors: collectorGroups.flatMap((g) => g.collectors), meta, totalBytes: input.length,
+				});
+				for (const line of input.split("\n")) runner.line(line);
+				return runner.result();
+			})();
+
 		const { output } = runToString(
-			{ transforms: buildTransforms(recipe, { scriptsTrusted: false }), meta, sourcePath: `0:/gcodes/${fixture}.gcode` },
+			{
+				transforms: buildTransforms(recipe, ctx, meta), meta,
+				sourcePath: `0:/gcodes/${fixture}.gcode`, analysisResults,
+			},
 			input,
 		);
 		await expect(output).toMatchFileSnapshot(resolve(__dirname, "../../test/golden", `${key}.${fixture}.gcode`));

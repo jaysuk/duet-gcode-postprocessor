@@ -55,6 +55,15 @@ export interface Transform {
 	onLine(ctx: LineContext, line: string): StepResult;
 	/** Lines to emit after the last source line. */
 	onEnd?(ctx: RunContext): Array<string> | void;
+	/**
+	 * Release any resource this transform holds outside the JS heap (currently: the sandboxed script
+	 * engine's QuickJS runtime and its WASM memory). Called by `Pipeline.dispose()` exactly once per
+	 * transform instance, whether the run finished normally, was cancelled, or threw — see task 14's
+	 * Finding C. Must never throw; `Pipeline.dispose()` calls it best-effort inside a `try`/`catch` so
+	 * one transform's cleanup failure cannot mask the run's real error or skip another transform's
+	 * cleanup, but a transform that could throw here should catch internally regardless.
+	 */
+	dispose?(): void;
 }
 
 // #region Field schema
@@ -142,6 +151,20 @@ export class StepConfigError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = "StepConfigError";
+	}
+}
+
+/**
+ * Thrown by the script step's `onLine` to abort a whole run — a script that threw, or one that
+ * exceeded its time budget. Shared by both engines (`script.ts`'s fast engine and
+ * `quickjs/sandboxEngine.ts`'s sandboxed one) rather than each having its own class: they are the
+ * same concept ("this script step cannot continue"), and living here rather than in `script.ts` lets
+ * `sandboxEngine.ts` throw it without a circular import between the two modules.
+ */
+export class ScriptAbortError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ScriptAbortError";
 	}
 }
 
@@ -236,23 +259,54 @@ export function buildMatcher(opts: {
 }
 
 /**
- * Expand `{layer}`, `{z}`, `{tool}`, `{line}`, `{file}`, `{feedrate}`, `{object}` placeholders in
- * text a user typed into an insert/emit field.
+ * Known typed fields on `SlicerMetadata` reachable as `{meta.totalLayers}` etc, by their own
+ * (camelCase) field name. Anything else falls back to the raw normalised map (`{meta.layer_height}`,
+ * snake_case — see `metadata.ts`'s own "Normalised key -> value" comment). `null` (field absent, or
+ * key not in the file's metadata at all) means "leave the placeholder text alone" — see
+ * `expandPlaceholders`'s doc comment for why that is the safe failure, not an empty string.
+ */
+function metaPlaceholderValue(meta: SlicerMetadata, key: string): string | null {
+	switch (key) {
+		case "totalLayers": return meta.totalLayers === null ? null : String(meta.totalLayers);
+		case "layerHeight": return meta.layerHeight === null ? null : String(meta.layerHeight);
+		case "filamentMm": return meta.filamentMm === null ? null : String(meta.filamentMm);
+		case "printTimeSeconds": return meta.printTimeSeconds === null ? null : String(meta.printTimeSeconds);
+		case "filamentDiameterMm": return meta.filamentDiameterMm === null ? null : String(meta.filamentDiameterMm);
+		case "maxVolumetricSpeedMm3PerSec": return meta.maxVolumetricSpeedMm3PerSec === null ? null : String(meta.maxVolumetricSpeedMm3PerSec);
+		default: return meta.values.get(key) ?? null;
+	}
+}
+
+/**
+ * Expand `{layer}`, `{z}`, `{tool}`, `{line}`, `{file}`, `{feedrate}`, `{object}` and
+ * `{meta.<key>}` placeholders in text a user typed into an insert/emit field.
+ *
+ * A `{meta.<key>}` whose key is not known — a typed field the file's slicer never stated, or a raw
+ * key absent from `meta.values` — is left **literally intact**, not expanded to `""`. Silently
+ * dropping it would turn `M104 S{meta.first_layer_temperature}` into `M104 S`, a command that means
+ * something different rather than one that is obviously wrong; the surviving placeholder text is
+ * the visible signal, and it shows up in the dry-run diff before anything is written.
  */
 export function expandPlaceholders(text: string, ctx: LineContext, sourcePath = ""): string {
 	if (!text.includes("{")) return text;
-	return text.replace(/\{(layer|z|tool|line|file|feedrate|object)\}/g, (_all, key: string) => {
-		switch (key) {
-			case "layer": return String(ctx.layer);
-			case "z": return ctx.z === null ? "" : String(ctx.z);
-			case "tool": return String(ctx.tool);
-			case "line": return String(ctx.lineNo);
-			case "file": return sourcePath;
-			case "feedrate": return ctx.feedrate === null ? "" : String(ctx.feedrate);
-			case "object": return ctx.object ?? "";
-			default: return _all;
-		}
-	});
+	return text.replace(
+		/\{(?:meta\.([A-Za-z0-9_]+)|(layer|z|tool|line|file|feedrate|object))\}/g,
+		(all, metaKey: string | undefined, key: string | undefined) => {
+			if (metaKey !== undefined) {
+				return metaPlaceholderValue(ctx.meta, metaKey) ?? all;
+			}
+			switch (key) {
+				case "layer": return String(ctx.layer);
+				case "z": return ctx.z === null ? "" : String(ctx.z);
+				case "tool": return String(ctx.tool);
+				case "line": return String(ctx.lineNo);
+				case "file": return sourcePath;
+				case "feedrate": return ctx.feedrate === null ? "" : String(ctx.feedrate);
+				case "object": return ctx.object ?? "";
+				default: return all;
+			}
+		},
+	);
 }
 
 /** Split a multi-line text field into lines, dropping a trailing blank. */

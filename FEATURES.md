@@ -56,8 +56,8 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | # | Feature | Phase |
 | --- | --- | --- |
 | C1 | **Rules DSL (no eval)** — declarative *when condition then action*, composable, serialisable, unit-testable; covers most real post-processing scripts without arbitrary code | 5 · v1 |
-| C2 | **JavaScript step** — user JS per line in a sandboxed worker, with `line`, `ctx` (layer, Z, tool, feedrate, extrusion mode, object, slicer metadata), `emit()`, `drop()`, per-run `state` and `log()` | 5 |
-| C3 | **Script sandbox hardening** — network APIs deleted from the worker global before user code runs, per-line time watchdog, explicit trust prompt for imported scripts | 5 |
+| C2 | ✅ **JavaScript step** — user JS with `line`, `ctx` (layer, Z, tool, feedrate, extrusion mode, object, slicer metadata), `emit()`, `drop()`, per-run `state` and `log()` | Done — `model/steps/script.ts`. Not literally a worker (the bundle is a single IIFE, see PLAN.md §3.2): two engines instead, both per-line, "fast" (`new Function`) and "sandboxed" (a real QuickJS VM) — see C3 |
+| C3 | ✅ **Script sandbox hardening** — network APIs unreachable before user code runs, a time watchdog, explicit trust prompt for imported scripts | Done — the "sandboxed" engine (`model/steps/quickjs/`) runs inside a real QuickJS VM with no network/DOM globals to begin with (not shadowed — genuinely absent), a real memory limit, and a wall-clock interrupt handler verified against an actual infinite loop. The original "fast" engine's guardrail (shadowed globals, an averaged-time watchdog) ships alongside it as the no-download default. Both require the same explicit trust prompt |
 | C4 | **Bundled script library** — worked examples for the common asks, ready to copy and edit | 5 |
 | C5 | **Script parameter schemas** — a script declares its inputs and the plugin generates the form, so a shared script is usable without editing code | 5 |
 | C6 | **Import/export scripts and rules** as JSON, with a share-by-URL/gist path behind a trust confirmation | 5 |
@@ -141,18 +141,18 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 | --- | --- | --- |
 | H1 | ^ **Hole detection with insert pauses** - find voids that get roofed over, report the depth, offer a pause at each | The standout borrow; present as candidates to tick, never an automatic rewrite. **Investigated and stopped** — `model/gcode/voids.ts`'s detector, checked against a real 250-layer dense slice per task 12 §4's own stop point, produced 16–1,139 false-positive candidates (depending on grid resolution) on a single object with no intentional cavities at all, mostly from rasterising curved thin walls. Not built further: no collector, no step, no UI |
 | H2 | ✅ ^ **Minimum layer time enforcement** on a thermal basis - slow or dwell on layers too fast to cool | Done — `model/steps/minLayerTime.ts`. Never slows below a configured feedrate floor; reports a layer that cannot reach the target rather than mangling it |
-| H3 | ^ **Eject sequence preset** for print farms | A preset, not machinery |
-| H4 | ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | `paramRewrite` already does the work |
+| H3 | ✅ ^ **Eject sequence preset** for print farms | Done — `presets.ts`'s "Eject sequence (template)". Every move ships commented out; it is a shape to edit for your own machine, not a ready sequence |
+| H4 | ✅ ^ **Per-layer Z-offset preset** - first-layer squish, or a correction partway up | Done — `presets.ts`'s "Per-layer Z-offset", over the existing `paramRewrite` step |
 | H5 | ^ **G-code command palette with click-to-insert** in the insert and rules editors | Cheapest route may be the upstream Monaco ask |
 | H6 | ^ **Geometric warp-risk notes** - large flat first layers, tall thin features, high-shrinkage material | Information-level only; no pretence of prediction |
 | H7 | ✅ **Pressure advance (and other parameters) per filament**, from the file's own metadata | Done — no dedicated table/step; G13's conditional steps already cover it, one existing step added per filament, each gated by its own `filament_type` condition. Documented with a worked example in `docs/usage.md` |
 | H8 | ✅ **Marlin tool-scoped temperatures** - `M104 S200 T1` becomes `M568 P1 S200` | Done — `commandMap`'s `onlyWithParam` |
-| H9 | **Tool renumbering** - remap T0 to T2 without mangling comments and `M568 P0` | |
-| H10 | **Z-hop injection** on travels above a length threshold | |
-| H11 | **Ooze control** - retract or drop temperature before long travels | |
-| H12 | **Bed-temperature ramp** after the first N layers | |
-| H13 | **`M291` confirmation gates** at chosen points | Print-farm workflows |
-| H14 | **Timelapse trigger on each object's top layer only** | Needs `M486` tracking |
+| H9 | ✅ **Tool renumbering** - remap T0 to T2 without mangling comments and `M568 P0` | Done — `model/steps/toolRenumber.ts`. Rewrites bare `T<n>` and the tool-number parameter of `M563`/`M567`/`M568`/`M116`, verified command-by-command against the RRF G-code dictionary; deliberately leaves `M106`/`M107` (fan index), `M585` (Z probe number) and `G10` (ambiguous with a workplace coordinate system) alone |
+| H10 | ✅ **Z-hop injection** on travels above a length threshold | Done — `model/steps/zHop.ts`, sharing travel detection with H11 via `model/steps/travel.ts`. Skips a travel with an existing hop, and the whole rest of a file using firmware retraction (`G10`/`G11`) |
+| H11 | ✅ **Ooze control** - retract or drop temperature before long travels | Done — `model/steps/oozeControl.ts`. Temperature drop is opt-in and only fires when a prior temperature is known to restore |
+| H12 | ✅ **Bed-temperature ramp** after the first N layers | Done — `presets.ts`'s "Bed-temperature ramp", over `insertAt`. Uses `M140`, never `M190` — the latter waits and would stall the print with the nozzle hot over the part |
+| H13 | ✅ **`M291` confirmation gates** at chosen points | Done — `presets.ts`'s "Confirmation gate at a layer". `M291 ... S2` genuinely blocks on its own, verified against `Duet3D/wiki-content` and RepRapFirmware's own source (`GCodes7.cpp`'s `DoMessageBox`) — no `M25` needed |
+| H14 | ✅ **Timelapse trigger on each object's top layer only** | Done — `model/steps/timelapseTopLayer.ts` (an `analysisPass` collector, same pattern as `preheat`) plus `presets.ts`'s "Timelapse trigger per object". A file with no `M486` labels is left untouched and reported, never falls back to firing every layer |
 | H15 | ✅ **Plain-English file summary** generated from the analysis | Done — `model/summary.ts`'s `summariseFile`, shown at the top of the inspector |
 | H16 | **Integrate with DWC's G-code viewer** - jump it to the layer under discussion | Rather than building a second 3D engine |
 

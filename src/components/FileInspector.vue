@@ -212,6 +212,30 @@
 						</v-expansion-panel-text>
 					</v-expansion-panel>
 
+					<v-expansion-panel v-if="retractionRows.length > 0" title="Retractions by tool">
+						<v-expansion-panel-text>
+							<div class="text-caption text-medium-emphasis mb-2">
+								A proxy for oozing and for wear — not a defect report on its own.
+							</div>
+							<v-table density="compact">
+								<thead>
+									<tr>
+										<th>Tool</th>
+										<th>Count</th>
+										<th>Total distance</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-for="row in retractionRows" :key="row.tool">
+										<td>T{{ row.tool }}</td>
+										<td>{{ row.count.toLocaleString() }}</td>
+										<td>{{ row.totalMm.toFixed(1) }} mm</td>
+									</tr>
+								</tbody>
+							</v-table>
+						</v-expansion-panel-text>
+					</v-expansion-panel>
+
 					<v-expansion-panel title="Slicer settings found">
 						<v-expansion-panel-text>
 							<div v-if="metaEntries.length === 0" class="text-medium-emphasis">
@@ -337,6 +361,8 @@ const objectRows = computed(() => (analysis.value?.objectStats ?? []).map((o) =>
 	seconds: o.seconds,
 	filamentMm: o.filamentMm,
 })));
+
+const retractionRows = computed(() => analysis.value?.retractionStats ?? []);
 
 const plainEnglishSummary = computed(() => (analysis.value === null ? "" : summariseFile(analysis.value)));
 

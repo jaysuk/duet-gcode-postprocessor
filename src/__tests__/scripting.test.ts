@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { parseMetadata } from "../model/gcode/metadata";
 import { parseRules, applyRules } from "../model/steps/rules";
 import { compileScript, ScriptAbortError, SHADOWED_GLOBALS } from "../model/steps/script";
 import { createGcodeApi } from "../model/steps/scriptApi";
@@ -71,6 +72,75 @@ describe("the rules tier", () => {
 	it("leaves a line untouched when no rule fires", () => {
 		const rules = JSON.stringify([{ when: [{ type: "matches", pattern: "ZZZ" }], then: [{ type: "drop" }] }]);
 		expect(runStep("rules", { rules }, SAMPLE)).toBe(SAMPLE);
+	});
+
+	describe("expr condition and setParamExpr action", () => {
+		it("gates on a computed condition", () => {
+			const rules = JSON.stringify([{
+				when: [{ type: "command", codes: ["G1"] }, { type: "expr", expression: "F > 1500" }],
+				then: [{ type: "appendComment", text: "fast" }],
+			}]);
+			const out = runStep("rules", { rules }, SAMPLE);
+			expect(out).toContain("G1 X10 Y10 E1 F1200"); // untouched, F not > 1500
+			expect(out).toContain("G1 X20 Y10 E2 F1800 ; fast");
+		});
+
+		it("sets a parameter to a computed value, with the parameter's own current value available as \"value\"", () => {
+			const rules = JSON.stringify([{
+				when: [{ type: "command", codes: ["G1"] }],
+				then: [{ type: "setParamExpr", letter: "F", expression: "value * 0.5", decimals: 0 }],
+			}]);
+			const out = runStep("rules", { rules }, "G1 X1 F1200\nG1 X2 F1800");
+			expect(out).toBe("G1 X1 F600\nG1 X2 F900");
+		});
+
+		it("rejects a malformed expression at parse time, in both the condition and the action", () => {
+			expect(() => parseRules('[{"when":[{"type":"expr","expression":"F *"}],"then":[{"type":"drop"}]}]'))
+				.toThrow(/not a valid expression/);
+			expect(() => parseRules('[{"when":[],"then":[{"type":"setParamExpr","letter":"F","expression":"F *"}]}]'))
+				.toThrow(/not a valid expression/);
+		});
+
+		it("treats a line missing a variable the expression needs as a non-match, not an error", () => {
+			// G28 has no F parameter at all — the condition must fail gracefully for that line
+			// without throwing, while a line that does carry F still matches normally
+			const rules = JSON.stringify([{
+				when: [{ type: "expr", expression: "F > 0" }],
+				then: [{ type: "appendComment", text: "has feedrate" }],
+			}]);
+			const out = runStep("rules", { rules }, "G28\nG1 X1 F1200");
+			expect(out).toBe("G28\nG1 X1 F1200 ; has feedrate");
+		});
+
+		it("leaves the line unchanged when setParamExpr's expression cannot be evaluated", () => {
+			const rules = JSON.stringify([{
+				when: [{ type: "command", codes: ["G1"] }],
+				then: [{ type: "setParamExpr", letter: "F", expression: "nonsense_var * 2" }],
+			}]);
+			const out = runStep("rules", { rules }, "G1 X1 F1200");
+			expect(out).toBe("G1 X1 F1200");
+		});
+
+		it("exposes known slicer metadata fields (e.g. totalLayers) flatly in expr scope", () => {
+			const meta = parseMetadata(SAMPLE);
+			expect(meta.totalLayers).toBe(3);
+			const rules = JSON.stringify([{
+				when: [{ type: "expr", expression: "layer < totalLayers - 1" }],
+				then: [{ type: "appendComment", text: "not last layer" }],
+			}]);
+			const out = runStep("rules", { rules }, "G1 X1 F1200", meta);
+			expect(out).toContain("not last layer");
+		});
+
+		it("expands a {meta.*} placeholder in appendComment too, not just insertAt", () => {
+			const meta = parseMetadata(SAMPLE);
+			const rules = JSON.stringify([{
+				when: [{ type: "matches", pattern: "G28" }],
+				then: [{ type: "appendComment", text: "of {meta.totalLayers}" }],
+			}]);
+			const out = runStep("rules", { rules }, "G28", meta);
+			expect(out).toBe("G28 ; of 3");
+		});
 	});
 });
 

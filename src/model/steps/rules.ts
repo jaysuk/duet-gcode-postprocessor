@@ -20,6 +20,7 @@
  */
 
 import { formatNumber, parseParams, removeParam, setParam, tokenise, withBody } from "../gcode/tokenise";
+import { buildExprScope, compileExpr } from "../gcode/exprEval";
 import {
 	buildMatcher, expandPlaceholders, StepConfigError,
 	type LineContext, type StepDefinition, type Transform,
@@ -34,7 +35,8 @@ export type Condition =
 	| { type: "param"; letter: string; op?: "present" | "absent" | "gt" | "lt" | "eq"; value?: number }
 	| { type: "comment" }
 	| { type: "object"; name: string }
-	| { type: "feature"; name: string };
+	| { type: "feature"; name: string }
+	| { type: "expr"; expression: string };
 
 export type Action =
 	| { type: "replace"; pattern: string; replacement: string; regex?: boolean; caseSensitive?: boolean; all?: boolean }
@@ -42,6 +44,7 @@ export type Action =
 	| { type: "setParam"; letter: string; value: number; decimals?: number }
 	| { type: "scaleParam"; letter: string; factor: number; decimals?: number }
 	| { type: "offsetParam"; letter: string; delta: number; decimals?: number }
+	| { type: "setParamExpr"; letter: string; expression: string; decimals?: number }
 	| { type: "removeParam"; letter: string }
 	| { type: "insertBefore"; text: string }
 	| { type: "insertAfter"; text: string }
@@ -80,9 +83,23 @@ export function parseRules(json: string): Array<Rule> {
 		}
 		for (const cond of rule.when) {
 			if (typeof (cond as Condition).type !== "string") throw new StepConfigError(`Rule ${index + 1} has a condition with no "type"`);
+			if ((cond as Condition).type === "expr") {
+				try {
+					compileExpr((cond as Extract<Condition, { type: "expr" }>).expression);
+				} catch (e) {
+					throw new StepConfigError(`Rule ${index + 1}: ${(e as Error).message}`);
+				}
+			}
 		}
 		for (const action of rule.then) {
 			if (typeof (action as Action).type !== "string") throw new StepConfigError(`Rule ${index + 1} has an action with no "type"`);
+			if ((action as Action).type === "setParamExpr") {
+				try {
+					compileExpr((action as Extract<Action, { type: "setParamExpr" }>).expression);
+				} catch (e) {
+					throw new StepConfigError(`Rule ${index + 1}: ${(e as Error).message}`);
+				}
+			}
 		}
 		return rule as Rule;
 	});
@@ -139,6 +156,18 @@ export function testCondition(cond: Condition, ctx: LineContext, line: string): 
 			return ctx.object === cond.name;
 		case "feature":
 			return (ctx.featureType ?? "").toLowerCase() === cond.name.toLowerCase();
+		case "expr": {
+			// A line that cannot supply every variable the expression needs (most commonly a
+			// parameter this specific line does not carry) fails the condition rather than aborting
+			// the run — the same graceful-miss behaviour "param"/"z" above already have for a line
+			// that cannot be evaluated at all.
+			try {
+				const result = compileExpr(cond.expression).evaluate(buildExprScope(ctx, line));
+				return typeof result === "boolean" ? result : result !== 0;
+			} catch {
+				return false;
+			}
+		}
 	}
 	return false;
 }
@@ -188,6 +217,25 @@ export function applyAction(action: Action, state: ActionState, ctx: LineContext
 				token,
 				token.body.slice(0, found.start + 1) + formatNumber(next, decimals) + token.body.slice(found.end),
 			);
+			break;
+		}
+		case "setParamExpr": {
+			// Evaluated with the line's own current value of this parameter additionally exposed as
+			// `value` in scope, mirroring scaleParam/offsetParam's own `current` — a line that cannot
+			// supply every variable the expression needs is left unchanged, the same graceful-miss
+			// behaviour scaleParam/offsetParam already have when their own target parameter is absent.
+			const token = tokenise(line);
+			const letter = action.letter.toUpperCase();
+			const found = parseParams(token.body).find((p) => p.letter === letter) ?? null;
+			const scope = buildExprScope(ctx, line);
+			const current = found === null ? null : Number(found.value);
+			if (current !== null && Number.isFinite(current)) scope.value = current;
+			try {
+				const next = compileExpr(action.expression).evaluateNumber(scope);
+				state.line = withBody(token, setParam(token.body, letter, formatNumber(next, action.decimals ?? 3)));
+			} catch {
+				// leave state.line unchanged
+			}
 			break;
 		}
 		case "removeParam": {
@@ -260,9 +308,12 @@ export const rulesStep: StepDefinition<RulesConfig> = {
 		+ "is a unit test. Rules are evaluated in order against each line; every rule whose "
 		+ "conditions all hold applies (not just the first match) unless it sets \"stop\": true. A "
 		+ "line dropped by an earlier rule's \"drop\" action can still receive insertions from a "
-		+ "later rule, but not a rewrite, since there is no line left to rewrite. Reach for the "
-		+ "JavaScript step instead only when a rule genuinely cannot express what you need — most "
-		+ "\"scripts\" people reach for turn out to be exactly this shape.",
+		+ "later rule, but not a rewrite, since there is no line left to rewrite. The \"expr\" "
+		+ "condition and \"setParamExpr\" action cover computed values (\"F * 0.8 + 100\") with a "
+		+ "safe expression evaluator, not real code, so they keep a rule diffable and unable to do "
+		+ "anything beyond arithmetic on the current line. Reach for the JavaScript step instead only "
+		+ "when a rule genuinely cannot express what you need — most \"scripts\" people reach for "
+		+ "turn out to be exactly this shape.",
 	docsAnchor: "rules--scripting-without-code",
 	icon: "mdi-format-list-checks",
 	fields: [
@@ -272,10 +323,18 @@ export const rulesStep: StepDefinition<RulesConfig> = {
 				+ "in a rule must hold. Conditions: matches (pattern, regex, caseSensitive, negate), "
 				+ "command (codes), layer (from, to), tool, z (from, to), param (letter, "
 				+ "op: present/absent/gt/lt/eq, value), comment, object (name), feature (name, from "
-				+ "the slicer's ;TYPE: comment). Actions: replace (pattern, replacement), replaceLine "
-				+ "(text), setParam/scaleParam/offsetParam (letter, value/factor/delta, decimals), "
-				+ "removeParam (letter), insertBefore/insertAfter (text), appendComment (text), "
-				+ "commentOut, drop. See docs/usage.md for a worked example of each.",
+				+ "the slicer's ;TYPE: comment), expr (expression — a computed condition, e.g. "
+				+ "\"layer < totalLayers / 2\", true when the result is non-zero). Actions: replace "
+				+ "(pattern, replacement), replaceLine (text), setParam/scaleParam/offsetParam (letter, "
+				+ "value/factor/delta, decimals), setParamExpr (letter, expression, decimals — the "
+				+ "parameter's own current value is available as \"value\" in the expression, e.g. "
+				+ "\"value * 0.8 + 100\"), removeParam (letter), insertBefore/insertAfter (text), "
+				+ "appendComment (text), commentOut, drop. Expressions see the current line's own "
+				+ "parameters (F, X, Y, Z, E, ...), layer, tool, z, feedrate, and totalLayers/"
+				+ "layerHeight/filamentMm/printTimeSeconds when the slicer states them — a variable "
+				+ "the current line does not have makes that condition false / leaves that action's "
+				+ "line unchanged, rather than failing the whole run. See docs/usage.md for a worked "
+				+ "example of each.",
 		},
 	],
 

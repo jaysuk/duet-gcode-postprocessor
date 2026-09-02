@@ -10,18 +10,22 @@
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
 		"typecheck": "dwc-plugin-typecheck",
-		"verify-build": "dwc-plugin-verify-build",
+		"verify-build": "node scripts/build-quickjs-asset.mjs && dwc-plugin-verify-build",
 		"release": "node scripts/release.mjs"
 	},
 	"dependencies": {
-		"dwc-plugin-runtime": "^0.8.8"
+		"dwc-plugin-runtime": "^0.8.8",
+		"expr-eval-fork": "^3.0.3"
 	},
 	"devDependencies": {
+		"@jitl/quickjs-singlefile-cjs-release-sync": "^0.32.0",
 		"@vitejs/plugin-vue": "^5.2.4",
 		"@vitest/coverage-v8": "^4.1.8",
 		"@vue/test-utils": "^2.4.6",
 		"dwc-plugin-test-kit": "^0.2.8",
+		"esbuild": "^0.28.2",
 		"happy-dom": "^20.11.15",
+		"quickjs-emscripten-core": "^0.32.0",
 		"vitest": "^4.1.8",
 		"vue": "^3.5.30",
 		"vuetify": "^4.1.0"

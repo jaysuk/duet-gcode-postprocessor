@@ -3,22 +3,27 @@
 An evaluation of what could be added to make the scripting side genuinely capable — including
 running real Python, the way a desktop slicer does — and what each option actually costs.
 
-## What ships today (no dependencies)
+## What ships today
 
-| Tier | What it is | Isolation |
-| --- | --- | --- |
-| **Rules** | Declarative when/then JSON, interpreted by `model/steps/rules.ts` | Total — no code runs |
-| **JavaScript** | User JS compiled with `new Function`, one call per line | A guardrail, not a sandbox |
-| **Standard library** | `gcode.parse/num/has/set/scale/offset/remove/isMove/isExtrusion/setComment/format`, backed by the same tested tokeniser the rest of the plugin uses | n/a |
+| Tier | What it is | Isolation | Dependency |
+| --- | --- | --- | --- |
+| **Rules** | Declarative when/then JSON, interpreted by `model/steps/rules.ts` | Total — no code runs | none |
+| **Rules: `expr`/`setParamExpr`** | A safe expression evaluator for computed conditions/values (`F * 0.8 + 100`) | Total — no loops, no function calls, no member access into anything but a flat scope | `expr-eval-fork` (~15 KB) |
+| **JavaScript: Fast engine** | User JS compiled with `new Function`, one call per line | A guardrail, not a sandbox | none |
+| **JavaScript: Sandboxed engine** | User JS run inside a real QuickJS VM, one call per line | Real — no network/DOM globals exist in the VM at all, plus a memory limit and a wall-clock interrupt | `quickjs-emscripten-core` + `@jitl/quickjs-singlefile-cjs-release-sync`, lazily fetched as a ~0.87 MB plugin asset, never bundled into the main IIFE |
+| **Standard library** | `gcode.parse/num/has/set/scale/offset/remove/isMove/isExtrusion/setComment/format`, backed by the same tested tokeniser the rest of the plugin uses; ported into a second, plain-JS copy (`quickjs/vmStdlib.ts`) for the sandboxed engine, kept honest by `quickjsStdlibParity.test.ts` | n/a | none |
 
 The standard library matters more than it looks. Left to themselves, post-processing scripts parse
 G-code with a regular expression, and that is precisely how they corrupt files — a `;` inside a
 quoted `M291` string, a parameter written `X 10`, a line carrying a checksum. Handing scripts the
 real tokeniser removes the whole class.
 
-The honest weakness is isolation. `new Function` with the network globals shadowed stops accidents
-and copy-paste, but `[].constructor.constructor("return this")()` still reaches the real global
-object. Everything below is judged first on whether it fixes that.
+The Fast engine's honest weakness is isolation: `new Function` with the network globals shadowed
+stops accidents and copy-paste, but `[].constructor.constructor("return this")()` still reaches the
+real global object. The Sandboxed engine (below) closes that — not by shadowing anything, but by
+running inside a VM that never had those globals to begin with. Both engines ship side by side
+(`engine: "fast" | "sandboxed"` on the script step, defaulting to `"fast"`) rather than one replacing
+the other, since Fast has no download cost and is enough for most recipes.
 
 ## The constraints that decide this
 
@@ -35,23 +40,91 @@ object. Everything below is judged first on whether it fixes that.
 5. Bundle size is paid on every plugin install and every DWC load, over the Duet's own HTTP server.
    A megabyte of always-loaded dependency is a real cost; a lazily-fetched asset is not.
 
-## Candidates
+## Shipped
 
-### quickjs-emscripten — a real JavaScript sandbox *(recommended next)*
+### quickjs-emscripten — a real JavaScript sandbox *(shipped)*
 
 [justjake/quickjs-emscripten](https://github.com/justjake/quickjs-emscripten) compiles the QuickJS
 engine to WebAssembly. Each runtime is a completely isolated VM: no DOM, no network, no globals it
 is not given, plus a **memory limit** and an **interrupt handler** that can stop a script
-deterministically.
+deterministically. Implemented as the script step's `engine: "sandboxed"` option
+(`model/steps/quickjs/`), alongside the original engine rather than replacing it.
 
-- **Fixes:** the isolation weakness *and* the watchdog. Today an infinite loop is caught by an
-  averaged time budget after the fact; an interrupt handler stops it properly.
-- **Cost:** roughly 1 MB of WASM (the asyncify variant is about twice that and 40% slower — not
-  needed here). Marshalling values across the VM boundary is the performance risk: a call per line
-  over five million lines would be far too slow, so the step has to hand the VM a **whole chunk of
-  lines at a time** and take an array back. That is a change to the step's shape, not to the engine.
-- **Verdict:** the highest-value addition. It turns the documented caveat in `script.ts` into a
-  genuine security boundary and makes untrusted, shared scripts a reasonable thing to support.
+- **Package split.** `quickjs-emscripten-core` (the API) + `@jitl/quickjs-singlefile-cjs-release-sync`
+  (the actual runtime — WASM inlined as base64, zero `import()` calls of any kind, verified by reading
+  its unpkg `dist` output directly). The "singlefile" variant was chosen over the smaller
+  `wasmfile` split specifically because it is one self-contained blob to fetch+eval, matching how it
+  ships as a plugin asset outside the main IIFE's own no-dynamic-import constraint.
+- **Loading.** Bundled by `scripts/build-quickjs-asset.mjs` (esbuild, `external: ["fs", "path", ...]`
+  to leave the emscripten glue's dead Node-detection branch unresolved rather than failing the bundle
+  over code that only runs — deliberately never — under real Node) into
+  `dwc/GCodePostProcessor/quickjs.bin`, a non-`.js` name so DWC's plugin loader does not auto-inject it
+  as a `<script>` on every page load, same reasoning as `duet-tool-align`'s `opencv.bin`.
+  `model/steps/quickjs/loader.ts` fetches and indirect-evals it on first use, exactly as
+  `duet-tool-align`'s OpenCV worker does, and memoises the result for the page session.
+- **Shape: one VM call per line, not a chunk.** An earlier design batched 500 lines into one VM call
+  to amortise the per-line marshalling cost — a real cost, but the batching hid it behind three
+  worse defects (task 14): `Pipeline.end()` never feeds a transform's own buffered output through
+  *later* transforms in the recipe, so the tail of every file silently skipped every downstream step;
+  every line in a flushed batch was evaluated against whichever line's `LineContext` happened to close
+  the batch, so a layer-anchored downstream step saw the wrong layer; and every withheld line reported
+  as a deletion (and every flushed line as an addition) in the dry-run diff and statistics — the
+  primary safety mechanism this plugin has. None of that showed up in the sandboxed engine's own unit
+  tests, because none of them drove it through a real `Pipeline` with a downstream step. The fix calls
+  the VM once per line — the same shape as the fast engine, a genuine drop-in for it — and hoists the
+  file's slicer metadata into the VM exactly once per run (`SandboxEngine.setMeta`, called from
+  `script.ts`'s `onStart`) rather than re-marshalling the whole metadata block on every line, which
+  had independently made the sandboxed engine 239× slower than the fast one on a file with 300
+  metadata keys (normal for PrusaSlicer/OrcaSlicer) — badly enough that the default time budget
+  aborted a do-nothing identity script on an ordinary file.
+- **What it actually costs: ~17× the fast engine.** Measured on a 20,000-line file with 300 metadata
+  keys: ~38µs/line against ~2µs/line. Two earlier drafts of this document claimed "roughly 2×", both
+  times by quoting a benchmark of a bare VM round trip against a context object with *no metadata in
+  it* — the same mistake twice, and the reason this bullet now names the fixture it was measured on.
+  Breaking the ~38µs down: a bare `newString`/`callFunction`/`getString` is ~6µs; the `{line, ctx}`
+  payload's four JSON operations (stringify host, parse VM, stringify VM, parse host) take it to
+  ~26µs, about half of that the 12-field ctx object; the rest is pipeline overhead. **The JSON
+  marshalling dominates, not the VM boundary** — so that is the thing to attack if this ever needs to
+  be faster (marshal the ctx as individual VM values, or keep a mutable ctx inside the VM and push
+  only changed fields), measuring on a fixture with real metadata. The armed interrupt handler costs
+  nothing measurable. In practice ~38µs/line is roughly 40s for a million-line file against ~2s on
+  the fast engine — a real cost, worth choosing deliberately, and why "Fast" stays the default.
+- **The one real architectural wrinkle:** loading the asset is async, but `StepDefinition.create()`
+  is not. Resolved without changing that contract: `processFile` (`io/transfer.ts`) is already async
+  and calls `buildTransforms` synchronously partway through its own sequence, so it awaits
+  `ensureQuickJsLoaded()` once beforehand (gated behind `recipe.ts`'s `usesSandboxedScript`, costing
+  nothing for the common recipe that never uses it); the loader module owns both the async load and a
+  synchronous cache accessor `create()` reads from.
+- **Verified, not assumed:** a dedicated test (`quickjsEngine.test.ts`) runs a real infinite loop
+  (`while (true) {}`) through a real VM and asserts the interrupt actually fires — the specific claim
+  ("the watchdog stops a runaway script") this codebase's own standard requires checking rather than
+  trusting from the API existing. A separate cross-engine parity test in the same file runs identical
+  scripts through both engines and asserts identical output *and* identical `Pipeline` statistics —
+  the test that would have caught the chunking defects above, and does now guard against their
+  reintroduction. A third test (`quickjsAssetSmoke.test.ts`) loads the real built asset inside a
+  `node:vm` sandbox specifically built to look like a browser page (no `process` global) rather than
+  the Node process running the test suite — the first attempt at that test, run without that
+  isolation, gave a false failure by tripping the emscripten glue's own Node-vs-browser detection
+  logic.
+
+### expr-eval — computed values in the rules tier *(shipped)*
+
+A safe expression parser, letting a rule say `F * 0.8 + 100` or `layer < totalLayers / 2` (a flat
+scope, not `meta.totalLayers` — no member access at all, deliberately, even though the library
+supports it) without dropping to JavaScript. Implemented as `expr` (a condition) and `setParamExpr`
+(an action) in `model/steps/rules.ts`, backed by `model/gcode/exprEval.ts`.
+
+**Ships as `expr-eval-fork`, not the `expr-eval` this section originally named.** The original has two
+unpatched high-severity advisories —
+[GHSA-8gw3-rxh4-v6jx](https://github.com/advisories/GHSA-8gw3-rxh4-v6jx) (prototype pollution) and
+[GHSA-jc85-fpwf-qm7x](https://github.com/advisories/GHSA-jc85-fpwf-qm7x) (unrestricted function
+values) — both exploitable through the *scope* object handed to `evaluate()`, which matters here
+specifically because part of that scope comes from a G-code file's own metadata, and this plugin
+explicitly processes files that may not be the user's own. The fork
+([jorenbroekema/expr-eval](https://github.com/jorenbroekema/expr-eval)) patches both, is API-compatible
+(same `Parser`/`Expression` classes), and `npm audit` shows zero vulnerabilities with it installed.
+
+## Candidates
 
 ### Pyodide — real CPython, and the actual slicer contract
 
@@ -103,7 +176,9 @@ Two ways forward, and the first is better for everyone:
 1. **Ask for `@/utils/monaco` to be externalised** (a one-line addition to `PLUGIN_GLOBALS` in
    `scripts/build-plugin.js`, plus the virtual-module entry). Every plugin that wants a code field
    then gets a first-class editor at zero bundle cost, and DWC's existing G-code language support
-   comes with it. This belongs in the DWC-native proposal list alongside the existing asks.
+   comes with it. This belongs in the shared
+   [DWC-native proposal list](https://github.com/jaysuk/dwc-plugin-runtime/blob/main/docs/dwc-native-proposal.md)
+   alongside the existing asks.
 2. Bundle CodeMirror if that is declined.
 
 ### diff (jsdiff) — a better preview
@@ -111,13 +186,6 @@ Two ways forward, and the first is better for everyone:
 ~30 KB, and would upgrade the change list from "these lines differ" to a proper unified diff with
 context and intra-line word highlighting. The current hand-rolled per-line diff is adequate but
 noticeably cruder. Cheap, low risk, purely cosmetic — worth it once the UI settles.
-
-### expr-eval / jsep — computed values in the rules tier
-
-~10–20 KB for a safe expression parser, letting a rule say `F * 0.8 + 100` or
-`layer < meta.totalLayers / 2` without dropping to JavaScript. This is a real gap: the rules tier
-currently only does fixed factors and offsets. It also keeps more people out of the script tier
-entirely, which is the security win. Recommended as a small, early addition.
 
 ### Not recommended
 
@@ -131,13 +199,12 @@ entirely, which is the security win. Recommended as a small, early addition.
 
 ## Recommended order
 
-1. **`ScriptEngine` seam** — formalise the interface the JS step already implies, and move the step
-   to a chunk-at-a-time shape. No new dependency, and it is the prerequisite for everything else.
-2. **expr-eval in the rules tier** — small, and moves people off scripting entirely.
-3. **quickjs-emscripten** — the JS tier becomes a real sandbox with a real timeout.
-4. **Monaco exposure (ask upstream) or CodeMirror** — the editing experience.
-5. **Pyodide, opt-in** — real Python, real slicer-script compatibility.
-6. **jsdiff** — nicer preview, whenever convenient.
+1. ~~**expr-eval in the rules tier**~~ — shipped.
+2. ~~**quickjs-emscripten**~~ — shipped. The JS tier now has a real sandbox with a real timeout,
+   alongside (not replacing) the original fast engine.
+3. **Monaco exposure (ask upstream) or CodeMirror** — the editing experience.
+4. **Pyodide, opt-in** — real Python, real slicer-script compatibility.
+5. **jsdiff** — nicer preview, whenever convenient.
 
 Nothing above is on the critical path for v1: the rules tier plus the JavaScript tier plus the
 standard library already cover what a post-processing script needs to do. These are what turn it

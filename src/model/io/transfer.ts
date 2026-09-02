@@ -27,8 +27,9 @@ import { Pipeline, type DiffEntry, type RunStats } from "../pipeline";
 import type { ToolConfig } from "../preheat";
 import {
 	alreadyProcessed, buildPrefixTransforms, buildTransforms, collectorsFor, findStamps, makeStamp,
-	skippedByCondition, type Recipe, type Stamp,
+	skippedByCondition, usesSandboxedScript, type Recipe, type Stamp,
 } from "../recipe";
+import { ensureQuickJsLoaded } from "../steps/quickjs/loader";
 import type { StepFactoryContext } from "../steps/types";
 import { backupCandidatePath, baseName, type OutputPlan } from "./plan";
 
@@ -226,6 +227,16 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 		toolHeaters: options.toolHeaters,
 	};
 
+	// buildTransforms()/buildPrefixTransforms() below are synchronous (recipe.ts), but loading the
+	// sandboxed engine's QuickJS asset is not — awaited once here, before anything calls a sandboxed
+	// script step's create(), including the analysis sub-pass just below when such a step sits ahead
+	// of a collector-declaring one. See quickjs/loader.ts's module comment. Skipped entirely (the
+	// common case) when the recipe uses no sandboxed script step.
+	if (usesSandboxedScript(recipe)) {
+		report({ phase: "scanning", fraction: null });
+		await ensureQuickJsLoaded();
+	}
+
 	// A second pass over the same already-downloaded blob, for any step that needs to see a fact
 	// about the whole file before the transform pass reaches the line that needs it — skipped
 	// entirely when no enabled step asked for one, so the common recipe pays nothing extra.
@@ -263,16 +274,24 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 				else for (const l of result) runner.line(l, byteOffset);
 			};
 
-			for (const line of prefixPipeline.begin()) runner.line(line, 0);
-			await forEachLine(blob, (line, byteOffset) => {
-				feed(prefixPipeline.line(line, byteOffset), byteOffset);
-			}, {
-				chunkBytes: options.chunkBytes,
-				signal,
-				onProgress: (fraction) => { report({ phase: "analysing", fraction }); },
-			});
-			checkCancelled();
-			for (const line of prefixPipeline.end()) runner.line(line, blob.size);
+			// Disposed in finally so a cancel or a thrown transform still releases this prefix
+			// pipeline's own transform instances (a sandboxed script step ordered ahead of the
+			// collector-declaring step gets its own QuickJS runtime here, separate from the main
+			// pass's — see task 14 Finding C).
+			try {
+				for (const line of prefixPipeline.begin()) runner.line(line, 0);
+				await forEachLine(blob, (line, byteOffset) => {
+					feed(prefixPipeline.line(line, byteOffset), byteOffset);
+				}, {
+					chunkBytes: options.chunkBytes,
+					signal,
+					onProgress: (fraction) => { report({ phase: "analysing", fraction }); },
+				});
+				checkCancelled();
+				for (const line of prefixPipeline.end()) runner.line(line, blob.size);
+			} finally {
+				prefixPipeline.dispose();
+			}
 
 			for (const [key, value] of runner.result()) analysisResultsMut.set(key, value);
 		}
@@ -311,24 +330,32 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 		}
 	};
 
-	for (const line of pipeline.begin()) emit(line);
+	// Disposed in finally so a cancel or a transform throwing mid-run still releases resources a
+	// transform holds outside the JS heap (currently: the sandboxed script engine's QuickJS runtime
+	// and its WASM memory — see task 14 Finding C).
+	let transformMs = 0;
+	try {
+		for (const line of pipeline.begin()) emit(line);
 
-	const transformStarted = Date.now();
-	report({ phase: "processing", fraction: 0 });
-	await forEachLine(blob, (line, lineOffset) => {
-		analyser?.line(line);
-		const result = pipeline.line(line, lineOffset);
-		if (result === null) return;
-		if (typeof result === "string") emit(result);
-		else for (const l of result) emit(l);
-	}, {
-		chunkBytes: options.chunkBytes,
-		signal,
-		onProgress: (fraction) => { report({ phase: "processing", fraction }); },
-	});
-	const transformMs = Date.now() - transformStarted;
+		const transformStarted = Date.now();
+		report({ phase: "processing", fraction: 0 });
+		await forEachLine(blob, (line, lineOffset) => {
+			analyser?.line(line);
+			const result = pipeline.line(line, lineOffset);
+			if (result === null) return;
+			if (typeof result === "string") emit(result);
+			else for (const l of result) emit(l);
+		}, {
+			chunkBytes: options.chunkBytes,
+			signal,
+			onProgress: (fraction) => { report({ phase: "processing", fraction }); },
+		});
+		transformMs = Date.now() - transformStarted;
 
-	for (const line of pipeline.end()) emit(line);
+		for (const line of pipeline.end()) emit(line);
+	} finally {
+		pipeline.dispose();
+	}
 	if (buffer.length > 0) parts.push(buffer.join("\n") + "\n");
 
 	const result: ProcessResult = {

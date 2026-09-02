@@ -6,3 +6,7 @@ Thumbs.db
 coverage/
 .vscode/
 *.log
+
+# Built by scripts/build-quickjs-asset.mjs before verify-build/release — same convention as
+# duet-tool-align's opencv.bin, a large fetched/built asset that should never be committed.
+dwc/

@@ -44,6 +44,14 @@ export interface ObjectStats {
 	filamentMm: number;
 }
 
+export interface RetractionStats {
+	tool: number;
+	count: number;
+	/** Total retracted distance in mm — the magnitude of every negative E delta, summed. A proxy for
+	 *  oozing and for wear, not a defect report on its own. */
+	totalMm: number;
+}
+
 export interface FileAnalysis {
 	lines: number;
 	bytes: number;
@@ -141,6 +149,10 @@ export interface FileAnalysis {
 	/** Time and filament per `M486` object, most time-consuming first. Empty when the file never uses
 	 *  `M486`. */
 	objectStats: Array<ObjectStats>;
+	/** Retraction count and total distance per tool, sorted by tool number. Moves before any tool is
+	 *  selected are not attributed to tool 0 — they are excluded entirely, matching `tools`' own
+	 *  convention of never counting the unselected `-1` state as a real tool. */
+	retractionStats: Array<RetractionStats>;
 }
 
 /** Cap on `slowestLayers` — a 5,000-layer file must not put 5,000 rows in the UI. */
@@ -159,6 +171,7 @@ export class Analyser {
 	private readonly featureStatsMap = new Map<Feature, { seconds: number; filamentMm: number; moves: number }>();
 	private readonly layerStatsMap = new Map<number, { seconds: number; filamentMm: number }>();
 	private readonly objectStatsMap = new Map<string, { seconds: number; filamentMm: number }>();
+	private readonly retractionStatsMap = new Map<number, { count: number; totalMm: number }>();
 
 	private lines = 0;
 	private bytes = 0;
@@ -237,6 +250,17 @@ export class Analyser {
 
 	private applyG(code: string, body: string, zBeforeLine: number | null): void {
 		if (code === "G28") { this.homes = true; return; }
+		if (code === "G92") {
+			// Resets the E datum (almost always to 0) without extruding anything. Without this,
+			// this.e keeps whatever a prior G1 left it at, and the next G1's absolute E reads as a
+			// huge negative delta against that stale value — recorded as a retraction that never
+			// happened. Not merely a retraction-counting nicety: the same stale `this.e` would also
+			// corrupt flow/filament tracking below, this just never surfaced there because a wrongly
+			// negative deltaE only zeroes out a filament credit rather than reporting a wrong one.
+			const e = paramNumber(parseParams(body), "E");
+			if (e !== null) this.e = e;
+			return;
+		}
 		if (code !== "G0" && code !== "G1" && code !== "G2" && code !== "G3") return;
 
 		const params = parseParams(body);
@@ -290,6 +314,12 @@ export class Analyser {
 				deltaE = eParam - prevE;
 			}
 		}
+		// A retraction is a negative delta in either E mode — relative mode writes it directly as a
+		// negative E on the line; absolute mode is only visible as this line's E reading lower than
+		// the last (which is exactly what `deltaE` already computes above). `G92 E0` never reaches
+		// here at all (it is a G92, not G0/G1/G2/G3 — see the `code !== "G0" ...` guard at the top of
+		// this method), so resetting the datum can never masquerade as a giant retraction.
+		if (deltaE < 0 && this.state.tool >= 0) this.recordRetraction(this.state.tool, -deltaE);
 		if (deltaE > 0 && this.filamentArea !== null && this.lastFeedrateMmPerSec !== null && this.lastFeedrateMmPerSec > 0) {
 			const dx = x !== null ? this.x! - (prevX ?? 0) : 0;
 			const dy = y !== null ? this.y! - (prevY ?? 0) : 0;
@@ -362,6 +392,16 @@ export class Analyser {
 		}
 		entry.seconds += seconds;
 		entry.filamentMm += filamentMm;
+	}
+
+	private recordRetraction(tool: number, mm: number): void {
+		let entry = this.retractionStatsMap.get(tool);
+		if (entry === undefined) {
+			entry = { count: 0, totalMm: 0 };
+			this.retractionStatsMap.set(tool, entry);
+		}
+		entry.count++;
+		entry.totalMm += mm;
 	}
 
 	private applyM(code: string, body: string): void {
@@ -540,6 +580,9 @@ export class Analyser {
 			objectStats: [...this.objectStatsMap.entries()]
 				.map(([object, s]) => ({ object, seconds: s.seconds, filamentMm: s.filamentMm }))
 				.sort((a, b) => b.seconds - a.seconds || b.filamentMm - a.filamentMm),
+			retractionStats: [...this.retractionStatsMap.entries()]
+				.map(([tool, s]) => ({ tool, count: s.count, totalMm: s.totalMm }))
+				.sort((a, b) => a.tool - b.tool),
 		};
 	}
 }

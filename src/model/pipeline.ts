@@ -155,6 +155,24 @@ export class Pipeline {
 		return out;
 	}
 
+	/**
+	 * Release every transform's own resources (currently: the sandboxed script engine's QuickJS
+	 * runtime — see `Transform.dispose`'s doc comment). Callers must call this exactly once per
+	 * `Pipeline` instance regardless of how the run ended — normally, cancelled, or thrown — which is
+	 * why every caller wraps its use of a `Pipeline` in `try`/`finally`. Best-effort: one transform's
+	 * cleanup throwing must not stop the rest from being disposed, and must never mask whatever error
+	 * is already propagating out of the run.
+	 */
+	dispose(): void {
+		for (const transform of this.transforms) {
+			try {
+				transform.dispose?.();
+			} catch {
+				// Best-effort cleanup only — see the doc comment above.
+			}
+		}
+	}
+
 	private syncContext(token: Tokenised, byteOffset: number): void {
 		syncLineContext(this.lineContext, this.state, token, this.totalBytes, byteOffset);
 	}
@@ -271,23 +289,27 @@ function applyToAll(
  */
 export function runToString(options: PipelineOptions, input: string): { output: string; pipeline: Pipeline } {
 	const pipeline = new Pipeline({ ...options, totalBytes: options.totalBytes ?? input.length });
-	const out: Array<string> = [...pipeline.begin()];
+	try {
+		const out: Array<string> = [...pipeline.begin()];
 
-	let offset = 0;
-	const lines = input.split("\n");
-	// A trailing newline produces a final empty element; processing it would append a spurious line
-	const hasTrailingNewline = lines.length > 0 && lines[lines.length - 1] === "";
-	if (hasTrailingNewline) lines.pop();
+		let offset = 0;
+		const lines = input.split("\n");
+		// A trailing newline produces a final empty element; processing it would append a spurious line
+		const hasTrailingNewline = lines.length > 0 && lines[lines.length - 1] === "";
+		if (hasTrailingNewline) lines.pop();
 
-	for (const rawLine of lines) {
-		const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-		const result = pipeline.line(line, offset);
-		offset += rawLine.length + 1;
-		if (result === null) continue;
-		if (typeof result === "string") out.push(result);
-		else out.push(...result);
+		for (const rawLine of lines) {
+			const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+			const result = pipeline.line(line, offset);
+			offset += rawLine.length + 1;
+			if (result === null) continue;
+			if (typeof result === "string") out.push(result);
+			else out.push(...result);
+		}
+		out.push(...pipeline.end());
+
+		return { output: out.join("\n") + (hasTrailingNewline ? "\n" : ""), pipeline };
+	} finally {
+		pipeline.dispose();
 	}
-	out.push(...pipeline.end());
-
-	return { output: out.join("\n") + (hasTrailingNewline ? "\n" : ""), pipeline };
 }
