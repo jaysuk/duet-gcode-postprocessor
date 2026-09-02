@@ -2,7 +2,7 @@
 	"id": "GCodePostProcessor",
 	"name": "G-code Post-Processor",
 	"author": "James Skitt",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"license": "GPL-3.0-or-later",
 	"homepage": "https://github.com/jaysuk/duet-gcode-postprocessor",
 	"dwcVersion": "auto-major",
