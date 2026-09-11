@@ -92,6 +92,17 @@ DWC_DIR=/path/to/DuetWebControl npx dwc-plugin-verify-build
 On this machine `DWC_DIR=/c/Users/live/Documents/Github/DuetWebControl`. All three pass on `main`, so
 any failure is yours.
 
+**On Windows, `verify-build`'s type check does not run.** DWC's `scripts/build-plugin.js` launches
+`node_modules/.bin/vue-tsc` with a bare `spawnSync` — no `.cmd`, no shell — which fails with `ENOENT`
+on Windows; the empty output reads as zero errors, and it prints "Type check passed" even with a type
+error planted in a source file. `dwc-plugin-typecheck` does run (it goes through a shell) but
+deliberately skips test files. So on Windows nothing local type-checks `test/` or `src/__tests__/`:
+the v1.2.0 release build failed in CI on a test-file type error (`attachTo` passed to `mountInDwc`)
+that every local gate had passed. Until that is fixed upstream, a green local `verify-build` proves the
+bundle builds, not that it type-checks — reproduce CI's check by running `vue-tsc` from the DWC
+checkout against the tsconfig `typeCheckPlugin` generates (with forward-slash paths), and read its raw
+output for this plugin's files.
+
 ## Golden files
 
 `test/golden/*.gcode` are committed expectations, one per preset per slicer fixture.

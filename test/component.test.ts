@@ -114,7 +114,6 @@ describe("components mount", () => {
 		const recipe = { ...createRecipe("Test"), steps: [{ uid: newUid(), type: "findReplace", enabled: true, config: defaultConfig("findReplace") }] };
 		const wrapper = mountInDwc(BatchDialog, {
 			props: { modelValue: true, paths: ["0:/gcodes/a.gcode", "0:/gcodes/b.gcode"], recipe, scriptsTrusted: false },
-			attachTo: document.body,
 		});
 		expect(document.body.textContent).toContain("0:/gcodes/a.gcode");
 		expect(document.body.textContent).toContain("0:/gcodes/b.gcode");
@@ -283,7 +282,7 @@ describe("PostProcessorPage diagnostics report (F4)", () => {
 
 	it("offers Download and Copy diagnostics from the About dialog, and the report state carries the recipe and path but not the diff", async () => {
 		setConnected(true);
-		const wrapper = mountInDwc(PostProcessorPage, { attachTo: document.body });
+		const wrapper = mountInDwc(PostProcessorPage);
 		await wrapper.findComponent(RecipeEditor).vm.$emit("add");
 		await flushPromises();
 		await wrapper.findComponent(GcodeBrowser).vm.$emit("update:modelValue", "0:/gcodes/part.gcode");

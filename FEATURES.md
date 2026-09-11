@@ -11,7 +11,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 > `M73` rewrite (G1), predictive pre-heat before a tool change (G2), arc welding (B16), and the
 > volumetric flow-rate audit with feedrate clamping (G6–G7).
 >
-> **v1.2.0 adds the automation phase**: automatic recipe selection (D4), auto-run on upload (D5),
+> **v1.2 adds the automation phase**: automatic recipe selection (D4), auto-run on upload (D5),
 > batch processing with multi-select (D6/A2), run history (D8), the run report (F2), the diagnostics
 > report (F4), the preflight gate (E13), and a touch/mobile layout pass (F6). Still outstanding: the
 > "Later" items only.
