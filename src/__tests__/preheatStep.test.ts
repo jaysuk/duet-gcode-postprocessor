@@ -73,6 +73,46 @@ function tempSetupLine(output: string, tool: number): number {
 	});
 }
 
+// The collector's own temperature-setup rule used to count any M568/G10 with a P and an S or R —
+// including a G10 L2/L20 workplace offset, where P is a coordinate system and not a tool — which put
+// that tool's pre-heat floor at the wrong line. It now reads through the shared toolTemperature.ts.
+describe("preheat collector: what counts as a tool's temperature setup", () => {
+	async function collect(lines: Array<string>) {
+		const { AnalysisRunner } = await import("../model/analysisPass");
+		const { parseMetadata } = await import("../model/gcode/metadata");
+		const input = lines.join("\n");
+		const ctx: StepFactoryContext = { scriptsTrusted: true, machineLimits: LIMITS, toolHeaters: TOOLS };
+		const collectors = preheatStep.analysis?.(defaultConfig("preheat") as never, ctx) ?? [];
+		expect(collectors.length).toBeGreaterThan(0);
+		const runner = new AnalysisRunner({ collectors, meta: parseMetadata(input), totalBytes: input.length });
+		for (const line of lines) runner.line(line);
+		return runner.result().get(collectors[0].id) as {
+			tempSetupLineSeq: Map<number, number>;
+			existingPreheats: Array<{ tool: number }>;
+		};
+	}
+
+	it("does not take a G10 L20 workplace offset carrying an S for the tool's temperature setup", async () => {
+		const withOffset = await collect(["G10 L20 P1 S205", "M568 P1 R140 S205", "T1"]);
+		const withoutOffset = await collect(["G90", "M568 P1 R140 S205", "T1"]);
+		// The same position either way: the offset line must not move tool 1's floor ahead of its setup
+		expect(withOffset.tempSetupLineSeq.get(1)).toBe(withoutOffset.tempSetupLineSeq.get(1));
+	});
+
+	it("still takes G10's real temperature form as the setup", async () => {
+		expect((await collect(["G10 P1 R140 S205", "T1"])).tempSetupLineSeq.has(1)).toBe(true);
+	});
+
+	it("still takes an expression temperature as the setup, though there is no number in it", async () => {
+		expect((await collect(["M568 P1 S{global.printTemp}", "T1"])).tempSetupLineSeq.has(1)).toBe(true);
+	});
+
+	it("still records a file's own M568 A2 as an existing pre-heat, and never a G10", async () => {
+		expect((await collect(["M568 P1 A2", "T1"])).existingPreheats.map((e) => e.tool)).toEqual([1]);
+		expect((await collect(["G10 P1 S205", "T1"])).existingPreheats).toEqual([]);
+	});
+});
+
 describe("preheat step", () => {
 	it("on a fixture with genuine lead, every tool is ACTIVE at every selection", () => {
 		const { output } = run(loadFixture("two-tool-long"));

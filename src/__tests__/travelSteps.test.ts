@@ -2,6 +2,33 @@ import { describe, expect, it } from "vitest";
 
 import { makeStep, runSteps, runStep } from "./helpers";
 
+// G10 has three meanings; only a bare G10 (and G11) is firmware retraction. Before this used the
+// shared g10Form, any G10 without a P counted — so a file setting its tool temperature with G10 S200,
+// or an offset with G10 X10, silently lost every hop and retraction for the rest of the file
+describe("firmware retraction detection, shared by zHop and oozeControl", () => {
+	const withLine = (line: string) => ["G90", "M83", line, "G1 X0 Y0 F6000", "G1 X50 Y50 F6000"].join("\n");
+	const notRetractions = [
+		["G10 S200", "the current tool's temperature"],
+		["G10 X10", "an offset for the current tool"],
+		["G10 P0 R150 S210", "a tool's temperatures"],
+		["G10 L2 P1 X0 Y0 Z0", "a workplace offset"],
+	];
+
+	it.each(notRetractions)("zHop still hops after %s (%s)", (line) => {
+		expect(runStep("zHop", { thresholdMm: 5, hopHeightMm: 0.4 }, withLine(line))).toContain("G1 Z0.4 F600");
+	});
+
+	it.each(notRetractions)("oozeControl still retracts after %s (%s)", (line) => {
+		expect(runStep("oozeControl", { thresholdMm: 5, retractMm: 0.4 }, withLine(line))).toContain("E-0.4");
+	});
+
+	it("a bare G10 still switches both off", () => {
+		const input = withLine("G10");
+		expect(runStep("zHop", { thresholdMm: 5, hopHeightMm: 0.4 }, input)).toBe(input);
+		expect(runStep("oozeControl", { thresholdMm: 5, retractMm: 0.4 }, input)).toBe(input);
+	});
+});
+
 describe("zHop", () => {
 	it("hops a travel at or above the threshold, restoring the original Z", () => {
 		const out = runStep(

@@ -12,6 +12,7 @@ import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
 import { advance, createState, type MachineState } from "./gcode/state";
 import { TimeEstimator, type MachineLimits } from "./gcode/timeModel";
 import { findParam, paramNumber, parseParams, tokenise, unquoteString } from "./gcode/tokenise";
+import { readToolTemperatureSetting, type ToolTemperatureSetting } from "./gcode/toolTemperature";
 
 export interface Extents {
 	minX: number; maxX: number;
@@ -63,7 +64,8 @@ export interface FileAnalysis {
 	extents: Extents | null;
 	/** Tool numbers selected anywhere in the file. */
 	tools: Array<number>;
-	/** Highest tool temperature commanded (M104/M109 S). */
+	/** Highest tool temperature commanded (M104/M109 S, and M568/G10 S or R — every heater of a
+	 *  multi-heater list). */
 	maxToolTemp: number | null;
 	/** Highest bed temperature commanded (M140/M190 S). */
 	maxBedTemp: number | null;
@@ -249,6 +251,13 @@ export class Analyser {
 	}
 
 	private applyG(code: string, body: string, zBeforeLine: number | null): void {
+		// G10 is a tool-temperature command in only one of its three forms (toolTemperature.ts has RRF's
+		// own dispatch rule); the retraction and workplace-offset forms read as null and change nothing
+		if (code === "G10") {
+			const setting = readToolTemperatureSetting(code, body);
+			if (setting !== null) this.applyToolTemperatureSetting(setting);
+			return;
+		}
 		if (code === "G28") { this.homes = true; return; }
 		if (code === "G92") {
 			// Resets the E datum (almost always to 0) without extruding anything. Without this,
@@ -404,6 +413,21 @@ export class Analyser {
 		entry.totalMm += mm;
 	}
 
+	/** M568 and G10's temperature form. Feeds the highest-temperature figure the M143 and
+	 *  cold-extrusion checks read — a standby temperature counts, since a heater set to it over its
+	 *  M143 limit faults just the same — but never `firstHeatWaitLine`: neither command waits. */
+	private applyToolTemperatureSetting(setting: ToolTemperatureSetting): void {
+		const temps = [...setting.active, ...setting.standby];
+		if (temps.length > 0) {
+			const highest = Math.max(...temps);
+			if (this.maxToolTemp === null || highest > this.maxToolTemp) this.maxToolTemp = highest;
+		}
+		// Every active temperature set to 0 is the M568/G10 form of M104 S0
+		if (setting.active.length > 0 && setting.active.every((t) => t <= 0)) this.heatersAddressed = true;
+		// M568's A0 = off, A1 = standby — either is "addressed"; A2 (active) is not
+		if (setting.heaterState === 0 || setting.heaterState === 1) this.heatersAddressed = true;
+	}
+
 	private applyM(code: string, body: string): void {
 		switch (code) {
 			case "M104":
@@ -433,9 +457,10 @@ export class Analyser {
 				break;
 			}
 			case "M568": {
-				// A0 = off, A1 = standby — either is "addressed"; A2 (active) is not
-				const a = paramNumber(parseParams(body), "A");
-				if (a === 0 || a === 1) this.heatersAddressed = true;
+				// Tool temperatures (S/R, every heater of a colon list) and heater state (A), read by the shared
+				// `readToolTemperatureSetting`, which cites RRF source and the wiki. M568 never waits.
+				const setting = readToolTemperatureSetting(code, body);
+				if (setting !== null) this.applyToolTemperatureSetting(setting);
 				break;
 			}
 			case "M0":

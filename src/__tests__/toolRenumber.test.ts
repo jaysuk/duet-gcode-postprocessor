@@ -46,6 +46,24 @@ describe("toolRenumber", () => {
 		expect(runStep("toolRenumber", { mapping: "0->2" }, "M116 P0")).toBe("M116 P2");
 	});
 
+	// G10's P is a tool number in its tool-settings form (temperatures or offsets) and a workplace
+	// coordinate system number in its L2/L20 form. It used to be left alone entirely; the shared
+	// g10Form (gcode/toolTemperature.ts) now tells the two apart by RepRapFirmware's own rule
+	it("renumbers G10's P in its tool-settings form — temperatures and tool offsets", () => {
+		expect(runStep("toolRenumber", { mapping: "0->2" }, "G10 P0 R150 S210")).toBe("G10 P2 R150 S210");
+		expect(runStep("toolRenumber", { mapping: "0->2" }, "G10 P0 X17.8 Y-19.3 Z0")).toBe("G10 P2 X17.8 Y-19.3 Z0");
+		expect(runStep("toolRenumber", { mapping: "0->2" }, "G10 L1 P0 X17.8")).toBe("G10 L1 P2 X17.8");
+	});
+
+	it("does not renumber G10 L2/L20's P — that is a workplace coordinate system, not a tool", () => {
+		expect(runStep("toolRenumber", { mapping: "1->2" }, "G10 L2 P1 X110 Y110 Z20")).toBe("G10 L2 P1 X110 Y110 Z20");
+		expect(runStep("toolRenumber", { mapping: "1->2" }, "G10 L20 P1 X0 Y0 Z0")).toBe("G10 L20 P1 X0 Y0 Z0");
+	});
+
+	it("leaves a bare G10 retraction alone", () => {
+		expect(runStep("toolRenumber", { mapping: "0->2" }, "G10")).toBe("G10");
+	});
+
 	it("does not renumber M106/M107's P — that is a fan index, not a tool", () => {
 		expect(runStep("toolRenumber", { mapping: "0->2" }, "M106 P0 S255")).toBe("M106 P0 S255");
 		expect(runStep("toolRenumber", { mapping: "0->2" }, "M107 P0")).toBe("M107 P0");

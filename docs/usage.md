@@ -398,9 +398,9 @@ on parsed parameters instead, and rewrites the tool number wherever RepRapFirmwa
 dictionary confirms one actually appears: bare `T<n>` command lines, and the `P` parameter of
 `M563`/`M567`/`M568`/`M116`. It deliberately leaves `M106`/`M107`'s `P` alone (that is a **fan**
 index) and `M585`'s `P` alone (a **Z probe** number) — both reuse the same letter for something else
-entirely. It also leaves `G10` tool offsets alone: `G10`'s own `P` means a tool number in one form and
-a workplace coordinate system number in another, and reliably telling them apart needs more than this
-step attempts.
+entirely. `G10`'s `P` is renumbered only where it really is a tool number — the temperature form
+(`G10 P… S… R…`) and the tool-offset form (`G10 P… X… Y…`, with or without `L1`) — and left alone in
+`G10 L2`/`L20`, where it is a workplace coordinate system number instead.
 
 - **Mapping** — comma-separated `old->new` pairs, e.g. `0->2, 1->0`. Every pair is resolved against
   the file's *original* tool numbers at once, so `0->1, 1->0` is a genuine swap rather than every T0
@@ -412,8 +412,8 @@ step attempts.
 Lifts the nozzle before a travel move longer than a threshold and lowers it again after, for a file
 sliced without a hop that is knocking over a tall or fragile part. Skips a travel that already has an
 explicit Z-rise on the line immediately before it (a slicer-emitted hop of its own), and skips the
-rest of the file entirely once it sees `G10`/`G11` — RepRapFirmware's own firmware retraction, which
-already performs whatever hop this machine's `M207` is configured with, invisible from the file's own
+rest of the file entirely once it sees a bare `G10` or a `G11` — RepRapFirmware's own firmware
+retraction, which already performs whatever hop this machine's `M207` is configured with, invisible from the file's own
 text and not this plugin's to second-guess. Both kinds of skip are counted and reported, so "nothing
 changed" is distinguishable from "nothing needed to".
 
@@ -428,7 +428,8 @@ coordinates outright, and this step needs to see the file's own original travel 
 The same travel-detection as "Z-hop", used to retract (and optionally cool) before a long travel
 instead of lifting for one — for a file sliced without any protection that is stringing across long
 travels. Skips a travel already preceded by a retraction on the line immediately before it, and skips
-the rest of the file once it sees `G10`/`G11`, for the same reason "Z-hop" does.
+the rest of the file once it sees a bare `G10` or a `G11`, for the same reason "Z-hop" does. (A `G10`
+that sets a temperature or an offset is not a retraction and switches nothing off.)
 
 - **Travel length threshold (mm)** — only travels at least this long get a retraction. Default: 5.
 - **Retraction length (mm)** — pulled back before the travel, pushed back after. This is on top of
@@ -653,9 +654,9 @@ Most run against the machine's live object model:
 | Commands RepRapFirmware does not implement (`M900`, `M205`, `M420`, `M851`, `M501`, `M502`, `M108`, `M413`) | Error |
 | Moves outside the axis limits from `M208` | Error |
 | Tools the file selects that are not configured | Error |
-| Temperatures above the `M143` heater limits | Error |
+| Temperatures above the `M143` heater limits — from `M104`/`M109`, and `M568` or `G10 P… S… R…` active (`S`) or standby (`R`), every heater of a multi-heater list | Error |
 | A macro the file calls (`M98`) that is not on the SD card | Error |
-| Extrusion before anything waits for the hot end to reach temperature | Error, or Warning if some heating command exists |
+| Extrusion before anything waits for the hot end to reach temperature (`M109`, or `M116` — `M568` and `G10` set a temperature but never wait, so pair them with `M116`) | Error, or Warning if some heating command (including `M568`/`G10`) exists |
 | Fans the file drives that do not exist | Warning |
 | No homing command anywhere in the file | Warning |
 | The file's peak volumetric flow exceeds the slicer's own stated `max_volumetric_speed` | Warning |

@@ -35,6 +35,13 @@
  * calling `ToolHeatersAtSetTemperatures` directly on the tool by number). Bed temperature uses the
  * ordinary `M140`/`M190` this codebase already relies on elsewhere.
  *
+ * **M568 and G10 set tool temperatures too** — RRF 3.3+'s own command and the older form it
+ * replaces, both read by the shared `gcode/toolTemperature.ts`, which cites RRF source for each.
+ * Before that, only `M104`/`M109` were collected, so a print heated with either restarted with that
+ * tool never heated or waited for. Only active temperatures are recovered, as for `M104`; standby
+ * (`R`) and `M568`'s heater state (`A`) are not part of the recovered state, so a tool idle at the
+ * cut is heated to its active temperature rather than left at standby — the safe direction.
+ *
  * **Ordering matters**: bed before tool (a tool held hot over a cold bed oozes for the whole bed
  * heat-up), temperatures before tool selection (selecting first would wait on whichever tool becomes
  * current, in the wrong order), and the final reposition is lift-then-travel-then-descend, never a
@@ -47,6 +54,7 @@
 import type { AnalysisCollector } from "../analysisPass";
 import { emptyRecoveryState, recoveryPlan, type RecoveryEvent, type RecoveryState } from "../recovery";
 import { formatNumber, paramNumber, parseParams, unquoteString } from "../gcode/tokenise";
+import { readToolTemperatureSetting, type ToolTemperatureSetting } from "../gcode/toolTemperature";
 import type { LineContext, RunContext, StepDefinition, StepFactoryContext, Transform } from "./types";
 
 export interface RestartFromConfig {
@@ -93,6 +101,14 @@ class RestartFromCollector implements AnalysisCollector<RecoveryState> {
 		}
 	}
 
+	/** M568 and G10's temperature form, attributed like M104: to `P` when given, else the current
+	 *  tool, and not at all when there is neither (see the M104 case's own comment). */
+	private recordToolTemperatures(setting: ToolTemperatureSetting | null, ctx: LineContext): void {
+		if (setting === null || setting.active.length === 0) return;
+		const tool = setting.tool ?? ctx.tool;
+		if (tool >= 0) this.events.push({ kind: "toolTemp", tool, temps: setting.active });
+	}
+
 	private applyM(code: string | null, body: string, ctx: LineContext): void {
 		const params = parseParams(body);
 		switch (code) {
@@ -106,9 +122,14 @@ class RestartFromCollector implements AnalysisCollector<RecoveryState> {
 				// so this case is simply not attributed to any tool. In practice every real slicer
 				// selects a tool before its first M104, so this only affects a hand-written fixture.
 				const t = paramNumber(params, "T") ?? ctx.tool;
-				if (s !== null && t >= 0) this.events.push({ kind: "toolTemp", tool: t, temp: s });
+				if (s !== null && t >= 0) this.events.push({ kind: "toolTemp", tool: t, temps: [s] });
 				break;
 			}
+			case "M568":
+				// RRF's own tool-temperature command. No P means the current tool — the same attribution
+				// rule as M104's missing T above
+				this.recordToolTemperatures(readToolTemperatureSetting(code, body), ctx);
+				break;
 			case "M140":
 			case "M190": {
 				const s = paramNumber(params, "S");
@@ -159,6 +180,11 @@ class RestartFromCollector implements AnalysisCollector<RecoveryState> {
 	private applyG(code: string | null, body: string, ctx: LineContext): void {
 		const params = parseParams(body);
 		switch (code) {
+			case "G10":
+				// Only G10's temperature form is a temperature; a bare G10 (retraction) and G10 L2/L20
+				// (workplace offsets) read as null — see toolTemperature.ts for RRF's own dispatch rule
+				this.recordToolTemperatures(readToolTemperatureSetting(code, body), ctx);
+				break;
 			case "G90":
 				this.events.push({ kind: "moveMode", relative: false });
 				break;
@@ -228,9 +254,18 @@ function buildPreamble(state: RecoveryState, config: RestartFromConfig, sourcePa
 		lines.push(`M140 S${formatNumber(state.bedTemp, 0)}`);
 		if (state.bedTemp > 0) lines.push(`M190 S${formatNumber(state.bedTemp, 0)}`);
 	}
-	for (const [tool, temp] of state.toolTemps) {
-		lines.push(`M104 T${tool} S${formatNumber(temp, 0)}`);
-		if (temp > 0) lines.push(`M116 P${tool}`);
+	for (const [tool, temps] of state.toolTemps) {
+		// One value (M104, or a single-heater tool) keeps the M104 form this preamble has always used.
+		// A multi-heater tool's list is restored as given with M568, rather than flattened to one
+		// value. A2 switches those heaters on at their active temperatures explicitly — what M568's `A`
+		// is documented to do — rather than relying on how `S` alone treats a tool that is not current.
+		const anyHot = temps.some((t) => t > 0);
+		if (temps.length === 1) {
+			lines.push(`M104 T${tool} S${formatNumber(temps[0], 0)}`);
+		} else {
+			lines.push(`M568 P${tool} S${temps.map((t) => formatNumber(t, 0)).join(":")}${anyHot ? " A2" : ""}`);
+		}
+		if (anyHot) lines.push(`M116 P${tool}`);
 	}
 
 	if (state.tool >= 0) lines.push(`T${state.tool}`);

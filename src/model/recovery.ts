@@ -23,7 +23,9 @@
 export type RecoveryEvent =
 	| { kind: "tool"; tool: number }
 	| { kind: "bedTemp"; temp: number }
-	| { kind: "toolTemp"; tool: number; temp: number }
+	/** Active temperature of each of the tool's heaters, in heater order — one element for `M104` or
+	 *  a single-heater tool; `M568`/`G10` give one per heater (`S185:200:150`). */
+	| { kind: "toolTemp"; tool: number; temps: ReadonlyArray<number> }
 	| { kind: "fan"; index: number; speed: number }
 	| { kind: "extrusionMode"; relative: boolean }
 	| { kind: "moveMode"; relative: boolean }
@@ -51,9 +53,10 @@ export interface RecoveryState {
 	absoluteE: number | null;
 	/** Last commanded bed temperature. Null when the bed was never addressed before the cut. */
 	bedTemp: number | null;
-	/** Tool number -> last commanded active temperature. A tool never mentioned before the cut has
+	/** Tool number -> last commanded active temperatures, one per heater in heater order. A tool
+	 *  never mentioned before the cut has
 	 *  no entry — it must not be heated in the preamble on the strength of a guess. */
-	toolTemps: ReadonlyMap<number, number>;
+	toolTemps: ReadonlyMap<number, ReadonlyArray<number>>;
 	/** Last commanded fan state. Null when no fan command appeared before the cut. */
 	fan: { index: number; speed: number } | null;
 	/** Active `M486` object at the cut, or null. `name` is null when the M486 that made it current
@@ -86,7 +89,7 @@ export function emptyRecoveryState(): RecoveryState {
  *  means. Pure: no I/O, no G-code parsing, no knowledge of where the events came from. */
 export function recoveryPlan(events: ReadonlyArray<RecoveryEvent>): RecoveryState {
 	const state = emptyRecoveryState();
-	const toolTemps = new Map<number, number>();
+	const toolTemps = new Map<number, ReadonlyArray<number>>();
 
 	for (const event of events) {
 		switch (event.kind) {
@@ -97,7 +100,7 @@ export function recoveryPlan(events: ReadonlyArray<RecoveryEvent>): RecoveryStat
 				state.bedTemp = event.temp;
 				break;
 			case "toolTemp":
-				toolTemps.set(event.tool, event.temp);
+				toolTemps.set(event.tool, event.temps);
 				break;
 			case "fan":
 				state.fan = { index: event.index, speed: event.speed };

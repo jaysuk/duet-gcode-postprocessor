@@ -28,7 +28,7 @@ export const zHopStep: StepDefinition<ZHopConfig> = {
 		+ "and coordinates outright, and this step needs to see the file's own original travel moves, "
 		+ "not arcs that used to be several of them. Skips a travel that already has an explicit "
 		+ "Z-rise immediately before it (a slicer-emitted hop of its own), and skips the whole rest of "
-		+ "the file once it sees G10/G11 (RepRapFirmware's own firmware retraction, which already "
+		+ "the file once it sees a bare G10 or a G11 (RepRapFirmware's own firmware retraction, which already "
 		+ "performs whatever hop the machine's M207 is configured with — invisible from the file's own "
 		+ "text, so trusted rather than guessed at). Both kinds of skip are counted and reported, so "
 		+ "\"nothing changed\" is distinguishable from \"it was not needed\".",

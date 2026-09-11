@@ -23,17 +23,17 @@ describe("recoveryPlan", () => {
 
 	it("toolTemps: each tool tracked independently, last value per tool wins", () => {
 		const events: Array<RecoveryEvent> = [
-			{ kind: "toolTemp", tool: 0, temp: 200 },
-			{ kind: "toolTemp", tool: 1, temp: 210 },
-			{ kind: "toolTemp", tool: 0, temp: 205 },
+			{ kind: "toolTemp", tool: 0, temps: [200] },
+			{ kind: "toolTemp", tool: 1, temps: [210] },
+			{ kind: "toolTemp", tool: 0, temps: [205] },
 		];
 		const state = recoveryPlan(events);
-		expect(state.toolTemps.get(0)).toBe(205);
-		expect(state.toolTemps.get(1)).toBe(210);
+		expect(state.toolTemps.get(0)).toEqual([205]);
+		expect(state.toolTemps.get(1)).toEqual([210]);
 	});
 
 	it("a tool never heated before the cut has no entry at all — not defaulted to 0 or omitted-as-zero", () => {
-		const state = recoveryPlan([{ kind: "toolTemp", tool: 0, temp: 200 }]);
+		const state = recoveryPlan([{ kind: "toolTemp", tool: 0, temps: [200] }]);
 		expect(state.toolTemps.has(1)).toBe(false);
 	});
 
@@ -111,7 +111,7 @@ describe("recoveryPlan", () => {
 		const events: Array<RecoveryEvent> = [
 			{ kind: "bedTemp", temp: 60 },
 			{ kind: "tool", tool: 0 },
-			{ kind: "toolTemp", tool: 0, temp: 200 },
+			{ kind: "toolTemp", tool: 0, temps: [200] },
 			{ kind: "fan", index: 0, speed: 255 },
 			{ kind: "tool", tool: 1 },
 			{ kind: "bedTemp", temp: 65 },
@@ -119,7 +119,7 @@ describe("recoveryPlan", () => {
 		const state = recoveryPlan(events);
 		expect(state.tool).toBe(1);
 		expect(state.bedTemp).toBe(65);
-		expect(state.toolTemps.get(0)).toBe(200);
+		expect(state.toolTemps.get(0)).toEqual([200]);
 		expect(state.fan).toEqual({ index: 0, speed: 255 });
 	});
 });

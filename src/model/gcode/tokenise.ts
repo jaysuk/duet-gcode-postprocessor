@@ -187,6 +187,19 @@ export function paramNumber(params: ReadonlyArray<ParsedParam>, letter: string):
 	return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * A parameter's value as RepRapFirmware's colon-separated list — `S185:200:150` is one value per
+ * heater of a multi-heater tool (RRF reads these with `GetFloatArray`). A plain `S210` is a
+ * one-element list. `paramNumber` cannot be used for these: `Number("185:200:150")` is NaN, so the
+ * whole parameter would silently read as absent. Non-numeric elements are dropped rather than
+ * failing the lot. Empty when the parameter is absent.
+ */
+export function paramNumberList(params: ReadonlyArray<ParsedParam>, letter: string): Array<number> {
+	const p = findParam(params, letter);
+	if (p === null) return [];
+	return p.value.split(":").map(Number).filter((n) => Number.isFinite(n));
+}
+
 /** First parameter with the given letter, or null. Letter comparison is case-insensitive. */
 export function findParam(params: ReadonlyArray<ParsedParam>, letter: string): ParsedParam | null {
 	const want = letter.toUpperCase();

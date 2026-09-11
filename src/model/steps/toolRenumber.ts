@@ -7,6 +7,7 @@
  */
 
 import { findParam, parseParams, setParam, tokenise, withBody } from "../gcode/tokenise";
+import { g10Form } from "../gcode/toolTemperature";
 import { StepConfigError, type LineContext, type StepDefinition, type Transform } from "./types";
 
 export interface ToolRenumberConfig {
@@ -23,6 +24,12 @@ export interface ToolRenumberConfig {
  * - `M568 P` — "Tool number. If this parameter is not provided, the current tool is used" (settings).
  * - `M116 P` — "Tool number... waits for temperatures associated with that tool"; plausible in a
  *   sliced file around a tool change, unlike the config.g-only commands excluded below.
+ * - `G10 P` — **only in its tool-settings form**, the one entry here that needs `when`. `G10` means
+ *   three things: tool settings (`G10 P<n> S… R…` temperatures, `G10 [L1] P<n> X Y Z` offsets — `P`
+ *   is a tool), a workplace coordinate origin (`G10 L2`/`L20 P<n>` — `P` is a coordinate system
+ *   number, **not** a tool), and a bare firmware retraction (no `P` at all). `g10Form`
+ *   (`gcode/toolTemperature.ts`) tells them apart by RepRapFirmware's own dispatch rule, which is
+ *   what makes this safe to include; before that rule existed here, every `G10` was left alone.
  *
  * Deliberately **not** included:
  *
@@ -31,21 +38,21 @@ export interface ToolRenumberConfig {
  *   cooling on a file that also renumbers tools, with no error anywhere.
  * - `M585` — `P` is a **Z probe number** (see this project's own `CLAUDE.md` gotcha about M585's
  *   real purpose), not a tool.
- * - `G10` — genuinely ambiguous, not merely unlikely: the wiki documents `G10 P<n> R<n> S<n>` (tool
- *   temperatures, P = tool) and a *separate* `G10 [L1] P<n> X Y Z` (tool offsets, P = tool) alongside
- *   `G10 L2 P<n> ...` / `G10 L20 P<n> ...` (workplace coordinate system number, P = **not** a tool)
- *   — correctly telling these apart needs parsing `L` too, which is more than this step attempts. A
- *   file that sets tool offsets via `G10` keeps its original tool numbers there; renumber it by hand
- *   if it uses G10.
  * - `M207` (per-tool retraction) and `M309` (per-tool heater feedforward) — both are config.g-only
  *   tuning commands that do not appear in a slicer's own G-code output, excluded on realistic scope
  *   rather than on ambiguity.
  */
-export const TOOL_PARAM_COMMANDS: ReadonlyArray<{ command: string; param: string }> = [
+export const TOOL_PARAM_COMMANDS: ReadonlyArray<{
+	command: string;
+	param: string;
+	/** When present, the parameter is a tool number only for a line this accepts. */
+	when?: (body: string) => boolean;
+}> = [
 	{ command: "M563", param: "P" },
 	{ command: "M567", param: "P" },
 	{ command: "M568", param: "P" },
 	{ command: "M116", param: "P" },
+	{ command: "G10", param: "P", when: (body) => g10Form(body) === "toolSettings" },
 ];
 
 /**
@@ -78,13 +85,14 @@ export const toolRenumberStep: StepDefinition<ToolRenumberConfig> = {
 	id: "toolRenumber",
 	label: "Renumber tools",
 	description: "Remaps tool numbers for a file sliced against a different tool assignment.",
-	tip: "Rewrites bare T<n> command lines and the tool-number parameter of M563/M567/M568/M116 — "
-		+ "never inside a comment, and never M106/M107's fan index or M585's probe number, which reuse "
-		+ "the same P letter for something else entirely (see this step's own module comment for the "
-		+ "full, wiki-verified list). Every mapping is resolved against the file's ORIGINAL tool "
-		+ "numbers at once, so \"0->1, 1->0\" is a genuine swap rather than every T0 becoming T1 and "
-		+ "then, on the very next rule, turning straight back into T0. A tool number not listed is "
-		+ "left completely unchanged. Does not touch G10 tool offsets — see the module comment for why.",
+	tip: "Rewrites bare T<n> command lines and the tool-number parameter of M563/M567/M568/M116, and "
+		+ "of G10 where it really is a tool (its temperature and tool-offset forms — not G10 L2/L20, "
+		+ "where P is a workplace coordinate system) — never inside a comment, and never M106/M107's fan "
+		+ "index or M585's probe number, which reuse the same P letter for something else entirely (see "
+		+ "this step's own module comment for the full, wiki-verified list). Every mapping is resolved "
+		+ "against the file's ORIGINAL tool numbers at once, so \"0->1, 1->0\" is a genuine swap rather "
+		+ "than every T0 becoming T1 and then, on the very next rule, turning straight back into T0. A "
+		+ "tool number not listed is left completely unchanged.",
 	docsAnchor: "renumber-tools",
 	icon: "mdi-swap-horizontal",
 	fields: [
@@ -115,8 +123,9 @@ export const toolRenumberStep: StepDefinition<ToolRenumberConfig> = {
 					return withBody(token, `T${next}${rest}`);
 				}
 
-				for (const { command, param } of TOOL_PARAM_COMMANDS) {
+				for (const { command, param, when } of TOOL_PARAM_COMMANDS) {
 					if (token.code !== command) continue;
+					if (when !== undefined && !when(token.body)) return undefined;
 					const found = findParam(parseParams(token.body), param);
 					if (found === null) return undefined;
 					const current = Number(found.value);

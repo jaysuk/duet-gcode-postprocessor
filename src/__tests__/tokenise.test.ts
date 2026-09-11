@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	findCommentIndex, formatNumber, parseParams, paramNumber, removeParam, setParam, tokenise, withBody,
+	findCommentIndex, formatNumber, parseParams, paramNumber, paramNumberList, removeParam, setParam, tokenise,
+	withBody,
 } from "../model/gcode/tokenise";
 
 describe("findCommentIndex", () => {
@@ -150,5 +151,25 @@ describe("formatNumber", () => {
 
 	it("survives a non-finite input", () => {
 		expect(formatNumber(NaN, 3)).toBe("0");
+	});
+});
+
+describe("paramNumberList", () => {
+	// RRF reads S/R on M568 (and other per-heater parameters) as a colon list, one value per heater;
+	// paramNumber sees "185:200:150" as NaN, so the whole parameter would read as absent
+	it("reads a colon list, one value per element", () => {
+		expect(paramNumberList(parseParams("M568 P0 S185:200:150"), "S")).toEqual([185, 200, 150]);
+	});
+
+	it("reads a single value as a one-element list", () => {
+		expect(paramNumberList(parseParams("M568 P0 S210"), "S")).toEqual([210]);
+	});
+
+	it("is empty when the parameter is absent", () => {
+		expect(paramNumberList(parseParams("M568 P0 A2"), "S")).toEqual([]);
+	});
+
+	it("drops a non-numeric element rather than failing the whole list", () => {
+		expect(paramNumberList(parseParams("M568 P0 S200:x:150"), "S")).toEqual([200, 150]);
 	});
 });

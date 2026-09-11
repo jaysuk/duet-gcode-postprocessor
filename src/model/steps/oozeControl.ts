@@ -27,7 +27,7 @@ export const oozeControlStep: StepDefinition<OozeControlConfig> = {
 	tip: "Run this BEFORE \"Weld curves into arcs\" in the recipe — arc-welding changes line counts "
 		+ "and coordinates outright, and this step needs to see the file's own original travel moves. "
 		+ "Skips a travel that already has a retraction on the line immediately before it, and skips "
-		+ "the whole rest of the file once it sees G10/G11 (RepRapFirmware's own firmware retraction — "
+		+ "the whole rest of the file once it sees a bare G10 or a G11 (RepRapFirmware's own firmware retraction — "
 		+ "see zHop's tip for why that is trusted rather than second-guessed). The temperature drop, "
 		+ "if enabled, only fires when the file has already commanded a hot end temperature earlier "
 		+ "(M104/M109) to restore afterwards; without one it retracts but leaves temperature alone "

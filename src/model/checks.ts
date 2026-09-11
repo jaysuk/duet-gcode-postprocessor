@@ -288,8 +288,9 @@ function checkColdExtrusion(analysis: FileAnalysis): Array<CheckResult> {
 				? "Extrusion begins with no explicit wait for temperature"
 				: "Extrusion begins with no heating command anywhere in the file",
 			detail: `The first extruding move is at line ${analysis.firstExtrusionLine}, but the file never waits `
-				+ "for the hot end to reach temperature (M109 or M116). This is fine if a start macro handles "
-				+ "heating — otherwise the first layer will print cold.",
+				+ "for the hot end to reach temperature (M109, or M116 after M104/M568/G10 — M568 and G10 set "
+				+ "the temperature but do not wait for it). This is fine if a start macro handles heating — "
+				+ "otherwise the first layer will print cold.",
 		}];
 	}
 	return [{

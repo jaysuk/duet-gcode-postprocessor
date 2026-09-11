@@ -18,7 +18,7 @@
  * `planPreheats` for how each is avoided now.
  */
 
-import { findParam, paramNumber, parseParams } from "../gcode/tokenise";
+import { readToolTemperatureSetting } from "../gcode/toolTemperature";
 import { TimeEstimator, type MachineLimits } from "../gcode/timeModel";
 import { heatUpSeconds, HEATUP_CAP_SECONDS, type ToolConfig } from "../preheat";
 import type { AnalysisCollector } from "../analysisPass";
@@ -47,7 +47,8 @@ interface CollectedEvents {
 	existingPreheats: Array<ExistingPreheatEvent>;
 	/**
 	 * Elapsed seconds of the first command that establishes each tool's active/standby temperatures
-	 * — an `M568`/`G10` carrying an explicit `P<tool>` and an `R` or `S` parameter. A tool with no
+	 * — an `M568`, or a `G10` in its tool-settings form (never a `G10 L2`/`L20` workplace offset; see
+	 * `gcode/toolTemperature.ts`), carrying an explicit `P<tool>` and an `R` or `S`. A tool with no
 	 * such command (its temperatures come from `config.g` alone) has no entry here; its floor is then
 	 * just its own first selection — see `planPreheats`.
 	 */
@@ -104,23 +105,21 @@ class PreheatCollector implements AnalysisCollector<CollectedEvents> {
 			return;
 		}
 
-		const isM568 = token.letter === "M" && token.code === "M568";
-		const isG10 = token.letter === "G" && token.code === "G10";
-		if (!isM568 && !isG10) return;
-
-		const params = parseParams(token.body);
-		const p = paramNumber(params, "P");
-		if (p !== null) {
-			const tool = Math.trunc(p);
-			const setsTemps = findParam(params, "R") !== null || findParam(params, "S") !== null;
-			if (setsTemps && !this.tempSetupSeconds.has(tool)) {
-				this.tempSetupSeconds.set(tool, this.estimator.elapsed);
-				this.tempSetupLineSeq.set(tool, this.lineSeq);
-			}
+		// M568 and G10's temperature form, read by the shared `readToolTemperatureSetting` — so a
+		// `G10 L2`/`L20` workplace offset is never taken for a tool's temperature setup, which this
+		// collector's own rule used to do whenever such a line carried an `S` or `R`. Only an explicit
+		// `P` attributes the setup to a tool (without one there is no tool number to floor), and it is
+		// `setsTemperatures` — presence, not the numeric lists — that decides: an expression such as
+		// `S{global.printTemp}` establishes the temperatures just as surely as a number does.
+		const setting = readToolTemperatureSetting(token.code, token.body);
+		if (setting === null || setting.tool === null) return;
+		const tool = setting.tool;
+		if (setting.setsTemperatures && !this.tempSetupSeconds.has(tool)) {
+			this.tempSetupSeconds.set(tool, this.estimator.elapsed);
+			this.tempSetupLineSeq.set(tool, this.lineSeq);
 		}
-
-		if (isM568 && p !== null && paramNumber(params, "A") === 2) {
-			this.existingPreheats.push({ tool: Math.trunc(p), elapsedSeconds: this.estimator.elapsed });
+		if (setting.heaterState === 2) {
+			this.existingPreheats.push({ tool, elapsedSeconds: this.estimator.elapsed });
 		}
 	}
 

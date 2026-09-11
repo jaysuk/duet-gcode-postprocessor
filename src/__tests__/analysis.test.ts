@@ -200,6 +200,32 @@ describe("analyseText", () => {
 			const analysis = analyseText("G28\nG1 X1\nM109 S210");
 			expect(analysis.firstExtrusionLine).toBeNull();
 		});
+
+		// M568 is RepRapFirmware's own tool-temperature command. It used to be invisible here, so a
+		// file heating with it read as having no heating command at all
+		it("records an M568 active temperature as a commanded tool temperature", () => {
+			expect(analyseText("M568 P0 S210").maxToolTemp).toBe(210);
+		});
+
+		it("counts an M568 standby temperature too — a heater set to it faults over M143 just the same", () => {
+			expect(analyseText("M568 P0 R230 S205").maxToolTemp).toBe(230);
+		});
+
+		it("reads every heater of a multi-heater M568 list, not just the first", () => {
+			expect(analyseText("M568 P0 S185:200:150").maxToolTemp).toBe(200);
+		});
+
+		it("does not treat M568 as a wait — it sets a temperature and moves on", () => {
+			expect(analyseText("M568 P0 S210 A2\nG1 X1 E1").firstHeatWaitLine).toBeNull();
+		});
+
+		it("recognises M116 after M568 as the wait", () => {
+			expect(analyseText("M568 P0 S210 A2\nM116\nG1 X1 E1").firstHeatWaitLine).toBe(2);
+		});
+
+		it("records no temperature for an M568 that sets none", () => {
+			expect(analyseText("M568 P0 A2").maxToolTemp).toBeNull();
+		});
 	});
 
 	describe("end-of-file hygiene signals", () => {
@@ -216,6 +242,12 @@ describe("analyseText", () => {
 
 		it("M568 A2 (active) does not count as addressed", () => {
 			expect(analyseText("M568 P0 A2").heatersAddressed).toBe(false);
+		});
+
+		it("M568 with its active temperatures set to 0 counts as addressed, like M104 S0", () => {
+			expect(analyseText("M568 P0 S210\nM568 P0 S0").heatersAddressed).toBe(true);
+			expect(analyseText("M568 P0 S0:0").heatersAddressed).toBe(true);
+			expect(analyseText("M568 P0 S210").heatersAddressed).toBe(false);
 		});
 
 		it("heatersAddressed is true after M0 or M2", () => {
@@ -516,6 +548,41 @@ describe("detectDialect", () => {
 	});
 });
 
+// G10 P… S… R… is the older RRF form M568 replaces. G10 also means firmware retraction (bare) and
+// workplace offsets (L2/L20); only the temperature form may count — see gcode/toolTemperature.ts
+describe("G10 tool temperatures", () => {
+	it("records a G10 P S R temperature as a commanded tool temperature", () => {
+		expect(analyseText("G10 P0 R150 S215").maxToolTemp).toBe(215);
+	});
+
+	it("records nothing for a bare G10 — that is a firmware retraction", () => {
+		expect(analyseText("G10").maxToolTemp).toBeNull();
+	});
+
+	it("records nothing for G10 workplace or tool offsets", () => {
+		expect(analyseText("G10 L2 P2 X110 Y110 Z20").maxToolTemp).toBeNull();
+		expect(analyseText("G10 P2 X17.8 Y-19.3 Z0").maxToolTemp).toBeNull();
+	});
+
+	it("does not treat G10 as a wait", () => {
+		expect(analyseText("G10 P0 S210\nG1 X1 E1").firstHeatWaitLine).toBeNull();
+	});
+
+	it("counts as a heating command in the cold-extrusion check — a warning, not a no-heating error", () => {
+		const results = runChecks(analyseText("G28\nG10 P0 S210\nG1 X1 E1"), MACHINE);
+		expect(results.find((r) => r.code === "structure:coldExtrusionNoWait")?.level).toBe("warning");
+	});
+
+	it("is checked against the M143 limit", () => {
+		const results = runChecks(analyseText("G28\nG10 P0 S320"), MACHINE);
+		expect(results.some((r) => r.code === "temp:tool" && r.level === "error")).toBe(true);
+	});
+
+	it("counts as turning the heater off when its active temperature is set to 0", () => {
+		expect(analyseText("G10 P0 S210\nG10 P0 S0").heatersAddressed).toBe(true);
+	});
+});
+
 describe("preflight checks", () => {
 	it("passes a clean file on a matching machine", () => {
 		const results = runChecks(analyseText(SAMPLE, parseMetadata(SAMPLE)), MACHINE);
@@ -542,6 +609,21 @@ describe("preflight checks", () => {
 	it("reports a temperature above the heater limit", () => {
 		const results = runChecks(analyseText("G28\nM104 S320"), MACHINE);
 		expect(results.some((r) => r.code === "temp:tool" && r.level === "error")).toBe(true);
+	});
+
+	it("reports an M568 temperature above the heater limit", () => {
+		const results = runChecks(analyseText("G28\nM568 P0 S320"), MACHINE);
+		expect(results.some((r) => r.code === "temp:tool" && r.level === "error")).toBe(true);
+	});
+
+	it("reports a multi-heater M568 list with one heater over the limit", () => {
+		const results = runChecks(analyseText("G28\nM568 P0 S200:320"), MACHINE);
+		expect(results.some((r) => r.code === "temp:tool" && r.level === "error")).toBe(true);
+	});
+
+	it("reports nothing for an M568 temperature within the limit", () => {
+		const results = runChecks(analyseText("G28\nM568 P0 S250"), MACHINE);
+		expect(results.some((r) => r.code === "temp:tool")).toBe(false);
 	});
 
 	it("reports a bed temperature above the bed limit", () => {
@@ -584,6 +666,18 @@ describe("preflight checks", () => {
 			expect(issue?.level).toBe("warning");
 		});
 
+		it("treats M568 as a heating command: a warning for the missing wait, not a no-heating error", () => {
+			const results = runChecks(analyseText("G28\nM568 P0 S210 A2\nG1 X1 E1"), MACHINE);
+			const issue = results.find((r) => r.code === "structure:coldExtrusionNoWait");
+			expect(issue?.level).toBe("warning");
+			expect(issue?.detail).toContain("M568");
+		});
+
+		it("reports nothing when M568 is followed by M116 before extrusion", () => {
+			const results = runChecks(analyseText("G28\nM568 P0 S210 A2\nM116\nG1 X1 E1"), MACHINE);
+			expect(results.some((r) => r.code.startsWith("structure:coldExtrusion"))).toBe(false);
+		});
+
 		it("warns (never errors) when extrusion precedes an explicit wait", () => {
 			const results = runChecks(analyseText("G28\nG1 X1 E1\nM109 S210"), MACHINE);
 			const issue = results.find((r) => r.code === "structure:coldExtrusion");
@@ -605,6 +699,16 @@ describe("preflight checks", () => {
 		it("flags heaters never turned off", () => {
 			const results = runChecks(analyseText("G28\nM104 S210"), MACHINE);
 			expect(results.some((r) => r.code === "structure:heatersLeftOn" && r.level === "info")).toBe(true);
+		});
+
+		it("flags heaters never turned off when they were heated with M568", () => {
+			const results = runChecks(analyseText("G28\nM568 P0 S210 A2"), MACHINE);
+			expect(results.some((r) => r.code === "structure:heatersLeftOn")).toBe(true);
+		});
+
+		it("says nothing when M568 heats and then A0 turns the heaters off", () => {
+			const results = runChecks(analyseText("G28\nM568 P0 S210 A2\nM568 P0 A0"), MACHINE);
+			expect(results.some((r) => r.code === "structure:heatersLeftOn")).toBe(false);
 		});
 
 		it("says nothing about heaters when they are turned off", () => {

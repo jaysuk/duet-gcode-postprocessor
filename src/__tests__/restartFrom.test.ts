@@ -139,6 +139,41 @@ describe("restartFrom", () => {
 		expect(output.split("\n").some((l) => /^G1 X\d+ Y\d+ E1/.test(l))).toBe(false);
 	});
 
+	// M568 (RRF 3.3+) and G10's temperature form set tool temperatures too. The collector used to see
+	// only M104/M109, so a print heated with either restarted with that tool never heated or waited for
+	it("restores a tool temperature set with M568, and waits for it", () => {
+		const lines = run({}, FIXTURE.replace("M104 T1 S210", "M568 P1 S215")).output.split("\n");
+		expect(lines).toContain("M104 T1 S215");
+		expect(lines).toContain("M116 P1");
+	});
+
+	it("restores a tool temperature set with G10's temperature form", () => {
+		const lines = run({}, FIXTURE.replace("M104 T1 S210", "G10 P1 R150 S205")).output.split("\n");
+		expect(lines).toContain("M104 T1 S205");
+		expect(lines).toContain("M116 P1");
+	});
+
+	it("attributes an M568 with no P to the current tool", () => {
+		const lines = run({}, FIXTURE.replace("M104 T1 S210", "M568 S220")).output.split("\n");
+		expect(lines).toContain("M104 T1 S220");
+	});
+
+	it("restores every heater of a multi-heater tool, switched on, rather than flattening to one value", () => {
+		const lines = run({}, FIXTURE.replace("M104 T1 S210", "M568 P1 S185:200")).output.split("\n");
+		expect(lines).toContain("M568 P1 S185:200 A2");
+		expect(lines).toContain("M116 P1");
+	});
+
+	it("does not mistake a G10 retraction or workplace offset for a temperature", () => {
+		const lines = run({}, FIXTURE.replace("M104 T1 S210", "G10\nG10 L2 P1 X0 Y0 Z0")).output.split("\n");
+		expect(lines.some((l) => l.startsWith("M104 T1") || l.startsWith("M568 P1"))).toBe(false);
+	});
+
+	it("does not restore a tool set only to a heater state with no temperature", () => {
+		const lines = run({}, FIXTURE.replace("M104 T1 S210", "M568 P1 A2")).output.split("\n");
+		expect(lines.some((l) => l.startsWith("M104 T1") || l.startsWith("M568 P1"))).toBe(false);
+	});
+
 	it("acceptance: read back through Analyser, the output reports the same tool, mode and temperatures as the source at the cut", () => {
 		const { output } = run({}, FIXTURE);
 		const analysis = analyseText(output);

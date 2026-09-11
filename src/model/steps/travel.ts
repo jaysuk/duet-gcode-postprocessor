@@ -9,7 +9,8 @@
  * arithmetic is cheaper than coupling two otherwise-unrelated steps to arc-welding.
  */
 
-import { findParam, paramNumber, parseParams, type Tokenised } from "../gcode/tokenise";
+import { paramNumber, parseParams, type Tokenised } from "../gcode/tokenise";
+import { g10Form } from "../gcode/toolTemperature";
 import type { LineContext } from "./types";
 
 export interface TravelState {
@@ -92,19 +93,23 @@ export function advanceTravelState(state: TravelState, ctx: LineContext, token: 
 }
 
 /**
- * True for a *bare* `G10`/`G11` — RepRapFirmware's firmware retract/unretract, which (per
- * `Duet3D/wiki-content`: "RepRapFirmware recognizes G10 as a command to set tool offsets and/or
- * temperatures if the P parameter is present, and as a retraction command if it is absent") already
- * performs the configured retraction *and* any Z-hop from `M207`'s own Z parameter. `G10 P...` is a
- * completely different command (tool offsets/temperatures) and must not be mistaken for this.
+ * True for RepRapFirmware's firmware retract/unretract — `G11`, and a `G10` in its retraction
+ * form — which already performs the configured retraction *and* any Z-hop from `M207`'s own Z
+ * parameter.
  *
- * A file using G10/G11 anywhere has its own retraction and hop convention already, driven by
- * whatever `M207` is configured to on the real machine — invisible from the file's own text, and
- * not this plugin's to guess at. Both `zHop` and `oozeControl` treat seeing this even once as "this
- * file already handles it", for the rest of the file, rather than assuming M207's Z is zero.
+ * `G10` has three meanings and only one of them is this; which one a line has is decided by
+ * `g10Form` (`gcode/toolTemperature.ts`), which follows RepRapFirmware's own dispatch rather than
+ * the wiki's summary. This used to call any `G10` without a `P` a retraction, so a file setting the
+ * current tool's temperature with `G10 S200` — or a tool offset with `G10 X…` — silently lost every
+ * hop and retraction for the rest of the file.
+ *
+ * A file using firmware retraction anywhere has its own retraction and hop convention already,
+ * driven by whatever `M207` is configured to on the real machine — invisible from the file's own
+ * text, and not this plugin's to guess at. Both `zHop` and `oozeControl` treat seeing this even once
+ * as "this file already handles it", for the rest of the file, rather than assuming M207's Z is zero.
  */
 export function isFirmwareRetractOrUnretract(token: Tokenised): boolean {
 	if (token.code === "G11") return true;
-	if (token.code === "G10") return findParam(parseParams(token.body), "P") === null;
+	if (token.code === "G10") return g10Form(token.body) === "retract";
 	return false;
 }
