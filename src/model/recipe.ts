@@ -41,8 +41,16 @@ export interface Recipe {
 	steps: Array<RecipeStep>;
 	/** Set by the user after reviewing any script steps. Never persisted as true by default. */
 	scriptsTrusted?: boolean;
-	/** Glob-ish filename filter used by auto-run; empty means "any file". */
+	/** Glob-ish filename filter used by automatic recipe selection; empty means "any file". See
+	 *  `recipeMatch.ts`, which is what actually reads this — `match`/`matchFolder`/`matchSlicer`
+	 *  are recipe-level, opt-in-per-recipe data, not consumed anywhere in this module. */
 	match?: string;
+	/** Directory prefix (that directory or anything below it) used by automatic recipe selection;
+	 *  empty means "any folder". See `recipeMatch.ts`. */
+	matchFolder?: string;
+	/** Slicer name used by automatic recipe selection; empty means "any slicer". See
+	 *  `recipeMatch.ts` — this one needs a prescan, unlike `match`/`matchFolder`. */
+	matchSlicer?: string;
 	/** Schema version, for future migrations. */
 	version: number;
 }
@@ -306,6 +314,9 @@ export function importRecipe(json: string): Recipe {
 			note: typeof step.note === "string" ? step.note : undefined,
 			enabled: step.enabled !== false,
 			config: (typeof step.config === "object" && step.config !== null) ? step.config as Record<string, unknown> : {},
+			// Previously dropped here even though exportRecipe writes it out — a recipe whose steps
+			// were gated on file metadata silently ran unconditionally after a round-trip
+			condition: Array.isArray(step.condition) ? step.condition as Recipe["steps"][number]["condition"] : undefined,
 		};
 	});
 
@@ -314,6 +325,8 @@ export function importRecipe(json: string): Recipe {
 		name: raw.name,
 		description: typeof raw.description === "string" ? raw.description : undefined,
 		match: typeof raw.match === "string" ? raw.match : undefined,
+		matchFolder: typeof raw.matchFolder === "string" ? raw.matchFolder : undefined,
+		matchSlicer: typeof raw.matchSlicer === "string" ? raw.matchSlicer : undefined,
 		steps,
 		scriptsTrusted: false,
 		version: RECIPE_VERSION,

@@ -47,20 +47,33 @@
 				   :disabled="!canRun || busy" @click="preview">
 				Preview
 			</v-btn>
+
+			<template v-if="recentRuns.length > 0">
+				<div class="text-caption text-medium-emphasis mt-3 mb-1">Recent runs</div>
+				<div v-for="(run, index) in recentRuns" :key="index" class="text-caption d-flex align-center ga-1">
+					<v-icon :color="run.ok ? 'success' : 'error'" size="x-small">
+						{{ run.ok ? "mdi-check" : "mdi-alert" }}
+					</v-icon>
+					<span class="text-truncate">{{ baseName(run.sourcePath) }}</span>
+					<v-spacer />
+					<span class="text-medium-emphasis">{{ shortTime(run.at) }}</span>
+				</div>
+			</template>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
 import { installedPluginVersion } from "../dwc/machineSnapshot";
 import { scriptsTrusted, useRecipes } from "../dwc/recipeStore";
-import { LS_SELECTED_FILE, PLUGIN_MANIFEST_ID, ROUTE_PATH } from "../model/constants";
-import { planOutput } from "../model/io/plan";
+import { HISTORY_INDEX, LS_SELECTED_FILE, PLUGIN_MANIFEST_ID, ROUTE_PATH } from "../model/constants";
+import { parseHistory, type HistoryEntry } from "../model/io/history";
+import { baseName, planOutput } from "../model/io/plan";
 import { CancelledError, processFile } from "../model/io/transfer";
 import { usesScripts, validateRecipe } from "../model/recipe";
 
@@ -83,6 +96,28 @@ const busy = ref(false);
 const progress = ref<number | null>(null);
 const message = ref<string | null>(null);
 const messageType = ref<"success" | "error" | "info">("info");
+
+// The "plus recent runs" half of the Flexible-Layouts widget (FEATURES.md F1) — the last few
+// applied runs, read from the same on-card history index the History tab shows.
+const recentRuns = ref<Array<HistoryEntry>>([]);
+
+async function loadRecentRuns(): Promise<void> {
+	if (!machineStore.isConnected) return;
+	try {
+		const blob = await createGateway().download(HISTORY_INDEX);
+		recentRuns.value = parseHistory(await blob.text()).slice(0, 3);
+	} catch {
+		// No history index yet is the common case on first use — leave the list empty
+		recentRuns.value = [];
+	}
+}
+
+function shortTime(iso: string): string {
+	const date = new Date(iso);
+	return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+}
+
+onMounted(() => { void loadRecentRuns(); });
 
 const recipeItems = computed(() => recipes.value.map((r) => ({ id: r.id, name: r.name })));
 const recipeId = computed(() => recipe.value?.id ?? null);

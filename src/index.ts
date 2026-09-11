@@ -15,6 +15,7 @@ import { clearAnnouncedUpdate, installErrorCapture } from "dwc-plugin-runtime";
 
 import PostProcessorPage from "./components/PostProcessorPage.vue";
 import PostProcessorWidget from "./components/PostProcessorWidget.vue";
+import { installAutoRun } from "./dwc/autoRun";
 import en from "./i18n/en.json";
 import { EMBEDDABLE_ID, PLUGIN_ID, PLUGIN_MANIFEST_ID, ROUTE_PATH } from "./model/constants";
 import { runUpdateCheck } from "./model/updateCheck";
@@ -52,6 +53,7 @@ try {
 }
 
 const uninstallErrorCapture = installErrorCapture();
+const uninstallAutoRun = installAutoRun();
 
 // Deferred so the connection and object model have settled enough to read the installed version
 setTimeout(() => { void runUpdateCheck({ notify: true }); }, 4000);
@@ -62,6 +64,7 @@ function onPluginUnloaded(id: string): void {
 	if (embedded) unregisterEmbeddableComponent(EMBEDDABLE_ID);
 	clearAnnouncedUpdate(PLUGIN_MANIFEST_ID);
 	uninstallErrorCapture();
+	uninstallAutoRun();
 	Events.off("dwcPluginUnloaded", onPluginUnloaded);
 }
 

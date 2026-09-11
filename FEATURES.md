@@ -9,9 +9,12 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 > audit and per-feature override (G3), `M98` macro validation (G5), cold-extrusion and end-of-file
 > hygiene checks (G8), the Marlin tool-scoped temperature fix (H8), the move-time model with the
 > `M73` rewrite (G1), predictive pre-heat before a tool change (G2), arc welding (B16), and the
-> volumetric flow-rate audit with feedrate clamping (G6–G7). Still outstanding: auto-run on upload
-> (D5), batch processing (D6), automatic recipe selection (D4), run history (D8), and the "Later"
-> items.
+> volumetric flow-rate audit with feedrate clamping (G6–G7).
+>
+> **v1.2.0 adds the automation phase**: automatic recipe selection (D4), auto-run on upload (D5),
+> batch processing with multi-select (D6/A2), run history (D8), the run report (F2), the diagnostics
+> report (F4), the preflight gate (E13), and a touch/mobile layout pass (F6). Still outstanding: the
+> "Later" items only.
 > See [PLAN.md](PLAN.md#status) for the deviations.
 
 ---
@@ -21,7 +24,7 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | # | Feature | Phase |
 | --- | --- | --- |
 | A1 | **SD-card G-code browser** — breadcrumbs, folders, sort, name filter, tile/list view, thumbnails; reuses DWC's own `FileList` where available | 1 · v1 |
-| A2 | **Multi-select** for batch operations | 4 |
+| A2 | ✅ **Multi-select** for batch operations — Done — opt-in selection mode in `components/GcodeBrowser.vue` (`update:selection`), consumed by batch processing (D6) | 4 · v1.2 |
 | A3 | **File inspector** — slicer name and version, print time, filament length/weight/cost, layer height, layer count, bounding box, tools and heaters used, `M486` object list, embedded thumbnail | 1 · v1 |
 | A4 | **Dialect detection** — flags a file as RRF-flavoured, Marlin-flavoured or Klipper-flavoured from the commands it actually uses | 1 · v1 |
 | A5 | **Command histogram** — which G/M codes appear and how often; the fastest way to spot something the firmware will reject | 1 · v1 |
@@ -70,11 +73,11 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | D1 | **Named recipes** — ordered steps, each individually enabled/disabled, reorderable, duplicable | 4 · v1 |
 | D2 | **Recipe storage on the board** so it follows the printer, not the browser | 4 · v1 |
 | D3 | **Import/export recipes** as JSON | 4 · v1 |
-| D4 | **Recipe matching rules** — auto-select a recipe by filename glob, folder, or detected slicer | 4 |
-| D5 | **Auto-run on upload** — hooks DWC's `fileUploaded` event; opt-in, confirm-first by default, with a silent mode. Works while a DWC tab is open | 4 |
-| D6 | **Batch processing** over a selection or a whole folder, with progress and cancel | 4 |
+| D4 | ✅ **Recipe matching rules** — auto-select a recipe by filename glob, folder, or detected slicer — Done — `model/recipeMatch.ts` (`matchesPath`/`matchesFile`/`pickRecipe`), recipe-level `match`/`matchFolder`/`matchSlicer` fields. A recipe with no rules is never picked automatically | 4 · v1.2 |
+| D5 | ✅ **Auto-run on upload** — Done — `dwc/autoRun.ts`, an app-lifetime `fileUploaded` listener. Opt-in per browser, confirm-first, with a separate silent-mode opt-in. Only sees uploads made through this DWC tab; refuses scripted recipes and anything `checkSafety` blocks; serialised, self-uploads excluded by path | 4 · v1.2 |
+| D6 | ✅ **Batch processing** over a multi-file selection, with per-file progress, cancel and a skip list — Done — `model/io/batch.ts` (`runBatch`), `components/BatchDialog.vue`, multi-select in `GcodeBrowser.vue`. One recipe per batch; a blocked file is skipped with a reason, not failed; warns when an in-place batch would exceed the backup cap | 4 · v1.2 |
 | D7 | **Backup manager** — browse, restore and prune backups with a retention policy | 4 · v1 |
-| D8 | **Run history** — what ran, on what, when, with what result | 4 |
+| D8 | ✅ **Run history** — what ran, on what, when, with what result — Done — `model/io/history.ts` (`recordRun`, `0:/postproc/history.json`), `components/RunHistory.vue`. Applied runs only, never dry runs; `origin` records page / widget / auto / batch | 4 · v1.2 |
 
 ## E. Safety and validation
 
@@ -87,23 +90,23 @@ Grouped by area, tagged with the phase from [PLAN.md](PLAN.md) that would delive
 | E5 | **Post-write verification** — byte size checked against what was sent | 2 · v1 |
 | E6 | **Idempotency stamp** — a header line recording recipe and hash; re-running the same recipe warns first | 2 · v1 |
 | E7 | **Large-file guard** — warning and time estimate above a size threshold, cancel at any point | 2 · v1 |
-| E8 | **Preflight: bounding box vs machine limits** — compares the file's extents against `M208` from the live object model | 6 |
-| E9 | **Preflight: referenced tools, heaters and fans exist** on this machine | 6 |
-| E10 | **Preflight: temperatures within `M143` limits** | 6 |
-| E11 | **Preflight: commands RRF does not know** — dictionary-driven, flags Marlin/Klipper leftovers before they stall a print | 6 |
-| E12 | **Preflight: structural sanity** — missing homing, duplicated start G-code, missing `M400` before a critical move, no `T` selected before extrusion | 6 |
-| E13 | **Preflight as a gate** — optionally block Apply while errors are outstanding | 6 |
+| E8 | ✅ **Preflight: bounding box vs machine limits** — compares the file's extents against `M208` from the live object model — Done — `model/checks.ts` (`checkExtents`), `dwc/machineSnapshot.ts` | 6 · v1 |
+| E9 | ✅ **Preflight: referenced tools, heaters and fans exist** on this machine — Done — `model/checks.ts` (`checkTools`, `checkFans`) | 6 · v1 |
+| E10 | ✅ **Preflight: temperatures within `M143` limits** — Done — `model/checks.ts` (`checkTemperatures`) | 6 · v1 |
+| E11 | ✅ **Preflight: commands RRF does not know** — dictionary-driven, flags Marlin/Klipper leftovers before they stall a print — Done — `model/checks.ts` (`checkUnsupportedCommands`), `model/gcode/dialect.ts` | 6 · v1 |
+| E12 | ✅ **Preflight: structural sanity** — missing homing, duplicated start G-code, no `T` selected before extrusion — Done — `model/checks.ts` (`checkStructure`, `checkColdExtrusion`, `checkEndOfFileHygiene`) | 6 · v1 |
+| E13 | ✅ **Preflight as a gate** — optionally block Apply while errors are outstanding — Done — `dwc/pluginSettings.ts` (`preflightGate`, per-board, off by default), fed by `FileInspector`'s `@checked`, which emits the same merged list it renders (including the asynchronous macro check) plus the path it belongs to, so the gate can neither miss a check the panel shows nor judge a file the user has since navigated away from. An un-inspected file does not hard-block but the page reminds you | 6 · v1.2 |
 
 ## F. Integration and UX
 
 | # | Feature | Phase |
 | --- | --- | --- |
-| F1 | **Flexible-Layouts embeddable widget** — "post-process the selected job" plus recent runs, in a dashboard tile | 7 |
-| F2 | **Run report** — rules applied, lines added/changed/removed, time taken, warnings, downloadable log | 4 |
+| F1 | ✅ **Flexible-Layouts embeddable widget** — "post-process the selected job" plus recent runs, in a dashboard tile — Done — `index.ts` (`registerEmbeddableComponent`), `components/PostProcessorWidget.vue`; the recent-runs list reads the same history index as the History tab | 7 · v1 (recent runs · v1.2) |
+| F2 | ✅ **Run report** — recipe, per-step counts, lines added/changed/removed, timings, warnings (including skipped-by-condition), the diff — Done — `model/runReport.ts` (`buildRunReport`), downloadable from the preview and the applied-success alert | 4 · v1.2 |
 | F3 | **Self-update and About dialog** via `dwc-plugin-runtime`, wired into the shared cross-plugin update hub | 7 · v1 |
-| F4 | **Diagnostics report** — captured errors plus sanitised object model, replayable directly into a regression test | 7 |
+| F4 | ✅ **Diagnostics report** — captured errors plus sanitised object model, replayable directly into a regression test — Done — two `extraActions` on the About dialog build `dwc-plugin-runtime`'s `buildReport` with the recipe and selected path (never the diff); `recordError` on a failed run | 7 · v1.2 |
 | F5 | **i18n** and full dark-mode support | 7 · v1 |
-| F6 | **Touch and mobile layout** for the 4.3"/7" panel case | 7 |
+| F6 | ✅ **Touch and mobile layout** for the 4.3"/7" panel case — Done — `dwc/useBreakpoint.ts` (wraps Vuetify `useDisplay`) plus responsive CSS across `PostProcessorPage` (height-capped stacked browser, `show-arrows` tabs, icon-only toolbar buttons at `xs`), `FileInspector` (scrollable tables) and `DiffPreview` (narrower gutter) | 7 · v1.2 |
 | F7 | **`docs/usage.md`** — the full guide, linked from the About dialog | 7 · v1 |
 
 ---

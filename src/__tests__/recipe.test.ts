@@ -291,6 +291,25 @@ describe("import and export", () => {
 		const back = importRecipe('{"name":"x","steps":[{"type":"findReplace","config":{}}]}');
 		expect(back.steps[0].uid).not.toBe("");
 	});
+
+	it("preserves step conditions — export writes them out, so import must not drop them", () => {
+		const recipe = recipeWith([
+			{ type: "findReplace", config: { find: "a" }, condition: [{ key: "slicer", op: "eq", value: "Cura" }] },
+		]);
+		const back = importRecipe(exportRecipe(recipe));
+		expect(back.steps[0].condition).toEqual([{ key: "slicer", op: "eq", value: "Cura" }]);
+	});
+
+	it("preserves the automatic-selection match fields", () => {
+		const recipe: Recipe = {
+			...recipeWith([{ type: "findReplace", config: { find: "a" } }]),
+			match: "*.gcode", matchFolder: "0:/gcodes/petg", matchSlicer: "Cura",
+		};
+		const back = importRecipe(exportRecipe(recipe));
+		expect(back.match).toBe("*.gcode");
+		expect(back.matchFolder).toBe("0:/gcodes/petg");
+		expect(back.matchSlicer).toBe("Cura");
+	});
 });
 
 describe("matchesFilter", () => {

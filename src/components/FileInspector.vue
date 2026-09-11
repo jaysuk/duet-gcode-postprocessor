@@ -10,6 +10,14 @@
 	font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
 	font-size: 0.8125rem;
 }
+
+/* Wide tables (feature stats, objects, retractions, metadata) scroll inside their own box on a
+ * narrow panel rather than pushing the whole page sideways. */
+.scroll-x {
+	display: block;
+	overflow-x: auto;
+	max-width: 100%;
+}
 </style>
 
 <template>
@@ -138,7 +146,7 @@
 								<div v-if="mixedFanScale" class="text-caption text-warning mb-2">
 									This file mixes 0–255 and 0–1 fan speed values — shown exactly as written.
 								</div>
-								<v-table density="compact">
+								<v-table density="compact" class="scroll-x">
 									<thead>
 										<tr>
 											<th>Fan</th>
@@ -169,7 +177,7 @@
 								<div v-if="!hasFeatureSeconds" class="text-caption text-medium-emphasis mb-2">
 									Filament only — inspect with this machine connected for a time breakdown too.
 								</div>
-								<v-table density="compact">
+								<v-table density="compact" class="scroll-x">
 									<thead>
 										<tr>
 											<th>Feature</th>
@@ -193,7 +201,7 @@
 
 					<v-expansion-panel v-if="objectRows.length > 0" title="Time and filament by object">
 						<v-expansion-panel-text>
-							<v-table density="compact">
+							<v-table density="compact" class="scroll-x">
 								<thead>
 									<tr>
 										<th>Object</th>
@@ -217,7 +225,7 @@
 							<div class="text-caption text-medium-emphasis mb-2">
 								A proxy for oozing and for wear — not a defect report on its own.
 							</div>
-							<v-table density="compact">
+							<v-table density="compact" class="scroll-x">
 								<thead>
 									<tr>
 										<th>Tool</th>
@@ -271,7 +279,17 @@ import { summariseFile } from "../model/summary";
 
 const props = defineProps<{ path: string | null }>();
 
-const emit = defineEmits<{ analysed: [analysis: FileAnalysis] }>();
+/**
+ * Emitted whenever this component's own verdict on a file changes — the same merged, sorted list the
+ * panel renders, not the raw analysis, so a consumer (the preflight gate on the page) cannot end up
+ * judging a file by a different set of checks than the one shown here. In particular the macro check
+ * is asynchronous and lands after the analysis, so this fires again when it does.
+ *
+ * The `path` is carried explicitly and is the path the checks were actually computed for. A consumer
+ * must compare it against its own current selection before acting: an inspection of a large file
+ * takes tens of seconds, and the selection can change while it is in flight.
+ */
+const emit = defineEmits<{ checked: [checks: Array<CheckResult>, path: string] }>();
 
 const machineStore = useMachineStore();
 
@@ -323,6 +341,14 @@ const checks = computed<Array<CheckResult>>(() => {
 	if (analysis.value === null) return [];
 	const combined = [...runChecks(analysis.value, machineSnapshot(machineStore.model)), ...macroResults.value];
 	return combined.sort((a, b) => CHECK_ORDER[a.level] - CHECK_ORDER[b.level]);
+});
+
+// Report the verdict outward whenever it changes — on the initial analysis, and again once the
+// asynchronous macro check lands. Never fires for an un-analysed file: an empty list would read as
+// "checked, nothing wrong", which is the opposite of "not checked yet".
+watch(checks, (value) => {
+	if (analysis.value === null || props.path === null) return;
+	emit("checked", value, props.path);
 });
 
 const commandList = computed(() => (analysis.value === null ? [] : [...analysis.value.commandCounts.entries()]));
@@ -444,6 +470,11 @@ function cancel(): void {
 
 async function inspect(): Promise<void> {
 	if (props.path === null || busy.value) return;
+	// Captured up front: inspecting a large file takes tens of seconds, and the selection can change
+	// while it runs. Everything below is discarded if it does — otherwise the resolved result would
+	// re-populate the state the path watcher just cleared, showing (and reporting) one file's figures
+	// under another file's name.
+	const inspectedPath = props.path;
 	busy.value = true;
 	error.value = null;
 	progress.value = 0;
@@ -452,20 +483,21 @@ async function inspect(): Promise<void> {
 	try {
 		const result = await inspectFile({
 			gateway: createGateway(),
-			sourcePath: props.path,
+			sourcePath: inspectedPath,
 			signal,
 			onProgress: (update: ProgressUpdate) => { progress.value = update.fraction; },
 			limits: machineLimits(machineStore.model),
 		});
+		if (props.path !== inspectedPath) return;
 		analysis.value = result.analysis;
 		meta.value = result.meta;
 		stamps.value = result.stamps;
-		emit("analysed", result.analysis);
 		if (result.analysis.macroRefs.length > 0) {
 			// Runs after the rest of the inspection has already reported; a slow or failed macro
-			// lookup should never hold up everything else the user is waiting to see
+			// lookup should never hold up everything else the user is waiting to see. Its results
+			// merge into `checks`, which re-emits — see the watcher below.
 			checkMacros(createGateway(), result.analysis.macroRefs)
-				.then((results) => { macroResults.value = results; })
+				.then((results) => { if (props.path === inspectedPath) macroResults.value = results; })
 				.catch(() => { /* a failed check reports nothing rather than a false positive */ });
 		}
 	} catch (e) {

@@ -30,6 +30,10 @@ export const BACKUP_INDEX = `${WORK_DIR}/backups.json`;
 /** Oldest backups are pruned once there are more than this many. */
 export const MAX_BACKUPS = 20;
 
+export const HISTORY_INDEX = `${WORK_DIR}/history.json`;
+/** Oldest run-history entries are pruned once there are more than this many. */
+export const MAX_HISTORY = 100;
+
 /** localStorage keys (namespaced under the camelCase plugin id). */
 export const LS_SELECTED_FILE = "gCodePostProcessor.selectedFile";
 export const LS_DIRECTORY = "gCodePostProcessor.directory";
@@ -38,6 +42,17 @@ export const LS_TRUSTED_SCRIPTS = "gCodePostProcessor.trustedScripts";
 export const LS_UPDATE_ENABLED = "gCodePostProcessor.updateCheck.enabled";
 export const LS_UPDATE_LAST = "gCodePostProcessor.updateCheck.lastCheck";
 export const LS_UPDATE_DISMISSED = "gCodePostProcessor.updateCheck.dismissed";
+
+/** Auto-run on upload (D5). Per-browser: a property of "this tab is watching", not of the machine. */
+export const LS_AUTORUN_ENABLED = "gCodePostProcessor.autoRun.enabled";
+/** Skip the confirmation dialog. A separate opt-in — enabling auto-run must never silently enable
+ *  silent mode. */
+export const LS_AUTORUN_SILENT = "gCodePostProcessor.autoRun.silent";
+
+/** How many auto-run requests may be queued at once (see `dwc/autoRun.ts`). A multi-file upload
+ *  emits one `fileUploaded` per file; past this many queued files, further ones are dropped with a
+ *  single notification rather than growing without bound. */
+export const AUTORUN_QUEUE_LIMIT = 20;
 
 /** Files bigger than this get a "this will be slow" warning before processing. */
 export const LARGE_FILE_WARN_BYTES = 250 * 1024 * 1024;

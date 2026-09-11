@@ -69,6 +69,17 @@ the recipe once per filament, each with its own condition —
 
 — and only the one whose filament matches actually runs.
 
+### Picking a recipe automatically
+
+A recipe can carry up to three **match rules**, set on the recipe (not on a step): **Only files
+matching** (a `*`/`?` glob on the file name), **Only in folder** (that folder or anything below it),
+and **Only when sliced by**. They are ANDed. These are what auto-run and batch use to choose a
+recipe without you picking one by hand.
+
+A recipe with **no** match rules filled in is never chosen automatically — automatic selection is
+opt-in per recipe. If two recipes both match a file, neither is used automatically (the choice is
+ambiguous); pick one by hand for that file.
+
 ### Find and replace
 
 The workhorse, and deliberately compatible with PrusaSlicer's **G-code Substitutions**: the same
@@ -659,6 +670,19 @@ rest of the inspection rather than holding it up. The flow checks are also machi
 they never assume a filament diameter the slicer did not state, and never invent a flow ceiling the
 slicer did not state either.
 
+### The preflight gate
+
+By default the preflight list is advisory — you read it and decide. Turn on **Settings → Require a
+clean preflight before Apply** and Apply is blocked for any file with an error-level check
+outstanding, and the reason names the first one. This setting lives on the board, not the browser:
+it is a policy about this machine.
+
+A file you have not inspected yet does *not* hard-block — an un-run check is not a failed check —
+but the page reminds you the gate is on and the file has not been checked. Run **Inspect this file**
+on the Inspect tab to clear that. The gate reads the same checks the Inspect tab shows; fixing them
+(or turning the gate off) is how you get past it. It is off by default because the checks are
+heuristic and a false positive that blocks a good print is worse than a warning you can read.
+
 ### Simulating on this machine
 
 **Inspect this file** first, then **Simulate on this machine** sends `M37` and reads back
@@ -719,6 +743,61 @@ between. Never available for a preview — only a real Apply writes a file worth
 - **An identity stamp.** Every processed file gets a header line recording the recipe and a hash of
   its configuration. Running the same recipe on the same file again warns you first — this is what
   stops the classic "applied the 20% speed reduction three times" bug.
+
+---
+
+## Automating: matching, auto-run and batch
+
+### Auto-run on upload
+
+**Settings → Enable auto-run** watches for files being uploaded to the SD card and, when one matches
+a recipe's match rules, offers to post-process it automatically.
+
+**It only sees uploads made from this browser tab, while the tab is open.** A slicer uploading
+straight to the Duet, or an upload from another DWC session, does not pass through here and is not
+seen. This is a convenience for "I drop files into DWC and want them processed", not a background
+service.
+
+The rules that keep it safe:
+
+- **Off by default**, per browser. Enabling it does not enable silent mode — that is a separate
+  second switch. With silent mode off (the default) each run asks first, naming the file, the recipe
+  and where the output will go.
+- It writes **alongside** the original (`benchy.gcode` → `benchy.pp.gcode`), never over it.
+- A recipe that contains a **script** is refused — there is nobody present to review and trust it.
+- Anything the normal safety layer blocks (the printing file, and so on) is refused.
+- The plugin's own output never re-triggers it, and several uploads at once are processed one after
+  another, not all at once.
+- No matching recipe, or two matching recipes: nothing happens (the second case tells you why).
+
+### Batch processing
+
+Turn on multi-select in the file browser (the checkbox-stack button in its toolbar), tick some
+files, and a **Batch** button appears. One recipe and one output mode for the whole batch.
+
+- It does **not** stop on the first failure — every file gets an outcome (written / skipped /
+  failed) and the run carries on, so you always know exactly which files were done.
+- A file the safety layer blocks (the printing file, for instance) is **skipped with a reason**,
+  not counted as failed.
+- **Cancel** stops the whole batch at the next file boundary, not just the file in progress.
+- Writing a large selection **over the originals** takes one backup per file, and the plugin keeps
+  only the most recent 20 — the confirmation warns you when a batch would exceed that.
+
+## Run history and the run report
+
+### Run history
+
+The **History** tab lists every recipe that was *applied* (previews are not recorded) — what ran, on
+what file, when, the line counts, any warnings, and whether it came from the page, the widget,
+auto-run or a batch. It is stored on the board (`0:/postproc/history.json`), capped at the most
+recent 100 runs, and can be cleared from the tab.
+
+### The run report
+
+Both the preview and the applied-run confirmation offer **Download the run report** — a Markdown
+file with the recipe and its hash, per-step change counts, every warning (including which steps were
+skipped by a condition and why), the timings, and the diff. It is the thing to attach to a bug
+report or keep alongside a tuned profile.
 
 ---
 

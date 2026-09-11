@@ -59,10 +59,30 @@
 				<v-col cols="12" sm="6">
 					<v-text-field :model-value="recipe.match ?? ''" label="Only files matching"
 								  placeholder="*.gcode" density="compact" hide-details
-								  messages="Used when picking a recipe automatically. Blank means any file."
+								  messages="Blank means any file."
 								  @update:model-value="(v: string) => patch({ match: v })" />
 				</v-col>
 			</v-row>
+
+			<v-row dense class="mt-1">
+				<v-col cols="12" sm="6">
+					<v-text-field :model-value="recipe.matchFolder ?? ''" label="Only in folder"
+								  placeholder="0:/gcodes/petg" density="compact" hide-details
+								  messages="That folder or anything below it. Blank means any folder."
+								  @update:model-value="(v: string) => patch({ matchFolder: v })" />
+				</v-col>
+				<v-col cols="12" sm="6">
+					<v-select :model-value="recipe.matchSlicer ?? ''" :items="slicerOptions" label="Only when sliced by"
+							  density="compact" hide-details messages="Blank means any slicer."
+							  @update:model-value="(v: string) => patch({ matchSlicer: v })" />
+				</v-col>
+			</v-row>
+
+			<div v-if="recipe.match || recipe.matchFolder || recipe.matchSlicer"
+				 class="text-caption text-medium-emphasis mt-1">
+				These rules are used by automatic recipe selection (auto-run, batch). A recipe with none of
+				them filled in is never picked automatically.
+			</div>
 
 			<v-alert v-if="problems.length > 0" type="warning" variant="tonal" density="compact" class="mt-3">
 				<div v-for="(problem, index) in problems" :key="index">
@@ -205,6 +225,15 @@ import {
 } from "../model/recipe";
 import { defaultConfig, getStepDefinition, STEP_DEFINITIONS } from "../model/steps/registry";
 import type { StepCondition } from "../model/stepCondition";
+import type { SlicerName } from "../model/gcode/metadata";
+
+// SlicerMetadata.slicer's own union, minus "unknown" — matching against "unknown" would mean "only
+// files this plugin failed to identify", never a useful selection rule
+const SLICER_NAMES: Array<SlicerName> = [
+	"PrusaSlicer", "SuperSlicer", "OrcaSlicer", "BambuStudio", "Slic3r",
+	"Cura", "Simplify3D", "ideaMaker", "KISSlicer",
+];
+const slicerOptions = [{ title: "Any slicer", value: "" }, ...SLICER_NAMES.map((s) => ({ title: s, value: s }))];
 
 const conditionTipText = "Checked once against the file's own slicer metadata before the recipe "
 	+ "runs — a step whose condition fails is skipped entirely, not run against an empty result. "

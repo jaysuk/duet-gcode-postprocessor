@@ -74,10 +74,21 @@
 				</v-btn>
 				<v-toolbar-title class="text-body-2 text-truncate">{{ directory }}</v-toolbar-title>
 				<v-spacer />
+				<v-btn variant="text" icon size="small" :color="selectionMode ? 'primary' : undefined"
+					   title="Select multiple files for batch processing" @click="toggleSelectionMode">
+					<v-icon>mdi-checkbox-multiple-marked-outline</v-icon>
+				</v-btn>
 				<v-btn variant="text" icon size="small" :loading="loading" title="Refresh" @click="refresh">
 					<v-icon>mdi-refresh</v-icon>
 				</v-btn>
 			</v-toolbar>
+
+			<div v-if="selectionMode" class="d-flex align-center ga-2 px-2 py-1">
+				<v-checkbox :model-value="allFilesSelected" density="compact" hide-details
+							label="Select all G-code files in this folder" @update:model-value="toggleSelectAll" />
+				<v-spacer />
+				<span class="text-caption text-medium-emphasis">{{ selection.length }} selected</span>
+			</div>
 
 			<v-text-field v-model="filter" density="compact" hide-details variant="outlined"
 						  class="filter-field mx-2 my-1" placeholder="Filter by name" prepend-inner-icon="mdi-magnify"
@@ -95,6 +106,9 @@
 							 :subtitle="item.isDirectory ? undefined : describe(item)"
 							 @click="onClick(item)">
 					<template #prepend>
+						<v-checkbox v-if="selectionMode && !item.isDirectory" :model-value="isSelected(item)"
+									density="compact" hide-details class="me-1"
+									@click.stop @update:model-value="() => toggleSelected(item)" />
 						<v-icon v-if="item.isDirectory">mdi-folder</v-icon>
 						<v-icon v-else-if="fullPath(item.name) === modelValue" color="primary">mdi-check-circle</v-icon>
 						<v-icon v-else>mdi-file-document-outline</v-icon>
@@ -112,7 +126,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useMachineStore } from "@/stores/machine";
 
 import { LS_DIRECTORY } from "../model/constants";
-import { formatBytes } from "../model/io/plan";
+import { formatBytes, isGcodePath } from "../model/io/plan";
 
 interface BrowserItem {
 	name: string;
@@ -122,6 +136,8 @@ interface BrowserItem {
 }
 
 const modelValue = defineModel<string | null>({ default: null });
+
+const emit = defineEmits<{ "update:selection": [paths: Array<string>] }>();
 
 const machineStore = useMachineStore();
 
@@ -142,7 +158,7 @@ const selectedName = computed(() => {
 const filtered = computed(() => {
 	const needle = (filter.value ?? "").toLowerCase();
 	return items.value
-		.filter((item) => item.isDirectory || isGcode(item.name))
+		.filter((item) => item.isDirectory || isGcodePath(item.name))
 		.filter((item) => needle === "" || item.name.toLowerCase().includes(needle))
 		.sort((a, b) => {
 			if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
@@ -150,12 +166,45 @@ const filtered = computed(() => {
 		});
 });
 
-function isGcode(name: string): boolean {
-	return /\.(g|gco|gcode|nc|ngc)$/i.test(name);
-}
-
 function fullPath(name: string): string {
 	return `${directory.value.replace(/\/+$/, "")}/${name}`;
+}
+
+// Multi-select is opt-in and additive alongside the single-file `modelValue` (used by everything
+// else on the page — preview/apply/inspect all key off one file), not a replacement for it. Only
+// files, never directories: batch processing (D6) operates over a flat file list, not a tree.
+const selectionMode = ref(false);
+const selection = ref<Array<string>>([]);
+
+function isSelected(item: BrowserItem): boolean {
+	return selection.value.includes(fullPath(item.name));
+}
+
+function toggleSelected(item: BrowserItem): void {
+	const path = fullPath(item.name);
+	selection.value = isSelected(item) ? selection.value.filter((p) => p !== path) : [...selection.value, path];
+	emit("update:selection", selection.value);
+}
+
+const allFilesSelected = computed(() => {
+	const files = filtered.value.filter((item) => !item.isDirectory);
+	return files.length > 0 && files.every((item) => isSelected(item));
+});
+
+function toggleSelectAll(value: boolean | null): void {
+	const files = filtered.value.filter((item) => !item.isDirectory).map((item) => fullPath(item.name));
+	selection.value = value === true
+		? [...new Set([...selection.value, ...files])]
+		: selection.value.filter((p) => !files.includes(p));
+	emit("update:selection", selection.value);
+}
+
+function toggleSelectionMode(): void {
+	selectionMode.value = !selectionMode.value;
+	if (!selectionMode.value) {
+		selection.value = [];
+		emit("update:selection", []);
+	}
 }
 
 function describe(item: BrowserItem): string {

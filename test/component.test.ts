@@ -1,8 +1,10 @@
+import { defineComponent, h, nextTick } from "vue";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dwc, mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
 
 import BackupManager from "../src/components/BackupManager.vue";
+import BatchDialog from "../src/components/BatchDialog.vue";
 import CompareFiles from "../src/components/CompareFiles.vue";
 import DiffPreview from "../src/components/DiffPreview.vue";
 import FileInspector from "../src/components/FileInspector.vue";
@@ -10,6 +12,7 @@ import GcodeBrowser from "../src/components/GcodeBrowser.vue";
 import PostProcessorPage from "../src/components/PostProcessorPage.vue";
 import PostProcessorWidget from "../src/components/PostProcessorWidget.vue";
 import RecipeEditor from "../src/components/RecipeEditor.vue";
+import RunHistory from "../src/components/RunHistory.vue";
 import StepFields from "../src/components/StepFields.vue";
 import { LARGE_FILE_WARN_BYTES } from "../src/model/constants";
 import { createRecipe, newUid } from "../src/model/recipe";
@@ -30,6 +33,16 @@ vi.mock("../src/dwc/gateway", () => ({
 		remove: vi.fn(),
 		makeDirectory: vi.fn(),
 	}),
+}));
+
+const buildReportMock = vi.fn((opts: unknown) => opts);
+const downloadReportMock = vi.fn();
+const copyReportMock = vi.fn().mockResolvedValue(true);
+vi.mock("dwc-plugin-runtime/diagnostics", () => ({
+	buildReport: (opts: unknown) => buildReportMock(opts),
+	downloadReport: (report: unknown) => downloadReportMock(report),
+	copyReport: (report: unknown) => copyReportMock(report),
+	recordError: vi.fn(),
 }));
 
 describe("components mount", () => {
@@ -81,6 +94,34 @@ describe("components mount", () => {
 		expect(wrapper.text()).toContain("Not connected");
 	});
 
+	it("mounts the run history and shows the empty state when there is no index yet", async () => {
+		setConnected(true);
+		const wrapper = mountInDwc(RunHistory);
+		await flushPromises();
+		expect(wrapper.text()).toContain("No runs recorded yet");
+	});
+
+	it("run history shows a not-connected message rather than the empty state when disconnected", () => {
+		setConnected(false);
+		const wrapper = mountInDwc(RunHistory);
+		expect(wrapper.text()).toContain("Not connected");
+	});
+
+	it("mounts the batch dialog and lists the given paths", () => {
+		// v-dialog teleports its content to document.body (Vuetify's own <VOverlay>), which is
+		// outside the tree wrapper.text() searches — read the body directly, the same way a real
+		// open dialog is only found there
+		const recipe = { ...createRecipe("Test"), steps: [{ uid: newUid(), type: "findReplace", enabled: true, config: defaultConfig("findReplace") }] };
+		const wrapper = mountInDwc(BatchDialog, {
+			props: { modelValue: true, paths: ["0:/gcodes/a.gcode", "0:/gcodes/b.gcode"], recipe, scriptsTrusted: false },
+			attachTo: document.body,
+		});
+		expect(document.body.textContent).toContain("0:/gcodes/a.gcode");
+		expect(document.body.textContent).toContain("0:/gcodes/b.gcode");
+		expect(document.body.textContent).toContain("Batch process 2 files");
+		wrapper.unmount();
+	});
+
 	it("mounts the inspector with nothing selected", () => {
 		const wrapper = mountInDwc(FileInspector, { props: { path: null } });
 		expect(wrapper.text()).toContain("Select a G-code file");
@@ -88,7 +129,7 @@ describe("components mount", () => {
 
 	it("mounts the diff preview with no run yet", () => {
 		const wrapper = mountInDwc(DiffPreview, {
-			props: { stats: null, diff: [], recipe: null, sourceName: "" },
+			props: { result: null, recipe: null, sourceName: "" },
 		});
 		expect(wrapper.text()).toContain("Run a preview");
 	});
@@ -217,6 +258,227 @@ describe("PostProcessorPage safety warnings", () => {
 		// Switching to the small file must clear the warning, not just add a second one
 		await selectFile(wrapper, "0:/gcodes/small.gcode");
 		expect(wrapper.text()).not.toMatch(/leave the tab open/i);
+	});
+});
+
+describe("PostProcessorPage diagnostics report (F4)", () => {
+	beforeEach(() => {
+		resetDwc();
+		sizeOfMock.mockReset();
+		sizeOfMock.mockResolvedValue(null);
+		buildReportMock.mockClear();
+		downloadReportMock.mockClear();
+		copyReportMock.mockClear();
+
+		const settings = dwc.settings as Record<string, unknown> & { plugins: Record<string, unknown> };
+		settings.plugins = {};
+		(settings as Record<string, unknown>).registerPluginData = (plugin: string, key: string, value: unknown) => {
+			const bag = (settings.plugins[plugin] ?? {}) as Record<string, unknown>;
+			if (!(key in bag)) settings.plugins[plugin] = { ...bag, [key]: value };
+		};
+		(settings as Record<string, unknown>).setPluginData = (plugin: string, key: string, value: unknown) => {
+			settings.plugins[plugin] = { ...(settings.plugins[plugin] as Record<string, unknown> ?? {}), [key]: value };
+		};
+	});
+
+	it("offers Download and Copy diagnostics from the About dialog, and the report state carries the recipe and path but not the diff", async () => {
+		setConnected(true);
+		const wrapper = mountInDwc(PostProcessorPage, { attachTo: document.body });
+		await wrapper.findComponent(RecipeEditor).vm.$emit("add");
+		await flushPromises();
+		await wrapper.findComponent(GcodeBrowser).vm.$emit("update:modelValue", "0:/gcodes/part.gcode");
+		await flushPromises();
+
+		await wrapper.find('[title="About"]').trigger("click");
+		await flushPromises();
+
+		const buttons = Array.from(document.body.querySelectorAll("button")) as Array<HTMLButtonElement>;
+		const download = buttons.find((b) => (b.textContent ?? "").includes("Download diagnostics"));
+		const copy = buttons.find((b) => (b.textContent ?? "").includes("Copy diagnostics"));
+		expect(download).toBeDefined();
+		expect(copy).toBeDefined();
+
+		download!.click();
+		await flushPromises();
+
+		expect(downloadReportMock).toHaveBeenCalledTimes(1);
+		const opts = buildReportMock.mock.calls.at(-1)![0] as { state: Record<string, unknown> };
+		expect(opts.state).toHaveProperty("recipe");
+		expect(opts.state.recipe).not.toBeNull();
+		expect(opts.state.selectedPath).toBe("0:/gcodes/part.gcode");
+		expect(Object.keys(opts.state)).not.toContain("diff");
+		expect(JSON.stringify(opts.state)).not.toContain("scriptsTrusted\":true");
+
+		wrapper.unmount();
+	});
+});
+
+describe("responsive layout (F6)", () => {
+	beforeEach(() => {
+		resetDwc();
+		sizeOfMock.mockReset();
+		sizeOfMock.mockResolvedValue(null);
+		setDisplayWidth(1200);
+	});
+
+	function setDisplayWidth(width: number): void {
+		(window as unknown as { innerWidth: number }).innerWidth = width;
+		window.dispatchEvent(new Event("resize"));
+	}
+
+	it("useBreakpoint reacts to a window resize (the stop point outcome)", async () => {
+		const { useBreakpoint } = await import("../src/dwc/useBreakpoint");
+		let bp!: ReturnType<typeof useBreakpoint>;
+		const probe = defineComponent({
+			setup() { bp = useBreakpoint(); return () => h("div"); },
+		});
+		mountInDwc(probe);
+		setDisplayWidth(1400);
+		await nextTick();
+		expect(bp.xs.value).toBe(false);
+		expect(bp.mobile.value).toBe(false);
+
+		setDisplayWidth(400);
+		await nextTick();
+		expect(bp.xs.value).toBe(true);
+		expect(bp.mobile.value).toBe(true);
+		expect(bp.controlDensity.value).toBe("compact"); // largeButtons undefined in the test settings bag
+	});
+
+	// Asserts the actual swap, not just that a title exists — the titles are unconditional, so a test
+	// that only checked for them would pass at any width and catch nothing
+	it("collapses the toolbar actions to icons at xs, and keeps their titles so nothing vanishes", async () => {
+		setDisplayWidth(1400);
+		await nextTick();
+		const wide = mountInDwc(PostProcessorPage);
+		await nextTick();
+		const wideApply = wide.findAll("button").find((b) => b.attributes("title") === "Apply");
+		expect(wideApply).toBeDefined();
+		expect(wideApply!.text()).toContain("Apply");
+
+		setDisplayWidth(400);
+		await nextTick();
+		const narrow = mountInDwc(PostProcessorPage);
+		await nextTick();
+		const narrowApply = narrow.findAll("button").find((b) => b.attributes("title") === "Apply");
+		expect(narrowApply).toBeDefined();
+		// Icon-only: the label is gone from the DOM, but the control (and its title) is still there
+		expect(narrowApply!.text()).not.toContain("Apply");
+		expect(narrowApply!.classes().join(" ")).toContain("v-btn--icon");
+	});
+
+});
+
+describe("PostProcessorPage preflight gate (E13)", () => {
+	beforeEach(() => {
+		resetDwc();
+		sizeOfMock.mockReset();
+		sizeOfMock.mockResolvedValue(null);
+		setConnected(true);
+
+		const settings = dwc.settings as Record<string, unknown> & { plugins: Record<string, unknown> };
+		settings.plugins = {};
+		(settings as Record<string, unknown>).registerPluginData = (plugin: string, key: string, value: unknown) => {
+			const bag = (settings.plugins[plugin] ?? {}) as Record<string, unknown>;
+			if (!(key in bag)) settings.plugins[plugin] = { ...bag, [key]: value };
+		};
+		(settings as Record<string, unknown>).setPluginData = (plugin: string, key: string, value: unknown) => {
+			settings.plugins[plugin] = { ...(settings.plugins[plugin] as Record<string, unknown> ?? {}), [key]: value };
+		};
+	});
+
+	async function setup(gateOn: boolean) {
+		const { usePluginSettings } = await import("../src/dwc/pluginSettings");
+		const wrapper = mountInDwc(PostProcessorPage);
+		if (gateOn) {
+			// Flip the per-board setting through the same store the page reads
+			usePluginSettings().setPreflightGate(true);
+			await nextTick();
+		}
+		await wrapper.findComponent(RecipeEditor).vm.$emit("add");
+		await flushPromises();
+		await wrapper.findComponent(GcodeBrowser).vm.$emit("update:modelValue", "0:/gcodes/part.gcode");
+		await flushPromises();
+		// Open the Inspect tab so FileInspector mounts, then hand it an analysis with an error
+		const tabs = wrapper.findAll(".v-tab");
+		const inspectTab = tabs.find((t) => t.text().includes("Inspect"));
+		await inspectTab!.trigger("click");
+		await flushPromises();
+		return { wrapper };
+	}
+
+	/** The shape FileInspector now emits: the merged check list plus the path it belongs to. */
+	const ERROR_CHECK = { level: "error" as const, code: "unsupported:M900", title: "M900 is not supported by RepRapFirmware", detail: "Seen 1 time." };
+	const MACRO_ERROR = { level: "error" as const, code: "macro:missing", title: "start.g is not on the SD card", detail: "M98 calls it." };
+
+	function applyButton(wrapper: ReturnType<typeof mountInDwc>) {
+		return wrapper.findAll("button").find((b) => (b.attributes("title") ?? "") === "Apply"
+			|| b.text().trim() === "Apply");
+	}
+
+	it("blocks Apply and names the check when the gate is on and preflight has an error", async () => {
+		const { wrapper } = await setup(true);
+		wrapper.findComponent(FileInspector).vm.$emit("checked", [ERROR_CHECK], "0:/gcodes/part.gcode");
+		await flushPromises();
+		expect(applyButton(wrapper)!.attributes("disabled")).toBeDefined();
+		expect(wrapper.text()).toMatch(/Preflight found/i);
+	});
+
+	// The macro check is asynchronous and lands after the analysis, so it used to be invisible to the
+	// gate even though the Inspect tab (and docs/usage.md) call it an Error
+	it("blocks on an error the asynchronous macro check contributes, not just the synchronous ones", async () => {
+		const { wrapper } = await setup(true);
+		const inspector = wrapper.findComponent(FileInspector);
+		inspector.vm.$emit("checked", [], "0:/gcodes/part.gcode");
+		await flushPromises();
+		// Inspected and clean: neither blocked nor nagged
+		expect(wrapper.text()).not.toMatch(/Preflight found/i);
+		expect(wrapper.text()).not.toMatch(/has not been inspected yet/i);
+
+		inspector.vm.$emit("checked", [MACRO_ERROR], "0:/gcodes/part.gcode");
+		await flushPromises();
+		expect(wrapper.text()).toMatch(/Preflight found/i);
+		expect(applyButton(wrapper)!.attributes("disabled")).toBeDefined();
+	});
+
+	// An inspection of a large file takes tens of seconds; if the selection moves on while it runs,
+	// its verdict must not be recorded against the file the user is now looking at
+	it("ignores a verdict that arrives for a file that is no longer selected", async () => {
+		const { wrapper } = await setup(true);
+		wrapper.findComponent(FileInspector).vm.$emit("checked", [ERROR_CHECK], "0:/gcodes/some-other-file.gcode");
+		await flushPromises();
+		expect(wrapper.text()).not.toMatch(/Preflight found/i);
+		expect(wrapper.text()).toMatch(/has not been inspected yet/i);
+	});
+
+	it("does not block Apply when the same analysis comes in but the gate is off", async () => {
+		const { wrapper } = await setup(false);
+		wrapper.findComponent(FileInspector).vm.$emit("checked", [ERROR_CHECK], "0:/gcodes/part.gcode");
+		await flushPromises();
+		// Apply is governed only by the normal safety layer now — not by preflight
+		expect(wrapper.text()).not.toMatch(/Preflight found/i);
+	});
+
+	it("does not block Apply when the gate is on but the file has not been inspected, and says so", async () => {
+		const { wrapper } = await setup(true);
+		// No `checked` emitted — file never inspected
+		await flushPromises();
+		expect(wrapper.text()).toMatch(/has not been inspected yet/i);
+		// The gate does not hard-block an un-inspected file
+		expect(wrapper.text()).not.toMatch(/Preflight found/i);
+	});
+
+	it("clears the previous file's preflight result when the selection changes", async () => {
+		const { wrapper } = await setup(true);
+		wrapper.findComponent(FileInspector).vm.$emit("checked", [ERROR_CHECK], "0:/gcodes/part.gcode");
+		await flushPromises();
+		expect(wrapper.text()).toMatch(/Preflight found/i);
+
+		await wrapper.findComponent(GcodeBrowser).vm.$emit("update:modelValue", "0:/gcodes/other.gcode");
+		await flushPromises();
+		// The stale error must not carry over — the new file is simply "not inspected yet"
+		expect(wrapper.text()).not.toMatch(/Preflight found/i);
+		expect(wrapper.text()).toMatch(/has not been inspected yet/i);
 	});
 });
 

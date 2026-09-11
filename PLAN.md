@@ -66,17 +66,24 @@ built on `M32`, and the usage guide.
 4. **i18n is scaffolded, not applied.** The nav caption and widget strings go through
    `registerPluginMessages`; the rest of the UI is literal English.
 
-**Not built yet:** auto-run on upload (D5), batch processing (D6), automatic recipe selection by
-filename (D4 — the field exists and is stored, nothing consumes it), and run history (D8). D7
-(backup browser) is now done — see `model/io/backups.ts` and `components/BackupManager.vue`.
+**The automation phase (D4/D5/D6/D8, plus F2/F4/F6/E13) is now built** — see
+[task 16](docs/tasks/16-automation-and-reporting.md): automatic recipe selection
+(`model/recipeMatch.ts`), auto-run on upload (`dwc/autoRun.ts`), batch processing with multi-select
+(`model/io/batch.ts`, `components/BatchDialog.vue`), run history (`model/io/history.ts`,
+`components/RunHistory.vue`), the run report (`model/runReport.ts`), the diagnostics report (About
+dialog `extraActions`), a touch/mobile layout pass (`dwc/useBreakpoint.ts`), and the preflight gate
+(`dwc/pluginSettings.ts`).
 
-**Next:** tasks 01–13 are all done — the whole of phases 8–15. [12](docs/tasks/12-geometry-analysis.md)
+**Not built:** real Python (Pyodide, §3.4), block-mode rules (deviation 2 above), and the "Later"
+items in FEATURES.md. i18n is still scaffolded, not applied (deviation 4).
+
+**History:** tasks 01–13 are all done — the whole of phases 8–15. [12](docs/tasks/12-geometry-analysis.md)
 §4 (hole detection) resolved its own stop point by checking against a real dense slice (a real,
 250-layer, densely-toolpathed print, not this repo's own thin bundled fixtures) rather than shipping:
 16–1,139 candidates depending on grid resolution, on a single object with no intentional cavities at
 all — nowhere near something a user could act on. Per the task's own acceptance criteria, stopping
 here on that evidence is the successful outcome, not a shortfall. Nothing beyond the pure, tested
-detector module was built. There is no more open work on the plan.
+detector module was built. Task 16 then closed out the automation phase (above).
 
 ---
 

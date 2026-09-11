@@ -46,6 +46,12 @@ export function baseName(path: string): string {
 	return index === -1 ? path : path.slice(index + 1);
 }
 
+/** True for a filename this plugin treats as G-code — the same extension list `GcodeBrowser` uses
+ *  to filter its listing, lifted here so auto-run (`dwc/autoRun.ts`) shares the one definition. */
+export function isGcodePath(path: string): boolean {
+	return /\.(g|gco|gcode|nc|ngc)$/i.test(baseName(path));
+}
+
 export function splitExtension(name: string): { stem: string; ext: string } {
 	const index = name.lastIndexOf(".");
 	return index <= 0 ? { stem: name, ext: "" } : { stem: name.slice(0, index), ext: name.slice(index) };

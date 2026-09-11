@@ -23,14 +23,45 @@ four non-negotiables there are binding, not background.
 | [13](13-simulation-and-tail.md) | `M37` simulation round-trip and the long tail (§8 phase 15) | **Done in full**, including "compare two files" — `model/compareFiles.ts` + `components/CompareFiles.vue` | 10 |
 | [14](14-scripting-engine-defects.md) | Defect pass on the scripting engines — the QuickJS sandbox's chunking bypassed downstream steps and wrecked the dry-run diff, and it re-serialised the whole metadata block per line (239× slower on a real file) | **Done** — every reproduction in the work order now fails before the fix and passes after it; sandboxed engine moved to one VM call per line, metadata hoisted once per run via `setMeta` | — (the work it audits is uncommitted, not shipped) |
 | [15](15-feature-backlog.md) | The remaining feature-ideas backlog — `{meta.*}` placeholders, retraction totals, four presets (H3/H4/H12/H13), tool renumbering, Z-hop + ooze control, per-object timelapse | **Done** — both stop points resolved against the wiki and RRF source and cited in the modules that depend on them; found and fixed a real G92-reset bug in `analysis.ts` and a pre-existing gap in `golden.test.ts` (it never ran the analysis pass, so no analysis-dependent step had ever been golden-tested) along the way | 14 |
+| [16](16-automation-and-reporting.md) | The automation phase — recipe matching (D4), run history (D8), the run report (F2), auto-run on upload (D5), batch processing with multi-select (D6/A2), diagnostics (F4), touch layout (F6), and the preflight gate (E13, which was reported as done and is not) | **Done, then audited and corrected** — stop point resolved: Vuetify's `useDisplay` breakpoint *can* be driven under the harness (set `window.innerWidth`, dispatch `resize`, `await nextTick()`), so F6 is tested directly rather than pushed into CSS. Fixed a real pre-existing bug found along the way: `importRecipe` silently dropped step `condition`s that `exportRecipe` had written out. **The audit pass then found seven defects in the first cut — see the note below** | 15 |
 
-**Tasks 11–13 and 15 carry stop points**, because each contains a question that cannot be answered by
+**Tasks 11–13, 15 and 16 carry stop points**, because each contains a question that cannot be answered by
 reading this codebase: whether the user's machine can safely re-home Z over a part (11), whether void
 detection's false-positive rate is low enough to show anyone (12), what `M37` simulation actually
-costs the user in machine time (13), and two firmware-behaviour questions in 15 (which commands' `P`
+costs the user in machine time (13), two firmware-behaviour questions in 15 (which commands' `P`
 parameter is a tool number rather than a fan index; whether `M291` on its own actually pauses a
-print). Resolving a stop point by picking the convenient answer is worse than not doing the task —
+print), and whether Vuetify's `useDisplay` breakpoint can be driven under the test harness at all
+(16 §G). Resolving a stop point by picking the convenient answer is worse than not doing the task —
 **stop and report**, as the section at the bottom of this file says.
+
+## What task 16's audit pass caught, as bug classes
+
+All three gates were green and 1,065 tests passed on the first cut of task 16. The audit still found
+seven defects, and the shape of them is worth keeping:
+
+1. **A promise chain used as a queue is a single point of failure.** `autoRun`'s serialiser did
+   `queue = queue.then(...)`; one unexpected throw left `queue` rejected and every later upload's
+   `.then` was skipped — auto-run went permanently and silently dead. Anything chained this way needs
+   a handler that cannot reject (`runGuarded`).
+2. **An `await` invalidates what you captured before it.** `FileInspector.inspect()` read `props.path`,
+   awaited a full analysis, then wrote the result back without re-checking — so switching files
+   mid-inspection showed, and reported, one file's figures under another's name. Re-check after every
+   await, and make the payload carry the identity it belongs to.
+3. **A gate must consume exactly what the UI shows.** The preflight gate re-derived its own check list
+   and so missed the asynchronous macro check that the Inspect tab (and `docs/usage.md`) call an Error.
+   Emit the rendered verdict outward; do not recompute a parallel one.
+4. **Work whose result is discarded is still work.** Both the batch and auto-run downloaded and
+   prescanned every file to compute an `existingStamp` that `checkSafety` returns at warn level and
+   neither caller reads — a second full transfer of every file, for nothing. Trace what a value
+   actually reaches before paying to produce it.
+5. **A second copy of a formatter drifts.** `runReport` grew its own `formatBytes` that stopped at
+   KiB, so a report said `+40960.0 KiB` where the screen said `+39.1 MiB` for the same run.
+6. **A control moved to a new branch can leave its most useful case unreachable** — the run report
+   button sat inside `v-else` of "did anything change", hiding it from exactly the no-op run it best
+   explains.
+7. **A test named for a condition it never establishes proves nothing.** "…at xs" passed identically
+   at 1400px wide, because the attribute it asserted was unconditional. Every test added for a
+   behaviour here now has its teeth checked by breaking the behaviour and watching it fail.
 
 ## What a work order here must contain
 

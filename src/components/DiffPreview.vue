@@ -19,6 +19,16 @@
 	user-select: none;
 }
 
+@media (max-width: 600px) {
+	.diff-row {
+		gap: 0.375rem;
+	}
+
+	.diff-line-no {
+		min-width: 2.25rem;
+	}
+}
+
 .removed {
 	background: rgba(var(--v-theme-error), 0.12);
 }
@@ -58,23 +68,30 @@
 				</div>
 			</v-alert>
 
-			<v-alert v-if="diff.length === 0" type="warning" variant="tonal" density="compact">
-				This recipe changes nothing in this file. Check the patterns and the layer ranges.
-			</v-alert>
-
-			<template v-else>
-				<div class="d-flex align-center mb-2">
-					<span class="text-caption text-medium-emphasis">
+			<!-- The report download sits outside the "did anything change" branch on purpose: a run
+				 that changed nothing is exactly when the report is most useful, because it carries the
+				 per-step zero counts and the skipped-by-condition reasons that explain why. -->
+			<div class="d-flex align-center mb-2">
+				<span class="text-caption text-medium-emphasis">
+					<template v-if="diff.length === 0">No changes</template>
+					<template v-else>
 						Showing {{ diff.length.toLocaleString() }}
 						{{ diff.length === 1 ? "change" : "changes" }}<template v-if="stats.diffTruncated">
 							(capped — the run made more)</template>
-					</span>
-					<v-spacer />
-					<v-btn size="small" variant="text" prepend-icon="mdi-download" @click="downloadDiff">
-						Download the full list
-					</v-btn>
-				</div>
+					</template>
+				</span>
+				<v-spacer />
+				<v-btn size="small" variant="text" prepend-icon="mdi-download" @click="downloadReport">
+					Download the run report
+				</v-btn>
+			</div>
 
+			<v-alert v-if="diff.length === 0" type="warning" variant="tonal" density="compact">
+				This recipe changes nothing in this file. Check the patterns and the layer ranges — the
+				run report lists what each step matched and any step a condition skipped.
+			</v-alert>
+
+			<template v-else>
 				<v-card variant="tonal" class="pa-2 diff">
 					<template v-for="(entry, index) in visible" :key="entry.lineNo">
 						<div v-if="index > 0 && entry.lineNo > visible[index - 1].lineNo + 1" class="hunk-gap">
@@ -105,26 +122,29 @@ import { computed, ref, watch } from "vue";
 import { downloadBlob } from "dwc-plugin-runtime/download";
 
 import { formatBytes } from "../model/io/plan";
-import type { DiffEntry, RunStats } from "../model/pipeline";
-import { getStepDefinition } from "../model/steps/registry";
-import { effectiveSteps, type Recipe } from "../model/recipe";
+import type { ProcessResult } from "../model/io/transfer";
+import type { RunStats } from "../model/pipeline";
+import { buildRunReport, stepLabel } from "../model/runReport";
+import { type Recipe } from "../model/recipe";
 
 const props = defineProps<{
-	stats: RunStats | null;
-	diff: Array<DiffEntry>;
+	result: ProcessResult | null;
 	recipe: Recipe | null;
 	sourceName: string;
 }>();
 
+const stats = computed(() => props.result?.stats ?? null);
+const diff = computed(() => props.result?.diff ?? []);
+
 const PAGE = 200;
 const shown = ref(PAGE);
 
-watch(() => props.diff, () => { shown.value = PAGE; });
+watch(diff, () => { shown.value = PAGE; });
 
-const visible = computed(() => props.diff.slice(0, shown.value));
+const visible = computed(() => diff.value.slice(0, shown.value));
 
 const summary = computed(() => {
-	const s = props.stats;
+	const s = stats.value;
 	if (s === null) return [];
 	return [
 		{ label: "Lines changed", value: s.linesChanged.toLocaleString() },
@@ -141,31 +161,14 @@ function describeSizeChange(s: RunStats): string {
 }
 
 const perStep = computed(() => {
-	if (props.stats === null || props.recipe === null) return [];
-	const steps = effectiveSteps(props.recipe);
-	return props.stats.perStep.map((count, index) => {
-		const step = steps[index];
-		const label = step === undefined
-			? `Step ${index + 1}`
-			: (step.note !== undefined && step.note !== ""
-				? `${getStepDefinition(step.type)?.label ?? step.type} (${step.note})`
-				: getStepDefinition(step.type)?.label ?? step.type);
-		return { label, count };
-	});
+	if (stats.value === null || props.recipe === null) return [];
+	const recipe = props.recipe;
+	return stats.value.perStep.map((count, index) => ({ label: stepLabel(recipe, index), count }));
 });
 
-function downloadDiff(): void {
-	const lines: Array<string> = [
-		`# Changes ${props.recipe?.name ?? ""} would make to ${props.sourceName}`,
-		"",
-	];
-	for (const entry of props.diff) {
-		if (entry.before !== null) lines.push(`${entry.lineNo}\t- ${entry.before}`);
-		for (const line of entry.after ?? []) lines.push(`${entry.lineNo}\t+ ${line}`);
-	}
-	if (props.stats?.diffTruncated === true) {
-		lines.push("", "# The list was capped; the run made more changes than are shown here.");
-	}
-	downloadBlob("gcode-postprocessor-changes.txt", lines.join("\n"), "text/plain");
+function downloadReport(): void {
+	if (props.result === null || props.recipe === null) return;
+	const report = buildRunReport({ result: props.result, recipe: props.recipe, sourcePath: props.sourceName });
+	downloadBlob("gcode-postprocessor-run-report.md", report, "text/markdown");
 }
 </script>

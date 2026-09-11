@@ -9,4 +9,5 @@ coverage/
 
 # Built by scripts/build-quickjs-asset.mjs before verify-build/release — same convention as
 # duet-tool-align's opencv.bin, a large fetched/built asset that should never be committed.
-dwc/
+# Anchored to the repo root so it does not also swallow src/dwc/ (the plugin's DWC-facing modules).
+/dwc/
