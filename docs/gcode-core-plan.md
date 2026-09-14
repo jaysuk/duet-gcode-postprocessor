@@ -1,26 +1,25 @@
 # `dwc-gcode-core` — package outline, migration plan, and what to feed back upstream
 
-**Status: 2026-09-14. Phases 0, 1, 2 and 3 are all done**, including the `dwc-config-backup-core` leg
-(fixed on explicit request after being flagged rather than acted on unilaterally — see Phase 3's own
-"Work" section). `dwc-gcode-core` is a real public repo, `github.com/jaysuk/dwc-gcode-core`, at
-**`v0.4.0`** (tagged and released; not on npm yet — every consumer uses a `github:` dependency). It
-holds `lex`/`params`/`edit`/`meta`/`commands/g10`/`commands/toolParams` — command-number scanning
-fully verified against RRF source (Decisions #4), conditional-G-code recognition fully verified too
-(Phase 3's own section), `Assignment`'s index spans added for `dwc-config-backup-core`'s sake, 441 of
-the package's own tests, all its own gates green. **All four consuming repos are migrated**:
-duet-gcode-postprocessor (~30 call sites, 1,089 tests, still on `v0.1.0` — housekeeping bump not done
-yet, harmless since it never imports `edit`/`meta`), resonance-lab (`accelWiring.ts`/
-`machineConfig.ts`, 264 tests, a DWC-3.6-build vendoring fix, on `v0.3.1`), duet-calibration-wizard
-(`configFile.ts`, 92 tests, on `v0.3.1`), dwc-config-backup-core (`sanitise.ts`'s Tier 3, 351 tests,
-on `v0.4.0`) — each with zero golden-diff/regression, gates green, and (the three DWC-plugin repos)
-a by-hand `vue-tsc` replica confirming zero errors in that plugin's own files including tests. Each
+**Status: 2026-09-14. Phases 0 through 4 are all done.** `dwc-gcode-core` is a real public repo,
+`github.com/jaysuk/dwc-gcode-core`, at **`v0.5.0`** (tagged and released; not on npm yet — every
+consumer uses a `github:` dependency). It holds `lex`/`params`/`edit`/`meta`/`firmware`/
+`commands/g10`/`commands/toolParams` — command-number scanning and conditional-G-code recognition
+fully verified against RRF source, a cited `FEATURES` table, 471 of the package's own tests, all its
+own gates green. **All four consuming repos are migrated**: duet-gcode-postprocessor (~30 call sites,
+1,089 tests, still on `v0.1.0` — housekeeping bump not done, harmless since it never imports
+`edit`/`meta`/`firmware`), resonance-lab (264 → 242 tests after Phase 4's cleanup, a DWC-3.6-build
+vendoring fix in Phase 3 and a DWC-3.6 root-specifier packaging fix in Phase 4, on `v0.5.0`),
+duet-calibration-wizard (92 tests, its own `firmwareVersion.ts` deleted outright in Phase 4 — it had
+no plugin-specific constants worth keeping, on `v0.5.0`), dwc-config-backup-core (351 tests, on
+`v0.4.0`) — each with zero golden-diff/regression, gates green, and (the three DWC-plugin repos) a
+by-hand `vue-tsc` replica confirming zero errors in that plugin's own files including tests. Each
 migration is **committed locally, not pushed**, and `dwc-config-backup-core`'s fix specifically has
 **not** gone through its own `npm version`/publish or its three downstream consumers' release cascade
 — a live, already-published security package, a different order of "irreversible" than
-`dwc-gcode-core` itself. **Not started:** `firmware` (Phase 4 — see its own section below, now
-grounded in real prior art rather than a sketch, and the file-stamp diffing feature's requirements),
-`dwc-config-backup-core`'s own release cascade, and publishing
-`dwc-gcode-core` to npm proper, which stays a `github:` reference until that's separately decided. It follows
+`dwc-gcode-core` itself. **Not started:** the file-stamp diffing feature itself (its own section
+above scopes the requirement; `firmware`'s primitives are ready for it, the feature's own design is
+not), `dwc-config-backup-core`'s own release cascade, and publishing `dwc-gcode-core` to npm proper,
+which stays a `github:` reference until that's separately decided. It follows
 the exploration of whether one shared G-code parsing core, kept faithful to RepRapFirmware and tagged
 at RRF releases, should replace the parsers the plugins in this family have each grown. The answer was
 yes, with limits, and this document turns it into a plan.
@@ -484,17 +483,35 @@ about, `CheckForMixedSpacesAndTabs`) would otherwise misreport nesting depth.
      itself (created fresh this session). 351 tests pass, typecheck/build clean; the fix is committed
      locally on `main`, not published.
 
-### Phase 4 — semantic table and firmware gating
+### Phase 4 — semantic table and firmware gating — done, `dwc-gcode-core@0.5.0`
 
-- **Merge `firmware.ts` from resonance-lab's/calibration-wizard's diverged `firmwareVersion.ts`
-  copies** (Decisions #7 above has the full detail: adopt resonance-lab's newer, `+N`-aware version;
-  port its characterisation tests first).
-- Land the cited semantic entries and the `FEATURES` table.
-- The post-processor reads `boards[0].firmwareVersion` so that, for example, `restartFrom` warns before
-  emitting `M568` for a board older than 3.3.
-- Keep the file-stamp diffing feature (its own section above) in mind while shaping `FEATURES`: every
-  entry should carry a real `since`, cited, from the start — not bolted on once that feature is
-  actually being built.
+- **`firmware.ts` merged**, resonance-lab's newer `+N`-aware version as the base, its 33-test
+  characterisation suite ported unchanged into `test/firmware.test.ts`.
+- **A cited `FEATURES` table landed** — 11 entries, `{ since, description, source }`, nothing
+  invented: every one cites a fact already verified this session or an earlier phase (the wiki's
+  meta-commands/G10/M568/M584/M309/M116/M563 sections, or a specific RRF commit found via
+  `scripts/rrf-triage.mjs`). `compareFirmwareVersions` is documented explicitly as a genuine
+  three-way comparator, not just an "at least" gate — proven correct in both directions with a test —
+  because the file-stamp diffing feature (below) needs to compare a stamped version against a
+  board's current one either way, upgrade or downgrade.
+- **Migrated resonance-lab**: kept `MIN_ACCEL_FIRMWARE`/`MIN_MULTI_ACCEL_FIRMWARE` as local constants
+  (plugin-specific naming for thresholds that happen to match two `FEATURES` entries — not folded in,
+  matching the "primitive moves, policy/naming stays local" split from every other phase), dropped
+  everything else from its own `firmwareVersion.ts`. **A real, general packaging bug found and fixed
+  along the way**: the bare `import ... from "dwc-gcode-core"` root specifier does not resolve under
+  DWC 3.6's older webpack/TypeScript build (`moduleResolution: "node"`, no `"require"` condition in
+  this ESM-only package's `exports` map) — confirmed by actually running `build36.bat` against the
+  real DWC 3.6 checkout, both failing before and compiling after switching to the documented
+  `dwc-gcode-core/firmware` subpath (which resolves via `typesVersions`, unaffected). Recorded in
+  `dwc-gcode-core`'s own README as a known limitation, since any future consumer with a similar dual
+  DWC 3.6/3.7 build target will hit the same thing.
+- **Migrated duet-calibration-wizard**: its `firmwareVersion.ts` had no plugin-specific constants at
+  all (only `firmwareAtLeast`, via `machine.ts`'s `machineFirmwareAtLeast` wrapper), so the whole file
+  is deleted rather than trimmed. This plugin has no DWC 3.6 target, so the bare root specifier works
+  fine here — confirmed, not assumed, by the same three gates as always.
+- **The post-processor is not yet using `firmware`** — nothing in it currently needs a version gate;
+  `restartFrom`'s M568-vs-3.3 warning mentioned in the original sketch was aspirational, not built.
+  Left for whenever that specific gate (or the file-stamp diffing feature itself) is actually wanted.
 
 ### Not migrating
 
