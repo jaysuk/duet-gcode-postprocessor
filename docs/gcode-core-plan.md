@@ -1,5 +1,11 @@
 # `dwc-gcode-core` — package outline, migration plan, and what to feed back upstream
 
+**Next: `dwc-gcode-core/docs/roadmap.md`** — an audit of v0.5.0 against the fuller goal (parse
+everything RRF accepts, track config changes release to release, read/edit/compare plus diagnostics)
+and Phases 5–10. It supersedes this document for anything forward-looking; it found real lexer bugs
+(several commands per line, parameters split by letter rather than whitespace) that Phase 5 fixes
+before anything else is built on top.
+
 **Status: 2026-09-14. Phases 0 through 4 are all done.** `dwc-gcode-core` is a real public repo,
 `github.com/jaysuk/dwc-gcode-core`, at **`v0.5.0`** (tagged and released; not on npm yet — every
 consumer uses a `github:` dependency). It holds `lex`/`params`/`edit`/`meta`/`firmware`/
