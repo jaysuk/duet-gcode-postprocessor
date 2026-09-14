@@ -1,15 +1,19 @@
 # `dwc-gcode-core` — package outline, migration plan, and what to feed back upstream
 
-**Status: 2026-09-14. Phase 0 and Phase 1 are both done.** `dwc-gcode-core` is a real public repo,
-`github.com/jaysuk/dwc-gcode-core`, `v0.1.0` tagged and released (not on npm yet — consumed via a
-`github:` dependency). It holds `lex`/`params`/`commands/g10`/`commands/toolParams`, extracted from
-the post-processor with their command-number scanning fully verified against RRF source (bare letter,
-negative sign, single-digit fraction, `T{expr}` — Decisions #4) and proven by a full-dictionary corpus
-test — 343 of its own tests, all its own gates green. The post-processor itself now depends on it and
-every one of its ~30 call sites has been rewritten, no re-export shim: 1,089 tests pass, zero golden
-diff, all three of its own gates green plus the `vue-tsc` replica run by hand. **Not started:** `meta`,
-`edit`, `firmware`, and every later phase (2 onward) — including publishing `dwc-gcode-core` to npm
-proper, which stays a `github:` reference until that's separately decided. It follows
+**Status: 2026-09-14. Phases 0, 1 and 2 are all done.** `dwc-gcode-core` is a real public repo,
+`github.com/jaysuk/dwc-gcode-core`, at `v0.2.0` (tagged and released; not on npm yet — every consumer
+uses a `github:` dependency). It holds `lex`/`params`/`edit`/`commands/g10`/`commands/toolParams`,
+extracted from the post-processor (Phase 1) and the two `gcodeEdit` copies merged from resonance-lab
+and duet-calibration-wizard (Phase 2) — command-number scanning fully verified against RRF source
+(Decisions #4), 383 of the package's own tests, all its own gates green. **All three consuming repos
+are migrated**: duet-gcode-postprocessor (~30 call sites, 1,089 tests), resonance-lab (`accelWiring.ts`/
+`machineConfig.ts`, 264 tests, plus a DWC-3.6-build vendoring fix), duet-calibration-wizard
+(`configFile.ts`, 92 tests) — each with zero golden-diff/regression, both DWC-checkout gates green,
+and a by-hand `vue-tsc` replica confirming zero errors in that plugin's own files including tests.
+Each migration is **committed locally, not pushed** (pushing wasn't asked for). **Not started:**
+`meta`, `firmware`, and Phase 3's consumer-side work (resonance-lab/calibration swapping their
+`unsafe` heuristic, dwc-config-backup-core's own migration) — including publishing `dwc-gcode-core`
+to npm proper, which stays a `github:` reference until that's separately decided. It follows
 the exploration of whether one shared G-code parsing core, kept faithful to RepRapFirmware and tagged
 at RRF releases, should replace the parsers the plugins in this family have each grown. The answer was
 yes, with limits, and this document turns it into a plan.
@@ -268,13 +272,45 @@ The phases are ordered so each move lands under the heaviest test net available.
   (`SPECS=… && npm install --no-save $SPECS` into `../DuetWebControl`, per the memory note) before
   either DWC-checkout gate resolves it — done as part of verifying this phase.
 
-### Phase 2 — merge the two `gcodeEdit`s
+### Phase 2 — merge the two `gcodeEdit`s — done, `dwc-gcode-core@0.2.0`
 
-- First, add characterisation tests in both repos against their current code.
-- Build `edit` from calibration-wizard's superset, then settle `setParam` as above.
-- Migrate calibration-wizard: `src/dwc/configFile.ts` and the retraction-speed test.
-- Migrate resonance-lab: `accelWiring.ts`, `machineConfig.ts` and `test/gcodeEdit.test.ts`.
-- Delete both local copies.
+- **Characterisation tests already existed in both repos** — resonance-lab's own
+  `test/gcodeEdit.test.ts`, and calibration-wizard's "config.g line editor"/"config.g M98 includes"
+  describes inside `retraction-speed-config.test.ts` (it never had a dedicated file of its own).
+  Ported both into `dwc-gcode-core`'s `test/edit.test.ts` directly rather than rewritten — 383 tests.
+- **Built `edit.ts` from calibration-wizard's superset**, settling `setParam` as decided: the
+  colon-list-aware regex, fixing a real (if latent — nothing in resonance-lab happened to call it on
+  a colon-list value yet) bug in resonance-lab's own copy. The `{ line, refused }` return-shape
+  sketched in the Decisions section above did **not** survive contact with the real code: neither
+  original implementation had it — the safety gate already lived one level up, in
+  `planDirectiveEditAcrossFiles` checking `line.unsafe` before calling `editLine` at all — so
+  `setParam` keeps its existing plain-string return in both consuming repos unchanged.
+- **Considered and reverted:** routing `edit.ts`'s comment-splitting through `lex.ts`'s `""`-escape-
+  aware `findCommentIndex`, on the assumption the original naive quote-toggle mis-locates a comment
+  after a doubled quote. Traced both by hand before committing to it: an escaped `""` pair is always
+  two characters, which is parity-neutral under a naive per-character toggle regardless of whether
+  the toggle understands the escape, so the two are provably equivalent for this purpose — not a real
+  bug. `edit.ts` stayed fully self-contained rather than claim an unproven fix.
+- **`edit` is a subpath-only export** (`dwc-gcode-core/edit`), deliberately not re-exported from the
+  root barrel: its own `setParam` (rewrites a parameter on a raw config.g *line*) collides by name
+  with the root's existing `setParam` (rewrites a parameter on an already-tokenised command *body*).
+  `test/package.test.ts` proves the root still resolves to the tokenised-body one.
+- **Migrated calibration-wizard**: `src/dwc/configFile.ts`'s import, its own `src/model/gcodeEdit.ts`
+  deleted, the two now-duplicate describe blocks in `retraction-speed-config.test.ts` removed (their
+  coverage lives upstream now). 92 tests pass.
+- **Migrated resonance-lab**: `accelWiring.ts`/`machineConfig.ts`'s imports, its own
+  `src/config/gcodeEdit.ts` and `test/gcodeEdit.test.ts` deleted. 264 tests pass. **A real trap this
+  repo's dual-DWC-generation build hit and needed fixing**: `scripts/stage-dwc36.mjs`'s `VENDOR` list
+  (`chart.js`, `dwc-plugin-runtime`) needed `dwc-gcode-core` added too, since `config/` — where the
+  new import lives — is shared with the DWC 3.6 build, which has never heard of this package either.
+  Confirmed by actually running `build36.bat` against a real DWC 3.6 checkout: it failed with a
+  webpack resolution error before the fix, built cleanly after.
+- **Acceptance, all three repos**: local tests pass, both DWC-checkout gates green, and — since
+  those two gates are individually known to miss test-file type errors on this machine (Windows) —
+  a by-hand `vue-tsc` run against the same generated tsconfig CI uses, confirming zero errors
+  reference each plugin's own files, test files included.
+- **Not pushed.** Both migrations are committed locally on `main` in their own repos, same as the
+  post-processor's own Phase 1 migration commit — pushing wasn't asked for.
 
 ### Phase 3 — meta-commands (conditional G-code) and expressions
 
