@@ -11,8 +11,10 @@ import { normaliseFeature, type Feature } from "./gcode/features";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
 import { advance, createState, type MachineState } from "./gcode/state";
 import { TimeEstimator, type MachineLimits } from "./gcode/timeModel";
-import { findParam, paramNumber, parseParams, tokenise, unquoteString } from "./gcode/tokenise";
-import { readToolTemperatureSetting, type ToolTemperatureSetting } from "./gcode/toolTemperature";
+import {
+	findParam, paramNumber, parseParams, readToolTemperatureSetting, tokenise, unquoteString,
+	type ToolTemperatureSetting,
+} from "dwc-gcode-core";
 
 export interface Extents {
 	minX: number; maxX: number;

@@ -48,7 +48,7 @@ describe("toolRenumber", () => {
 
 	// G10's P is a tool number in its tool-settings form (temperatures or offsets) and a workplace
 	// coordinate system number in its L2/L20 form. It used to be left alone entirely; the shared
-	// g10Form (gcode/toolTemperature.ts) now tells the two apart by RepRapFirmware's own rule
+	// g10Form (dwc-gcode-core's commands/g10.ts) now tells the two apart by RepRapFirmware's own rule
 	it("renumbers G10's P in its tool-settings form — temperatures and tool offsets", () => {
 		expect(runStep("toolRenumber", { mapping: "0->2" }, "G10 P0 R150 S210")).toBe("G10 P2 R150 S210");
 		expect(runStep("toolRenumber", { mapping: "0->2" }, "G10 P0 X17.8 Y-19.3 Z0")).toBe("G10 P2 X17.8 Y-19.3 Z0");

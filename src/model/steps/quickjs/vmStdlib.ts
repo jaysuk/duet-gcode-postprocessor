@@ -1,7 +1,7 @@
 /**
  * The sandboxed engine's standard library — a hand-ported, plain-JS (no TypeScript syntax, since it
  * is evaluated *inside* a QuickJS context, not compiled by this project's own TypeScript toolchain)
- * copy of `../../gcode/tokenise.ts` + `../scriptApi.ts`'s pure logic, plus the `runLine`/`setMeta`
+ * copy of dwc-gcode-core's `lex.ts`/`params.ts` + `../scriptApi.ts`'s pure logic, plus the `runLine`/`setMeta`
  * entry points the sandboxed engine calls.
  *
  * **Why a second copy exists at all.** The host engine's `tokenise.ts`/`scriptApi.ts` cannot run

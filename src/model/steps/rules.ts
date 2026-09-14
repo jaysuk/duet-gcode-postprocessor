@@ -19,7 +19,7 @@
  * ```
  */
 
-import { formatNumber, parseParams, removeParam, setParam, tokenise, withBody } from "../gcode/tokenise";
+import { formatNumber, parseParams, removeParam, setParam, tokenise, withBody } from "dwc-gcode-core";
 import { buildExprScope, compileExpr } from "../gcode/exprEval";
 import {
 	buildMatcher, expandPlaceholders, StepConfigError,

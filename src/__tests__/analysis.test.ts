@@ -549,7 +549,7 @@ describe("detectDialect", () => {
 });
 
 // G10 P… S… R… is the older RRF form M568 replaces. G10 also means firmware retraction (bare) and
-// workplace offsets (L2/L20); only the temperature form may count — see gcode/toolTemperature.ts
+// workplace offsets (L2/L20); only the temperature form may count — see dwc-gcode-core's commands/g10.ts
 describe("G10 tool temperatures", () => {
 	it("records a G10 P S R temperature as a commanded tool temperature", () => {
 		expect(analyseText("G10 P0 R150 S215").maxToolTemp).toBe(215);

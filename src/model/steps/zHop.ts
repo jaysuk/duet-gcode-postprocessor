@@ -4,7 +4,7 @@
  * `oozeControl.ts` both build on.
  */
 
-import { formatNumber } from "../gcode/tokenise";
+import { formatNumber } from "dwc-gcode-core";
 import { advanceTravelState, createTravelState, isFirmwareRetractOrUnretract } from "./travel";
 import type { LineContext, RunContext, StepDefinition, Transform } from "./types";
 

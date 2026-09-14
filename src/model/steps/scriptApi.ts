@@ -12,7 +12,7 @@
 import {
 	findParam, formatNumber, parseParams, removeParam as removeParamFromBody, setParam as setParamInBody,
 	tokenise, withBody,
-} from "../gcode/tokenise";
+} from "dwc-gcode-core";
 
 export interface ParsedLine {
 	/** Command such as "G1", "M104", "T0", or null for a comment or blank line. */

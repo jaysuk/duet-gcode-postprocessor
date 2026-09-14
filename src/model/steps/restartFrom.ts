@@ -36,7 +36,7 @@
  * ordinary `M140`/`M190` this codebase already relies on elsewhere.
  *
  * **M568 and G10 set tool temperatures too** — RRF 3.3+'s own command and the older form it
- * replaces, both read by the shared `gcode/toolTemperature.ts`, which cites RRF source for each.
+ * replaces, both read by the shared `dwc-gcode-core` reader, which cites RRF source for each.
  * Before that, only `M104`/`M109` were collected, so a print heated with either restarted with that
  * tool never heated or waited for. Only active temperatures are recovered, as for `M104`; standby
  * (`R`) and `M568`'s heater state (`A`) are not part of the recovered state, so a tool idle at the
@@ -53,8 +53,10 @@
 
 import type { AnalysisCollector } from "../analysisPass";
 import { emptyRecoveryState, recoveryPlan, type RecoveryEvent, type RecoveryState } from "../recovery";
-import { formatNumber, paramNumber, parseParams, unquoteString } from "../gcode/tokenise";
-import { readToolTemperatureSetting, type ToolTemperatureSetting } from "../gcode/toolTemperature";
+import {
+	formatNumber, paramNumber, parseParams, readToolTemperatureSetting, unquoteString,
+	type ToolTemperatureSetting,
+} from "dwc-gcode-core";
 import type { LineContext, RunContext, StepDefinition, StepFactoryContext, Transform } from "./types";
 
 export interface RestartFromConfig {

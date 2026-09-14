@@ -11,7 +11,7 @@
  * *next* layer-change event to catch that one on).
  */
 
-import { paramNumber, parseParams } from "../gcode/tokenise";
+import { paramNumber, parseParams } from "dwc-gcode-core";
 import type { AnalysisCollector } from "../analysisPass";
 import type { LineContext, RunContext, StepDefinition, StepFactoryContext, Transform } from "./types";
 

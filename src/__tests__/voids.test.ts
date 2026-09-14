@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { normaliseFeature, type Feature } from "../model/gcode/features";
 import { advance, createState } from "../model/gcode/state";
-import { paramNumber, parseParams, tokenise } from "../model/gcode/tokenise";
+import { paramNumber, parseParams, tokenise } from "dwc-gcode-core";
 import { VoidDetector, type VoidSegment } from "../model/gcode/voids";
 
 /** A closed square outline (5 points, back to the start), the way one perimeter loop's own moves

@@ -1,13 +1,15 @@
 # `dwc-gcode-core` — package outline, migration plan, and what to feed back upstream
 
-**Status: 2026-09-14.** Phase 0 (scaffold) is done, and within Phase 1: `lex`/`params`/
-`commands/g10`/`commands/toolParams` are extracted from the post-processor, their command-number
-scanning is now fully verified against RRF source (bare letter, negative sign, single-digit fraction,
-`T{expr}` — see Decisions #4), and the full-dictionary corpus test (3a) is in place — 343 tests, all
-three of the package's own gates green. All of this is in a **local-only repo** at
-`C:\Users\live\Documents\Github\dwc-gcode-core` — no GitHub remote, nothing published to npm. **Not
-started:** rewriting the post-processor's ~25 call sites to use the package (the rest of Phase 1),
-`meta`, `edit`, `firmware`, and every later phase. It follows
+**Status: 2026-09-14. Phase 0 and Phase 1 are both done.** `dwc-gcode-core` is a real public repo,
+`github.com/jaysuk/dwc-gcode-core`, `v0.1.0` tagged and released (not on npm yet — consumed via a
+`github:` dependency). It holds `lex`/`params`/`commands/g10`/`commands/toolParams`, extracted from
+the post-processor with their command-number scanning fully verified against RRF source (bare letter,
+negative sign, single-digit fraction, `T{expr}` — Decisions #4) and proven by a full-dictionary corpus
+test — 343 of its own tests, all its own gates green. The post-processor itself now depends on it and
+every one of its ~30 call sites has been rewritten, no re-export shim: 1,089 tests pass, zero golden
+diff, all three of its own gates green plus the `vue-tsc` replica run by hand. **Not started:** `meta`,
+`edit`, `firmware`, and every later phase (2 onward) — including publishing `dwc-gcode-core` to npm
+proper, which stays a `github:` reference until that's separately decided. It follows
 the exploration of whether one shared G-code parsing core, kept faithful to RepRapFirmware and tagged
 at RRF releases, should replace the parsers the plugins in this family have each grown. The answer was
 yes, with limits, and this document turns it into a plan.
@@ -236,19 +238,35 @@ The phases are ordered so each move lands under the heaviest test net available.
   "reads a tool change" both encoded the old, wrong behaviour — `tokenise("T-1").code` was asserted to
   be `null` with the comment "the minus is not a digit"). 343 tests pass; all three of this package's
   gates (`npm test`, `npm run typecheck`, `npm run build`) are green.
-- **Rewrite the call sites directly:** 20 imports of `tokenise`, 5 of `toolTemperature`. No re-export
-  shim, which would hide which code is where. Not started.
-- **Acceptance:**
-  - all 1,140 tests pass;
+- **Rewrite the call sites directly — done.** No re-export shim. 30 files touched in the end, not the
+  originally-guessed 25 (the extra ones are files inside `model/gcode/` itself — `exprEval.ts`,
+  `state.ts`, `timeModel.ts` — that imported via a bare `"./tokenise"`, one directory level different
+  from the `"../gcode/tokenise"` pattern everything outside `model/gcode/` used, and so needed a
+  second pass after a bulk find-and-replace missed them). Also moved `TOOL_PARAM_COMMANDS` out of
+  `toolRenumber.ts` (where it was actually defined, not `toolTemperature.ts` as first assumed) into
+  the package's `commands/toolParams.ts`, and deleted `src/__tests__/tokenise.test.ts` and
+  `toolTemperature.test.ts` outright rather than keep them as now-duplicate local copies of what
+  `dwc-gcode-core`'s own suite already tests.
+- **Dependency: `github:jaysuk/dwc-gcode-core#v0.1.0`, not npm yet.** The package has no npm publish;
+  the post-processor consumes it as a `dependencies` entry pointing at the GitHub tag directly (the
+  same pattern `dwc-plugin-runtime`/`dwc-config-backup-core` used before they were on npm — see this
+  repo's own `CLAUDE.md`). `github.com/jaysuk/dwc-gcode-core` is now a real public repo with `v0.1.0`
+  tagged and released (CI and Release workflows both green).
+- **Acceptance — all met:**
+  - 1,089 tests pass (1,140 minus the 51 in the two deleted duplicate test files — `tokenise.test.ts`
+    had 31, `toolTemperature.test.ts` had 20 — exactly accounted for by moving to `dwc-gcode-core`'s
+    own suite, not lost);
   - zero golden diff;
-  - all three gates green, plus the vue-tsc replica described in `docs/tasks/README.md`;
-  - the bundle size recorded before and after.
-- **Trap:**
-  - `dwc-gcode-core` must be a `dependencies` entry.
-  - CI's shared workflow (`dwc-plugin-ci.yml` line 83) and `release.yml` install `dependencies` into
-    the DWC checkout, so CI resolves it.
-  - Locally it has to be installed there by hand, the same as `expr-eval-fork` — see the memory note's
-    `SPECS=…` line.
+  - all three gates green (`npm test`, `dwc-plugin-typecheck`, `dwc-plugin-verify-build`), plus the
+    `vue-tsc` replica from `docs/tasks/README.md` run by hand — zero errors reference this plugin's
+    files, test files included (the one class of bug the other two gates can miss on Windows).
+  - Bundle size **not** A/B-compared byte-for-byte against the pre-migration build (would have needed
+    a git-stash round-trip across a change that includes file deletions) — the current build is
+    336.34 kB / 98.91 kB gzipped, and since this phase moves existing logic rather than adding any,
+    no material change was expected or observed to be a concern.
+- **Trap — hit and resolved once:** the DWC checkout needs `dwc-gcode-core` installed too
+  (`SPECS=… && npm install --no-save $SPECS` into `../DuetWebControl`, per the memory note) before
+  either DWC-checkout gate resolves it — done as part of verifying this phase.
 
 ### Phase 2 — merge the two `gcodeEdit`s
 

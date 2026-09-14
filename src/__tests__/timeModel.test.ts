@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { advance, createState } from "../model/gcode/state";
-import { tokenise } from "../model/gcode/tokenise";
+import { tokenise } from "dwc-gcode-core";
 import { moveTime, TimeEstimator, type MachineLimits } from "../model/gcode/timeModel";
 
 const LIMITS: MachineLimits = {

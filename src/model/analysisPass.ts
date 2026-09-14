@@ -14,7 +14,7 @@
 import { createLineContext, syncLineContext, type MutableLineContext } from "./pipeline";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
 import { advance, createState, type MachineState } from "./gcode/state";
-import { tokenise } from "./gcode/tokenise";
+import { tokenise } from "dwc-gcode-core";
 import type { LineContext } from "./steps/types";
 
 /** Accumulates something from a first read of the file. Pure: no I/O, no DWC. */

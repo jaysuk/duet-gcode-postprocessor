@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { advance, createState } from "../model/gcode/state";
-import { tokenise } from "../model/gcode/tokenise";
+import { tokenise } from "dwc-gcode-core";
 
 function run(lines: Array<string>) {
 	const state = createState();

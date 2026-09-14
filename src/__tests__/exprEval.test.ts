@@ -4,7 +4,7 @@ import { emptyMetadata } from "../model/gcode/metadata";
 import { buildExprScope, compileExpr } from "../model/gcode/exprEval";
 import { createState } from "../model/gcode/state";
 import type { LineContext } from "../model/steps/types";
-import { tokenise } from "../model/gcode/tokenise";
+import { tokenise } from "dwc-gcode-core";
 import { rulesStep } from "../model/steps/rules";
 import { runToString } from "../model/pipeline";
 

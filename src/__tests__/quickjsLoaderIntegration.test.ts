@@ -9,7 +9,7 @@ import {
 import { scriptStep } from "../model/steps/script";
 import { createState } from "../model/gcode/state";
 import { emptyMetadata } from "../model/gcode/metadata";
-import { tokenise } from "../model/gcode/tokenise";
+import { tokenise } from "dwc-gcode-core";
 import type { LineContext, RunContext, StepFactoryContext } from "../model/steps/types";
 import type { QuickJsModuleLike } from "../model/steps/quickjs/loader";
 

@@ -20,7 +20,7 @@
  */
 
 import { Parser, type Expression } from "expr-eval-fork";
-import { parseParams, tokenise } from "./tokenise";
+import { parseParams, tokenise } from "dwc-gcode-core";
 import type { LineContext } from "../steps/types";
 
 const parser = new Parser();

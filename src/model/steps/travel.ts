@@ -9,8 +9,7 @@
  * arithmetic is cheaper than coupling two otherwise-unrelated steps to arc-welding.
  */
 
-import { paramNumber, parseParams, type Tokenised } from "../gcode/tokenise";
-import { g10Form } from "../gcode/toolTemperature";
+import { g10Form, paramNumber, parseParams, type Tokenised } from "dwc-gcode-core";
 import type { LineContext } from "./types";
 
 export interface TravelState {
@@ -98,7 +97,7 @@ export function advanceTravelState(state: TravelState, ctx: LineContext, token: 
  * parameter.
  *
  * `G10` has three meanings and only one of them is this; which one a line has is decided by
- * `g10Form` (`gcode/toolTemperature.ts`), which follows RepRapFirmware's own dispatch rather than
+ * `g10Form` (`dwc-gcode-core`'s `commands/g10.ts`), which follows RepRapFirmware's own dispatch rather than
  * the wiki's summary. This used to call any `G10` without a `P` a retraction, so a file setting the
  * current tool's temperature with `G10 S200` — or a tool offset with `G10 X…` — silently lost every
  * hop and retraction for the rest of the file.

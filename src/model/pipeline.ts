@@ -10,7 +10,7 @@
 
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
 import { advance, createState, type MachineState } from "./gcode/state";
-import { tokenise, type Tokenised } from "./gcode/tokenise";
+import { tokenise, type Tokenised } from "dwc-gcode-core";
 import type { LineContext, RunContext, Transform } from "./steps/types";
 
 export interface DiffEntry {

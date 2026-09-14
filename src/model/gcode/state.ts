@@ -12,7 +12,7 @@
  * (`;LAYER:n`). The fallback only runs when no marker has ever been seen in the file.
  */
 
-import { paramNumber, parseParams, unquoteString, type Tokenised } from "./tokenise";
+import { paramNumber, parseParams, unquoteString, type Tokenised } from "dwc-gcode-core";
 
 export interface MachineState {
 	/** 1-based line number in the source file. */

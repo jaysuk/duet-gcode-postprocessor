@@ -5,7 +5,7 @@
  * untouched and the diff stays readable.
  */
 
-import { formatNumber, parseParams, setParam, tokenise, withBody } from "../gcode/tokenise";
+import { formatNumber, parseParams, setParam, tokenise, withBody } from "dwc-gcode-core";
 import { inLayerRange, StepConfigError, type LineContext, type StepDefinition, type Transform } from "./types";
 
 export type RewriteOp = "scale" | "offset" | "set" | "clamp";

@@ -7,7 +7,7 @@
  * the command structure rather than the text.
  */
 
-import { formatNumber, parseParams, setParam, tokenise, withBody } from "../gcode/tokenise";
+import { formatNumber, parseParams, setParam, tokenise, withBody } from "dwc-gcode-core";
 import { inLayerRange, type LineContext, type StepDefinition, type Transform } from "./types";
 
 export interface CommandMapConfig {

@@ -7,7 +7,7 @@
  * message so the finished part can be read off against the values.
  */
 
-import { formatNumber } from "../gcode/tokenise";
+import { formatNumber } from "dwc-gcode-core";
 import { expandPlaceholders, textToLines, type LineContext, type RunContext, type StepDefinition, type Transform } from "./types";
 
 export interface RangeVaryConfig {

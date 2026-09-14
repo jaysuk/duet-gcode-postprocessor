@@ -4,7 +4,7 @@
  * for the shared travel-detection this and `zHop.ts` both build on.
  */
 
-import { formatNumber, paramNumber, parseParams } from "../gcode/tokenise";
+import { formatNumber, paramNumber, parseParams } from "dwc-gcode-core";
 import { advanceTravelState, createTravelState, isFirmwareRetractOrUnretract } from "./travel";
 import type { LineContext, RunContext, StepDefinition, Transform } from "./types";
 

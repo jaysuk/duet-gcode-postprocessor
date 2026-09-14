@@ -27,7 +27,7 @@
  */
 
 import { combinedAxisLimits } from "../gcode/timeModel";
-import { formatNumber, paramNumber, parseParams, setParam, withBody } from "../gcode/tokenise";
+import { formatNumber, paramNumber, parseParams, setParam, withBody } from "dwc-gcode-core";
 import type { LineContext, RunContext, StepDefinition, StepFactoryContext, Transform } from "./types";
 
 export type ApplyToMoves = "printing" | "travel" | "both";

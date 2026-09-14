@@ -25,7 +25,7 @@
  */
 
 import { arcMoveLength } from "./arcFit";
-import { paramNumber, parseParams, type Tokenised } from "./tokenise";
+import { paramNumber, parseParams, type Tokenised } from "dwc-gcode-core";
 import type { MachineState } from "./state";
 
 export interface MachineLimits {

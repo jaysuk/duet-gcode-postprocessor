@@ -12,7 +12,7 @@
  * scope. A file with no `M73` markers is passed through unchanged, with a warning.
  */
 
-import { formatNumber, setParam, withBody } from "../gcode/tokenise";
+import { formatNumber, setParam, withBody } from "dwc-gcode-core";
 import { TimeEstimator, type MachineLimits } from "../gcode/timeModel";
 import type { AnalysisCollector } from "../analysisPass";
 import type { LineContext, RunContext, StepDefinition, StepFactoryContext, Transform } from "./types";

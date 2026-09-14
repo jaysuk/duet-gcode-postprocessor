@@ -6,7 +6,7 @@ import variant from "@jitl/quickjs-singlefile-cjs-release-sync";
 import { createState } from "../model/gcode/state";
 import { emptyMetadata, parseMetadata } from "../model/gcode/metadata";
 import { SandboxEngine, serialiseLineState } from "../model/steps/quickjs/sandboxEngine";
-import { tokenise } from "../model/gcode/tokenise";
+import { tokenise } from "dwc-gcode-core";
 import { ScriptAbortError, StepConfigError } from "../model/steps/types";
 import type { LineContext, StepFactoryContext } from "../model/steps/types";
 import type { QuickJsModuleLike } from "../model/steps/quickjs/loader";

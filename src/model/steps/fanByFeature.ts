@@ -11,7 +11,7 @@
  * once per layer, so treating a layer change as its own boundary keeps this in step with that).
  */
 
-import { formatNumber, paramNumber, parseParams, tokenise } from "../gcode/tokenise";
+import { formatNumber, paramNumber, parseParams, tokenise } from "dwc-gcode-core";
 import { CONFIGURABLE_FEATURES, featureLabel, normaliseFeature, type Feature } from "../gcode/features";
 import type { LineContext, StepDefinition, Transform } from "./types";
 

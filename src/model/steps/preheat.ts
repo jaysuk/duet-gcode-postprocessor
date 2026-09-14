@@ -18,7 +18,7 @@
  * `planPreheats` for how each is avoided now.
  */
 
-import { readToolTemperatureSetting } from "../gcode/toolTemperature";
+import { readToolTemperatureSetting } from "dwc-gcode-core";
 import { TimeEstimator, type MachineLimits } from "../gcode/timeModel";
 import { heatUpSeconds, HEATUP_CAP_SECONDS, type ToolConfig } from "../preheat";
 import type { AnalysisCollector } from "../analysisPass";
@@ -48,7 +48,7 @@ interface CollectedEvents {
 	/**
 	 * Elapsed seconds of the first command that establishes each tool's active/standby temperatures
 	 * — an `M568`, or a `G10` in its tool-settings form (never a `G10 L2`/`L20` workplace offset; see
-	 * `gcode/toolTemperature.ts`), carrying an explicit `P<tool>` and an `R` or `S`. A tool with no
+	 * `dwc-gcode-core`'s `commands/g10.ts`), carrying an explicit `P<tool>` and an `R` or `S`. A tool with no
 	 * such command (its temperatures come from `config.g` alone) has no entry here; its floor is then
 	 * just its own first selection — see `planPreheats`.
 	 */

@@ -27,7 +27,7 @@
  */
 
 import { arcRadiusWithinTolerance, tryFitArc, type FitPoint, type FittedArc } from "../gcode/arcFit";
-import { formatNumber, paramNumber, parseParams } from "../gcode/tokenise";
+import { formatNumber, paramNumber, parseParams } from "dwc-gcode-core";
 import type { LineContext, RunContext, StepDefinition, Transform } from "./types";
 
 export interface ArcWeldConfig {
