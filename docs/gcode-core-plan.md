@@ -112,6 +112,68 @@ against RRF 3.7.0-rc.1 source on 2026-09-14, and the latter are fixed and tested
      - `M568` — 3.3;
      - lowercase axis letters — 3.4;
      - `^` concatenation — 3.7.
+   - **Don't build `firmware.ts` from scratch — a real, battle-tested implementation already exists,
+     twice, and has already diverged once** (found 2026-09-14, while looking into the file-stamping
+     feature below): `resonance-lab/src/config/firmwareVersion.ts` and
+     `duet-calibration-wizard/src/model/firmwareVersion.ts` (a copy of it, per that repo's own file
+     header). Both parse `parseFirmwareVersion`/compare `compareFirmwareVersions`/gate
+     `firmwareAtLeast`, and both already handle real RRF quirks worth not re-discovering: the STM32
+     port's parenthesised suffix (`3.7.0-rc.1(CAN0)`, with a *space* before the paren despite RRF's
+     own header comment claiming otherwise) must be stripped before parsing, or every STM32H7 board —
+     the main phase-stepping platform — reports an unparseable version and a fail-closed gate hides
+     the feature from exactly the hardware it targets. **The divergence**: resonance-lab's copy later
+     grew a `ParsedVersion.build` field and a matching tiebreaker step in `compareFirmwareVersions`,
+     for RRF's `+N` suffix (`"3.7.0-rc.1+1"`) — real semver build metadata, which semver itself defines
+     as precedence-*neutral*, but which Duet3D is using as a genuine sequential counter within one
+     prerelease tag instead (confirmed by diffing `Version.h` across two consecutive firmware commits,
+     both bumping only that number). calibration-wizard's copy never got this back-ported, so it
+     silently treats `"3.7.0-rc.1"` and `"3.7.0-rc.1+1"` as equal — latent today (it doesn't currently
+     gate on anything at that resolution), exactly the same shape of bug as `setParam`'s colon-list gap
+     in Phase 2's merge. **Merge this into `dwc-gcode-core/firmware` the same way**: resonance-lab's
+     version is the base (it's the superset), characterisation tests ported from
+     `resonance-lab/test/firmwareVersion.test.ts` first, then both consumers migrated.
+   - **A future feature needs this to be a real range comparator, not just a single-version
+     boolean gate** — see "File-stamp diffing" below. `compareFirmwareVersions` already returns a
+     full three-way result (`-1`/`0`/`1`), which is the right shape for this (a boolean
+     `firmwareAtLeast` alone would not be); the `FEATURES` table itself is the part that needs a
+     new query, not just `supports(version, id)`, to answer "everything that changed between A and
+     B" rather than "does version V have feature X".
+
+### File-stamp diffing — a concrete future consumer of `firmware`, not yet designed in detail
+
+The user's own words (2026-09-14): each G-code/macro/filament file gets stamped with the RRF version
+it was last checked against (a header comment, most likely — the exact stamp format is not decided
+yet). When the firmware changes — **upgrade or downgrade**, both must work — re-checking a stamped
+file diffs the stamped version against the board's current one and reports what's relevant to *that*
+file: which commands/parameters in it started being interpreted differently, stopped existing, or
+started existing, between those two versions.
+
+**Constraints already given, to hold onto rather than rediscover:**
+- **Floor: RRF 3.6.3.** Nothing older is supported for this feature. `compareFirmwareVersions` already
+  parses and compares a plain `"3.6.3"` (no prerelease) with no special-casing needed — the floor is a
+  product decision (where to stop rather than bothering with older lines), not a parser limitation.
+- **Bidirectional.** A user can move to a newer firmware or roll back to an older one (a bad update,
+  a hardware-specific regression) and must get a correct answer either way. This is why the plan above
+  insists on a real three-way comparator as the foundation, not a `since`-only "is this new enough"
+  check — the same `FEATURES` table has to answer the question run as `min(stamped, current)` to
+  `max(stamped, current)` regardless of which one is actually newer.
+- **Per-file, not per-machine.** The stamp lives in the file itself, so the check is "what in *this
+  specific file's own content* is affected", not a blanket "what changed in this firmware release" —
+  which means the real query is closer to *"of the commands/parameters this file actually uses, which
+  ones have a `FEATURES`/semantic-table entry whose `since` falls in (min, max]"* than a global diff.
+  This is squarely why the semantic table (Decision #4) and the parser's syntax coverage (also
+  Decision #4) both need to be as complete as practical **before** this feature is worth building —
+  a diff against a table that only covers 5 commands would silently miss almost everything.
+
+**Not yet designed:** the stamp's exact format and where it's read/written from (a job for the
+consuming plugin, likely `duet-gcode-postprocessor`, not this package); the shape of the "what changed
+for this file" query itself (`changesAffecting(fileTokens, from, to): Array<FeatureChange>`, or
+similar — a real API design pass, not sketched here); whether "downgrade" ever needs to *warn* about a
+feature the file uses that the *older* firmware doesn't have (almost certainly yes — that is in fact
+the more dangerous direction, silently sending a command the rolled-back firmware doesn't understand).
+Tracked here so Phase 4's `FEATURES` table is built with this consumer in mind rather than redesigned
+again once it exists — every entry should already be planning to answer "since when", which a
+`supports()`-only design does not encourage as clearly.
 
 ## Package outline
 
@@ -146,7 +208,7 @@ dwc-gcode-core/
 | `meta` | `classifyLine` → `{ kind: "command" \| "meta" \| "comment" \| "blank"; meta?: MetaKeyword; indent }`, `MetaKeyword`, `parseAssignment` | **new**; replaces config-backup-core's three regexes and gcodeEdit's `unsafe` heuristic |
 | `edit` | `GcodeLine`, `detectEol`, `parseLines`, `serializeLines`, `findDirectives`, `setParam`, `setIndexedParam`, `replaceDirective`, `appendDirective`, `replaceLine`, `diffLines`, `planDirectiveEdit`, `findIncludes`, `resolveIncludePath`, `planDirectiveEditAcrossFiles` | calibration-wizard's superset of resonance-lab's |
 | `commands/*` | `g10Form`, `G10Form`, `readToolTemperatureSetting`, `ToolTemperatureSetting`, `TOOL_PARAM_COMMANDS`, `AXIS_LETTERS` | post-processor `toolTemperature.ts` (115 lines), `toolRenumber.ts` |
-| `firmware` | `parseFirmwareVersion`, `compareRrf`, `FEATURES`, `supports` | **new** |
+| `firmware` | `parseFirmwareVersion`, `compareFirmwareVersions`, `firmwareAtLeast`, `ParsedVersion`, plus **new** `FEATURES`/`supports` | resonance-lab's `firmwareVersion.ts` (the newer of two diverged copies — see Decisions #7) |
 
 **Staying in the post-processor:** `state.ts`, `metadata.ts`, `dialect.ts`, `features.ts`,
 `timeModel.ts`, `arcFit.ts`, `voids.ts`, `exprEval.ts`. They model slicer output and motion, not RRF
@@ -361,9 +423,15 @@ about, `CheckForMixedSpacesAndTabs`) would otherwise misreport nesting depth.
 
 ### Phase 4 — semantic table and firmware gating
 
-- Land `firmware` and the cited semantic entries.
+- **Merge `firmware.ts` from resonance-lab's/calibration-wizard's diverged `firmwareVersion.ts`
+  copies** (Decisions #7 above has the full detail: adopt resonance-lab's newer, `+N`-aware version;
+  port its characterisation tests first).
+- Land the cited semantic entries and the `FEATURES` table.
 - The post-processor reads `boards[0].firmwareVersion` so that, for example, `restartFrom` warns before
   emitting `M568` for a board older than 3.3.
+- Keep the file-stamp diffing feature (its own section above) in mind while shaping `FEATURES`: every
+  entry should carry a real `since`, cited, from the start — not bolted on once that feature is
+  actually being built.
 
 ### Not migrating
 
