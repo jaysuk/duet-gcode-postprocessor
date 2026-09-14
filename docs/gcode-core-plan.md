@@ -1,20 +1,25 @@
 # `dwc-gcode-core` — package outline, migration plan, and what to feed back upstream
 
-**Status: 2026-09-14. Phases 0, 1, 2 and 3 are all done**, except the `dwc-config-backup-core` leg of
-Phase 3, deliberately not executed — see Phase 3's own "Work" section for why. `dwc-gcode-core` is a
-real public repo, `github.com/jaysuk/dwc-gcode-core`, at **`v0.3.1`** (tagged and released; not on npm
-yet — every consumer uses a `github:` dependency). It holds `lex`/`params`/`edit`/`meta`/
-`commands/g10`/`commands/toolParams` — command-number scanning fully verified against RRF source
-(Decisions #4), conditional-G-code recognition fully verified too (Phase 3's own section), 438 of the
-package's own tests, all its own gates green. **All three consuming repos are migrated to `v0.3.1`**:
-duet-gcode-postprocessor (~30 call sites, 1,089 tests), resonance-lab (`accelWiring.ts`/
-`machineConfig.ts`, 264 tests, a DWC-3.6-build vendoring fix, and the npm git-ref caching gotcha noted
-in Phase 3's own section), duet-calibration-wizard (`configFile.ts`, 92 tests) — each with zero
-golden-diff/regression, both DWC-checkout gates green, and a by-hand `vue-tsc` replica confirming zero
-errors in that plugin's own files including tests. Each migration is **committed locally, not pushed**
-(pushing wasn't asked for). **Not started:** `firmware` (Phase 4 — see its own section below, now
+**Status: 2026-09-14. Phases 0, 1, 2 and 3 are all done**, including the `dwc-config-backup-core` leg
+(fixed on explicit request after being flagged rather than acted on unilaterally — see Phase 3's own
+"Work" section). `dwc-gcode-core` is a real public repo, `github.com/jaysuk/dwc-gcode-core`, at
+**`v0.4.0`** (tagged and released; not on npm yet — every consumer uses a `github:` dependency). It
+holds `lex`/`params`/`edit`/`meta`/`commands/g10`/`commands/toolParams` — command-number scanning
+fully verified against RRF source (Decisions #4), conditional-G-code recognition fully verified too
+(Phase 3's own section), `Assignment`'s index spans added for `dwc-config-backup-core`'s sake, 441 of
+the package's own tests, all its own gates green. **All four consuming repos are migrated**:
+duet-gcode-postprocessor (~30 call sites, 1,089 tests, still on `v0.1.0` — housekeeping bump not done
+yet, harmless since it never imports `edit`/`meta`), resonance-lab (`accelWiring.ts`/
+`machineConfig.ts`, 264 tests, a DWC-3.6-build vendoring fix, on `v0.3.1`), duet-calibration-wizard
+(`configFile.ts`, 92 tests, on `v0.3.1`), dwc-config-backup-core (`sanitise.ts`'s Tier 3, 351 tests,
+on `v0.4.0`) — each with zero golden-diff/regression, gates green, and (the three DWC-plugin repos)
+a by-hand `vue-tsc` replica confirming zero errors in that plugin's own files including tests. Each
+migration is **committed locally, not pushed**, and `dwc-config-backup-core`'s fix specifically has
+**not** gone through its own `npm version`/publish or its three downstream consumers' release cascade
+— a live, already-published security package, a different order of "irreversible" than
+`dwc-gcode-core` itself. **Not started:** `firmware` (Phase 4 — see its own section below, now
 grounded in real prior art rather than a sketch, and the file-stamp diffing feature's requirements),
-`dwc-config-backup-core`'s migration (flagged, not executed — see Phase 3), and publishing
+`dwc-config-backup-core`'s own release cascade, and publishing
 `dwc-gcode-core` to npm proper, which stays a `github:` reference until that's separately decided. It follows
 the exploration of whether one shared G-code parsing core, kept faithful to RepRapFirmware and tagged
 at RRF releases, should replace the parsers the plugins in this family have each grown. The answer was
@@ -445,27 +450,39 @@ about, `CheckForMixedSpacesAndTabs`) would otherwise misreport nesting depth.
   case. Always verify `node_modules/dwc-gcode-core/package.json`'s own `version` after a bump; force a
   real re-resolve with `npm install "dwc-gcode-core@github:jaysuk/dwc-gcode-core#vX.Y.Z"` (the full
   spec, not just re-running `npm install`) if it hasn't moved.
-- **`dwc-config-backup-core` migration — NOT done, flagged instead of executed.** Reading its
-  `sanitise.ts` before touching it surfaced two things this plan didn't anticipate, both reported to
-  the user directly rather than acted on unilaterally (this is a credential-redaction tool; changing
-  its matching behaviour needs explicit sign-off, not a plan bullet executed on autopilot):
-  1. **A real coverage gap, independent of this migration.** Its `ASSIGNMENT_RE` only matches
-     `set global.X = …` and bare `var X = …` — it has no path for the modern bare `global X = …`
-     declaration form (RRF's current syntax for declaring a new global, per the wiki's own example,
-     `global T1heat=0`) or `set var.X = …`. A secret declared as `global mySecret = "…"` matches
-     neither `ASSIGNMENT_RE` nor `LEADING_CODE_RE` (no digit after the letters) and falls through
-     Tier 3 entirely; it is only still caught if its variable name happens to contain one of Tier 4's
-     literal keywords (`token`/`key`/`secret`/`password`/`passwd`/`pwd`/`psk`/`auth`) — a name like
-     `wifiPass` matches none of those and would go completely unredacted. This is real regardless of
-     whether `dwc-gcode-core` is ever adopted here.
-  2. **A design tension, not a bug**: `ASSIGNMENT_RE` is case-INSENSITIVE (`/i`), while `classifyLine`
-     is deliberately case-sensitive to match RRF exactly. For a redaction tool, over-matching a line
-     RRF would never actually execute as an assignment is the safe direction (a secret sitting in
-     dead, miscapitalised text is still a secret if a backup is shared) — narrowing to RRF's real
-     grammar here would be a regression in a security tool's own favour, not an improvement. Replacing
-     `ASSIGNMENT_RE` outright with `parseAssignment` is therefore not a drop-in swap the way it was for
-     `edit.ts`'s `unsafe` flag; it needs its own design decision about whether/how to combine RRF
-     fidelity with the deliberate over-matching a redaction tool wants.
+- **`dwc-config-backup-core` migration — fixed 2026-09-14, on explicit request, committed locally.**
+  The finding below was first reported rather than acted on (this is a credential-redaction tool;
+  changing its matching behaviour needs explicit sign-off, not a plan bullet executed on autopilot);
+  the user then asked for it to be fixed.
+  1. **The real coverage gap.** Its `ASSIGNMENT_RE` only matched `set global.X = …` and bare
+     `var X = …` — no path for the modern bare `global X = …` declaration (RRF's current syntax, wiki
+     example `global T1heat=0`) or `set var.X = …`. A secret declared either of those two ways matched
+     neither `ASSIGNMENT_RE` nor `LEADING_CODE_RE` and fell through Tier 3 entirely, redacted only if
+     its name happened to also match a Tier 4 content keyword — a name like this file's own
+     documented example `operatorHash` (Tier 4 has no `hash` pattern) would have leaked completely.
+     Fixed by replacing `ASSIGNMENT_RE`/`IS_GLOBAL_RE` with `dwc-gcode-core`'s `parseAssignment` (all
+     four forms). Also fixed a second bug found along the way: the old regex's value group was a
+     single non-space token, so a multi-token expression (`someFunc() + otherSecret`) redacted only
+     the first token, leaving the rest of the real secret in the output.
+  2. **The design tension, resolved rather than papered over.** `parseAssignment` is
+     case-SENSITIVE (matching RRF exactly), while the old regex was case-insensitive — deliberately,
+     since over-matching text RRF would never execute is the safe direction for a redaction tool.
+     Not a drop-in swap: added a local `parseAssignmentLoose` (in `sanitise.ts`, not pushed into
+     `dwc-gcode-core` — this is redaction *policy*, not G-code parsing) that tries the exact parse
+     first and only falls back to a lowercased re-parse, re-sliced against the original text via
+     spans (position-invariant to a pure case change) — keeping the safety margin without diluting
+     `dwc-gcode-core`'s own RRF fidelity.
+  3. **`parseAssignment` needed one addition to support this**: index spans
+     (`nameStart`/`nameEnd`/`expressionStart`/`expressionEnd`) on `Assignment`, so the redaction
+     splice could stay byte-precise without re-deriving `prefix`/`rest` from a regex match — shipped
+     as `dwc-gcode-core@0.4.0` before this migration, the same "the primitive gets a real, tested
+     capability; the policy stays in the consumer" split as everywhere else in this plan.
+  4. **Not yet done, deliberately**: `npm version`/publish, and the three downstream consumers' own
+     bump+release cascade this repo's own `CLAUDE.md` documents (Flexible-Layouts,
+     duet-config-backup-plugin, duet-config-backup-plugin-3.6) — this is a live, already-published
+     security package with real users, a different order of "irreversible" than `dwc-gcode-core`
+     itself (created fresh this session). 351 tests pass, typecheck/build clean; the fix is committed
+     locally on `main`, not published.
 
 ### Phase 4 — semantic table and firmware gating
 
