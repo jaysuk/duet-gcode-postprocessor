@@ -115,6 +115,7 @@
 				<v-tabs v-model="tab" density="compact" show-arrows>
 					<v-tab value="recipe">Recipe</v-tab>
 					<v-tab value="inspect">Inspect</v-tab>
+					<v-tab value="edit">Edit</v-tab>
 					<v-tab value="preview">
 						Preview
 						<v-badge v-if="lastRun !== null" inline :content="lastRun.diff.length" color="primary" />
@@ -140,6 +141,8 @@
 
 					<FileInspector v-if="hasOpenedInspect" v-show="tab === 'inspect'" :path="selectedPath"
 								   @checked="onChecked" />
+
+					<GcodeEditor v-if="hasOpenedEdit" v-show="tab === 'edit'" :path="selectedPath" />
 
 					<DiffPreview v-if="tab === 'preview'"
 								 :result="lastRun"
@@ -321,6 +324,7 @@ import CompareFiles from "./CompareFiles.vue";
 import DiffPreview from "./DiffPreview.vue";
 import FileInspector from "./FileInspector.vue";
 import GcodeBrowser from "./GcodeBrowser.vue";
+import GcodeEditor from "./GcodeEditor.vue";
 import RecipeEditor from "./RecipeEditor.vue";
 import RunHistory from "./RunHistory.vue";
 import { isAutoRunEnabled, isAutoRunSilent, setAutoRunEnabled, setAutoRunSilent } from "../dwc/autoRun";
@@ -356,6 +360,9 @@ const tab = ref("recipe");
 // preflight result the gate reads) away on every tab switch.
 const hasOpenedInspect = ref(false);
 watch(tab, (t) => { if (t === "inspect") hasOpenedInspect.value = true; });
+
+const hasOpenedEdit = ref(false);
+watch(tab, (t) => { if (t === "edit") hasOpenedEdit.value = true; });
 const aboutOpen = ref(false);
 const selection = ref<Array<string>>([]);
 const batchOpen = ref(false);

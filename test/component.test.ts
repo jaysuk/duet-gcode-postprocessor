@@ -9,6 +9,7 @@ import CompareFiles from "../src/components/CompareFiles.vue";
 import DiffPreview from "../src/components/DiffPreview.vue";
 import FileInspector from "../src/components/FileInspector.vue";
 import GcodeBrowser from "../src/components/GcodeBrowser.vue";
+import GcodeEditor from "../src/components/GcodeEditor.vue";
 import PostProcessorPage from "../src/components/PostProcessorPage.vue";
 import PostProcessorWidget from "../src/components/PostProcessorWidget.vue";
 import RecipeEditor from "../src/components/RecipeEditor.vue";
@@ -24,10 +25,11 @@ import { defaultConfig, STEP_DEFINITIONS } from "../src/model/steps/registry";
 // rejecting, matching the real gateway's behaviour for a file that does not exist (e.g. no backup
 // index has been written yet) — BackupManager's empty-state path depends on that rejection.
 const sizeOfMock = vi.fn<(path: string) => Promise<number | null>>();
+const downloadMock = vi.fn<(path: string, onProgress?: (loaded: number, total: number) => void) => Promise<Blob>>();
 vi.mock("../src/dwc/gateway", () => ({
 	createGateway: () => ({
 		sizeOf: sizeOfMock,
-		download: vi.fn().mockRejectedValue(new Error("No such file")),
+		download: downloadMock,
 		upload: vi.fn(),
 		move: vi.fn(),
 		remove: vi.fn(),
@@ -50,6 +52,8 @@ describe("components mount", () => {
 		resetDwc();
 		sizeOfMock.mockReset();
 		sizeOfMock.mockResolvedValue(null);
+		downloadMock.mockReset();
+		downloadMock.mockRejectedValue(new Error("No such file"));
 	});
 
 	it("mounts the page", () => {
@@ -126,6 +130,21 @@ describe("components mount", () => {
 		expect(wrapper.text()).toContain("Select a G-code file");
 	});
 
+	it("mounts the editor with nothing selected", () => {
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: null } });
+		expect(wrapper.text()).toContain("Select a G-code file");
+		wrapper.unmount();
+	});
+
+	it("loads a real file into a live CM6 editor and shows its content", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10 Y10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => {
+			expect(wrapper.text()).toContain("G1 X10 Y10");
+		});
+		wrapper.unmount();
+	});
+
 	it("mounts the diff preview with no run yet", () => {
 		const wrapper = mountInDwc(DiffPreview, {
 			props: { result: null, recipe: null, sourceName: "" },
@@ -187,6 +206,8 @@ describe("PostProcessorPage safety warnings", () => {
 		resetDwc();
 		sizeOfMock.mockReset();
 		sizeOfMock.mockResolvedValue(null);
+		downloadMock.mockReset();
+		downloadMock.mockRejectedValue(new Error("No such file"));
 
 		// The test kit's settings stub doesn't implement registerPluginData/setPluginData, so
 		// recipeStore falls back to real `localStorage` — a non-functional stub in this
@@ -265,6 +286,8 @@ describe("PostProcessorPage diagnostics report (F4)", () => {
 		resetDwc();
 		sizeOfMock.mockReset();
 		sizeOfMock.mockResolvedValue(null);
+		downloadMock.mockReset();
+		downloadMock.mockRejectedValue(new Error("No such file"));
 		buildReportMock.mockClear();
 		downloadReportMock.mockClear();
 		copyReportMock.mockClear();
@@ -317,6 +340,8 @@ describe("responsive layout (F6)", () => {
 		resetDwc();
 		sizeOfMock.mockReset();
 		sizeOfMock.mockResolvedValue(null);
+		downloadMock.mockReset();
+		downloadMock.mockRejectedValue(new Error("No such file"));
 		setDisplayWidth(1200);
 	});
 
@@ -373,6 +398,8 @@ describe("PostProcessorPage preflight gate (E13)", () => {
 		resetDwc();
 		sizeOfMock.mockReset();
 		sizeOfMock.mockResolvedValue(null);
+		downloadMock.mockReset();
+		downloadMock.mockRejectedValue(new Error("No such file"));
 		setConnected(true);
 
 		const settings = dwc.settings as Record<string, unknown> & { plugins: Record<string, unknown> };
