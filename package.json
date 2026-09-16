@@ -14,7 +14,7 @@
 		"release": "node scripts/release.mjs"
 	},
 	"dependencies": {
-		"dwc-gcode-core": "github:jaysuk/dwc-gcode-core#v0.1.0",
+		"dwc-gcode-core": "^1.0.0",
 		"dwc-plugin-runtime": "^0.8.8",
 		"expr-eval-fork": "^3.0.3"
 	},
