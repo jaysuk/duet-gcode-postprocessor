@@ -216,6 +216,110 @@ describe("components mount", () => {
 		wrapper.unmount();
 	});
 
+	describe("split view", () => {
+		async function openTwoTabs(): Promise<ReturnType<typeof mountInDwc>> {
+			downloadMock.mockResolvedValue(new Blob(["G28\n"]));
+			const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+			await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+			await wrapper.setProps({ selectedPath: "0:/gcodes/b.g" });
+			await vi.waitFor(() => expect(wrapper.text()).toContain("b.g"));
+			return wrapper;
+		}
+
+		it("Split right moves the active tab into a second pane, both editors visible", async () => {
+			const wrapper = await openTwoTabs();
+			const splitBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Split right");
+			expect(splitBtn).toBeDefined();
+			await splitBtn!.trigger("click");
+			await wrapper.vm.$nextTick();
+
+			expect(wrapper.text()).toContain("a.g");
+			expect(wrapper.text()).toContain("b.g");
+			const closeSplitBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Close split");
+			expect(closeSplitBtn).toBeDefined();
+			wrapper.unmount();
+		});
+
+		it("Close split merges the second pane's tab back into one strip", async () => {
+			const wrapper = await openTwoTabs();
+			await wrapper.findAll("button").find((b) => b.attributes("title") === "Split right")!.trigger("click");
+			await wrapper.vm.$nextTick();
+
+			const closeSplitBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Close split");
+			await closeSplitBtn!.trigger("click");
+			await wrapper.vm.$nextTick();
+
+			expect(wrapper.findAll("button").find((b) => b.attributes("title") === "Close split")).toBeUndefined();
+			expect(wrapper.text()).toContain("a.g");
+			expect(wrapper.text()).toContain("b.g");
+			wrapper.unmount();
+		});
+
+		it("Split right is disabled with only one tab open", async () => {
+			downloadMock.mockResolvedValue(new Blob(["G28\n"]));
+			const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+			await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+			// The tab strip (and its Split right button) only renders with 2+ tabs to begin with
+			expect(wrapper.findAll("button").find((b) => b.attributes("title") === "Split right")).toBeUndefined();
+			wrapper.unmount();
+		});
+
+		it("dragging a tab onto the other pane moves it there", async () => {
+			const wrapper = await openTwoTabs();
+			await wrapper.findAll("button").find((b) => b.attributes("title") === "Split right")!.trigger("click");
+			await wrapper.vm.$nextTick();
+			// After splitRight(), the active tab (b.g) moved to the secondary pane; a.g stays primary
+			const dropTargets = wrapper.findAll(".gcode-workspace-body");
+			expect(dropTargets.length).toBe(2);
+
+			// Drag a.g (tab id 1, opened first) from the primary pane onto the secondary pane's body
+			await dropTargets[1].trigger("drop", { dataTransfer: { getData: () => "1" } });
+			await wrapper.vm.$nextTick();
+
+			// Both files must now be in the SAME (secondary) pane's tab strip
+			const secondaryPaneTabs = dropTargets[1].element.closest(".gcode-workspace-pane")?.querySelectorAll(".v-tab");
+			expect(secondaryPaneTabs?.length).toBe(2);
+			wrapper.unmount();
+		});
+
+		it("persists the split ratio to localStorage on drag release", async () => {
+			// This harness's happy-dom `localStorage` is a non-functional stub (documented
+			// elsewhere in this file and in src/__tests__/autoRun.test.ts) - a scoped in-memory
+			// stand-in, restored at the end of this one test, is the only way to exercise this.
+			const memoryStorage = new Map<string, string>();
+			vi.stubGlobal("localStorage", {
+				getItem: (key: string) => memoryStorage.get(key) ?? null,
+				setItem: (key: string, value: string) => { memoryStorage.set(key, value); },
+				removeItem: (key: string) => { memoryStorage.delete(key); },
+			});
+
+			try {
+				const wrapper = await openTwoTabs();
+				await wrapper.findAll("button").find((b) => b.attributes("title") === "Split right")!.trigger("click");
+				await wrapper.vm.$nextTick();
+
+				const divider = wrapper.find(".gcode-workspace-divider");
+				expect(divider.exists()).toBe(true);
+				vi.spyOn(HTMLElement.prototype, "setPointerCapture").mockImplementation(() => {});
+				// A non-zero `left` matters here: it is what proves the ratio is computed relative
+				// to the container's own position, not the raw viewport X coordinate.
+				vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+					{ left: 40, right: 440, top: 0, bottom: 100, width: 400, height: 100, x: 40, y: 0, toJSON() { } } as DOMRect,
+				);
+
+				await divider.trigger("pointerdown", { pointerId: 1 });
+				await divider.trigger("pointermove", { pointerId: 1, clientX: 140 }); // (140-40)/400 = 25%
+				await divider.trigger("pointerup", { pointerId: 1 });
+
+				expect(memoryStorage.get("gCodePostProcessor.edit.splitRatio")).toBe("0.25");
+				wrapper.unmount();
+			} finally {
+				vi.unstubAllGlobals();
+				vi.restoreAllMocks();
+			}
+		});
+	});
+
 	it("mounts the diff preview with no run yet", () => {
 		const wrapper = mountInDwc(DiffPreview, {
 			props: { result: null, recipe: null, sourceName: "" },

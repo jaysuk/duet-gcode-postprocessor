@@ -42,6 +42,9 @@ export const LS_TRUSTED_SCRIPTS = "gCodePostProcessor.trustedScripts";
 export const LS_UPDATE_ENABLED = "gCodePostProcessor.updateCheck.enabled";
 export const LS_UPDATE_LAST = "gCodePostProcessor.updateCheck.lastCheck";
 export const LS_UPDATE_DISMISSED = "gCodePostProcessor.updateCheck.dismissed";
+/** The Edit tab's split-view pane ratio (0-1, primary pane's share) — same idea as DWC core's own
+ *  `cacheStore.explorerSplitRatio` for its Explorer split view. */
+export const LS_EDIT_SPLIT_RATIO = "gCodePostProcessor.edit.splitRatio";
 
 /** Auto-run on upload (D5). Per-browser: a property of "this tab is watching", not of the machine. */
 export const LS_AUTORUN_ENABLED = "gCodePostProcessor.autoRun.enabled";
