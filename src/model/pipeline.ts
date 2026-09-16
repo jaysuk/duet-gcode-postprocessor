@@ -9,7 +9,8 @@
  */
 
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
-import { advance, createState, type MachineState } from "./gcode/state";
+import { applyToken, beginLine, createState, type MachineState } from "./gcode/state";
+import { splitCommands } from "./gcode/splitCommands";
 import { tokenise, type Tokenised } from "dwc-gcode-core";
 import type { LineContext, RunContext, Transform } from "./steps/types";
 
@@ -128,27 +129,77 @@ export class Pipeline {
 	/**
 	 * Process one source line. `byteOffset` is the offset of this line in the source and is only
 	 * used for progress-based anchors; pass 0 when it is not known.
+	 *
+	 * A line normally holds one command, and that stays a single pass over `this.transforms`. RRF
+	 * allows several (`splitCommands.ts`: `G90 G1 Z5` is two) — each is run through the whole
+	 * transform chain as its own logical line, in source order, against the state as it stood right
+	 * after the *previous* command on this line was applied. When none of them change anything, the
+	 * physical line is reported back byte-for-byte unchanged (not rejoined from pieces) so a file
+	 * full of untouched multi-command macro lines produces no diff noise; only an actual change
+	 * splits the physical line into its resulting pieces.
 	 */
 	line(raw: string, byteOffset = 0): string | Array<string> | null {
 		this.stats.linesIn++;
 		this.stats.bytesIn += raw.length + 1;
 
-		const token = tokenise(raw);
-		advance(this.state, token);
-		this.syncContext(token, byteOffset);
+		const subLines = splitCommands(raw);
+		beginLine(this.state);
 
-		let current: string | Array<string> | null = raw;
-		for (let i = 0; i < this.transforms.length; i++) {
-			if (current === null) break;
-			const result = applyToAll(this.transforms[i], this.lineContext, current);
-			if (result !== undefined) {
-				this.stats.perStep[i]++;
-				current = result;
+		if (subLines.length === 1) {
+			const token = tokenise(raw);
+			applyToken(this.state, token);
+			this.syncContext(token, byteOffset);
+
+			let current: string | Array<string> | null = raw;
+			for (let i = 0; i < this.transforms.length; i++) {
+				if (current === null) break;
+				const result = applyToAll(this.transforms[i], this.lineContext, current);
+				if (result !== undefined) {
+					this.stats.perStep[i]++;
+					current = result;
+				}
 			}
+
+			this.record(raw, current);
+			return current;
 		}
 
-		this.record(raw, current);
-		return current;
+		let anyChanged = false;
+		const touchedSteps = new Set<number>();
+		const pieces: Array<string | Array<string> | null> = [];
+		for (const subRaw of subLines) {
+			const token = tokenise(subRaw);
+			applyToken(this.state, token);
+			this.syncContext(token, byteOffset);
+
+			let current: string | Array<string> | null = subRaw;
+			for (let i = 0; i < this.transforms.length; i++) {
+				if (current === null) break;
+				const result = applyToAll(this.transforms[i], this.lineContext, current);
+				if (result !== undefined) {
+					touchedSteps.add(i);
+					anyChanged = true;
+					current = result;
+				}
+			}
+			pieces.push(current);
+		}
+		for (const i of touchedSteps) this.stats.perStep[i]++;
+
+		if (!anyChanged) {
+			this.record(raw, raw);
+			return raw;
+		}
+
+		const merged: Array<string> = [];
+		for (const piece of pieces) {
+			if (piece === null) continue;
+			if (typeof piece === "string") merged.push(piece);
+			else merged.push(...piece);
+		}
+		const result = merged.length === 0 ? null : merged;
+		this.record(raw, result);
+		return result;
 	}
 
 	/** Lines to write after the last source line. */

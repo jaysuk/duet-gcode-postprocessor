@@ -9,7 +9,8 @@ import { arcMoveLength } from "./gcode/arcFit";
 import { bareMacroName, detectDialect, type DialectReport } from "./gcode/dialect";
 import { normaliseFeature, type Feature } from "./gcode/features";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
-import { advance, createState, type MachineState } from "./gcode/state";
+import { applyToken, beginLine, createState, type MachineState } from "./gcode/state";
+import { splitCommands } from "./gcode/splitCommands";
 import { TimeEstimator, type MachineLimits } from "./gcode/timeModel";
 import {
 	findParam, paramNumber, parseParams, readToolTemperatureSetting, tokenise, unquoteString,
@@ -220,13 +221,25 @@ export class Analyser {
 			: null;
 	}
 
+	/**
+	 * A line may hold more than one command (`splitCommands.ts`: `G90 G1 Z5` is two) — each is
+	 * applied to the state and to every counter/estimator below in turn, in source order, so a move
+	 * riding along on a mode-change line is not invisible to command counting, time estimation, or
+	 * flow/extent tracking the way it would be if only the line's first command were ever looked at.
+	 */
 	line(raw: string): void {
 		this.lines++;
 		this.bytes += raw.length + 1;
 
+		const subLines = splitCommands(raw);
+		beginLine(this.state);
+		for (const subRaw of subLines) this.applyCommand(subRaw);
+	}
+
+	private applyCommand(raw: string): void {
 		const token = tokenise(raw);
 		const zBeforeLine = this.state.z;
-		advance(this.state, token);
+		applyToken(this.state, token);
 		this.timeEstimator?.line(token, this.state);
 		if (this.state.layer > this.maxLayer) this.maxLayer = this.state.layer;
 		if (this.state.relativeE) this.usesRelativeE = true;

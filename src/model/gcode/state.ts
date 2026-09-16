@@ -73,15 +73,25 @@ export function createState(options: { geometricFallback?: boolean } = {}): Mach
 }
 
 /**
- * Advance the state by one source line. Call exactly once per line, before running the steps.
- *
- * `token` must be the tokenised **original** line: state tracking describes the source file, so a
- * step that rewrites a line does not retroactively change what layer the next line is on.
+ * Reset the bookkeeping that belongs to one *physical* source line — the line counter and the
+ * layer-changed flag — before applying its command(s). Call exactly once per physical line,
+ * regardless of how many commands it holds (`splitCommands.ts`: RRF allows several — `G90 G1 X10` is
+ * two), then call {@link applyToken} once per command. `layerChanged` is deliberately not reset
+ * again between those `applyToken` calls: whichever command on the line carries the layer marker
+ * must not have its flag clobbered by a later command on the same line that carries none.
  */
-export function advance(state: MachineState, token: Tokenised): void {
+export function beginLine(state: MachineState): void {
 	state.lineNo++;
 	state.layerChanged = false;
+}
 
+/**
+ * Apply one already-tokenised command's effect to the state. `beginLine` must already have been
+ * called once for the physical line this command came from. `token` must be the tokenised
+ * **original** text: state tracking describes the source file, so a step that rewrites a command
+ * does not retroactively change what layer a later command is on.
+ */
+export function applyToken(state: MachineState, token: Tokenised): void {
 	if (token.comment !== null) {
 		applyComment(state, token.comment);
 	}
@@ -102,6 +112,17 @@ export function advance(state: MachineState, token: Tokenised): void {
 			break;
 		}
 	}
+}
+
+/**
+ * Advance the state by one source line holding exactly one command — `beginLine` + `applyToken` in
+ * one call. Kept for the many callers (and tests) that only ever see a single-command line; a caller
+ * that must handle a line with several commands (see `splitCommands.ts`) calls `beginLine` once and
+ * `applyToken` once per command instead — see `pipeline.ts`'s `line()` for the reference shape.
+ */
+export function advance(state: MachineState, token: Tokenised): void {
+	beginLine(state);
+	applyToken(state, token);
 }
 
 function applyComment(state: MachineState, comment: string): void {

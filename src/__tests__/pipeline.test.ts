@@ -7,6 +7,21 @@ import { makeStep, runSteps, SAMPLE } from "./helpers";
 /** A step that does nothing, to prove the pipeline itself is transparent. */
 const noop: Transform = { id: "noop", onLine: () => undefined };
 
+/** Records `ctx.z` at every `onLine` call, to inspect state tracking without rewriting anything. */
+function zSpy(): { transform: Transform; seen: Array<number | null> } {
+	const seen: Array<number | null> = [];
+	return {
+		transform: {
+			id: "zSpy",
+			onLine: (ctx: LineContext) => {
+				seen.push(ctx.z);
+				return undefined;
+			},
+		},
+		seen,
+	};
+}
+
 describe("the pipeline", () => {
 	it("is byte-identical with no steps", () => {
 		const { output } = runToString({ transforms: [] }, SAMPLE);
@@ -150,5 +165,49 @@ describe("the pipeline", () => {
 			makeStep("findReplace", { find: "M104", replace: "M568" }),
 		], SAMPLE).output;
 		expect(a).toBe(b);
+	});
+
+	describe("a line holding more than one command (RRF: 'G90 G1 X10' is two)", () => {
+		it("stays byte-identical when nothing touches either command", () => {
+			const { output } = runToString({ transforms: [noop] }, "G90 G1 Z5\nG1 X1 Y1");
+			expect(output).toBe("G90 G1 Z5\nG1 X1 Y1");
+		});
+
+		it("tracks state through EVERY command on the line, not just the first", () => {
+			const spy = zSpy();
+			runToString({ transforms: [spy.transform] }, "G90 G1 Z5\nG1 X1 Y1");
+			// Without the fix, `tokenise()` only ever sees "G90" on the combined line - the Z=5 move
+			// is invisible to the state machine, so ctx.z would stay null through both onLine calls
+			// on that line, and the second physical line would wrongly start from z=null too.
+			expect(spy.seen).toContain(5);
+			expect(spy.seen[spy.seen.length - 1]).toBe(5);
+		});
+
+		it("fires a Z-anchored insertion on a Z move hidden as a line's second command", () => {
+			const insert = makeStep("insertAt", { anchor: "z", z: 5, tolerance: 0.05, text: "M300", position: "after" });
+			const { output } = runToString({ transforms: [insert] }, "G90 G1 Z5\nG1 X1 Y1");
+			const lines = output.split("\n");
+			expect(lines).toContain("M300");
+			// The insertion must land right after the piece that actually reached Z5, not after the
+			// whole original two-command line as an undifferentiated block
+			expect(lines[lines.indexOf("M300") - 1]).toBe("G1 Z5");
+		});
+
+		it("splits the physical line into pieces only when a step actually rewrites one of them", () => {
+			const map = makeStep("commandMap", {
+				from: "G1", to: "G0", paramMap: "", addParams: "", dropParams: "", keepOriginal: false,
+			});
+			const { output } = runToString({ transforms: [map] }, "G90 G1 Z5\nG1 X1 Y1");
+			// G90 is untouched and must survive as its own line; only the matched G1 is rewritten
+			expect(output).toBe("G90 \nG0 Z5\nG0 X1 Y1");
+		});
+
+		it("counts a multi-command line as one touched line per step, not one per command", () => {
+			const map = makeStep("commandMap", { from: "G1", to: "G0", paramMap: "", addParams: "", dropParams: "" });
+			// Two G1s on the SAME physical line - both get rewritten, but it is still one source line
+			const { pipeline } = runToString({ transforms: [map] }, "G1 X1 G1 Y1");
+			expect(pipeline.stats.perStep).toEqual([1]);
+			expect(pipeline.stats.linesIn).toBe(1);
+		});
 	});
 });

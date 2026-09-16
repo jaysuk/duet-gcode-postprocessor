@@ -96,4 +96,16 @@ describe("AnalysisRunner", () => {
 		runner.line("G28", 0);
 		expect(runner.result().size).toBe(0);
 	});
+
+	it("shows a collector one snapshot per command on a multi-command line, matching the transform pass", () => {
+		const input = "G90 G1 Z5\nG1 X1 Y1";
+		const collector = new RecordingCollector();
+		driveAnalysisPass([collector], input);
+		const fromTransformPass = driveTransformPass(input);
+
+		// Two commands on the first physical line, one on the second - three snapshots total, not two
+		expect(collector.seen.length).toBe(3);
+		expect(collector.seen.map((s) => s.code)).toEqual(["G90", "G1", "G1"]);
+		expect(collector.seen).toEqual(fromTransformPass);
+	});
 });

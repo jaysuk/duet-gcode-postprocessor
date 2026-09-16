@@ -13,7 +13,8 @@
 
 import { createLineContext, syncLineContext, type MutableLineContext } from "./pipeline";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
-import { advance, createState, type MachineState } from "./gcode/state";
+import { applyToken, beginLine, createState, type MachineState } from "./gcode/state";
+import { splitCommands } from "./gcode/splitCommands";
 import { tokenise } from "dwc-gcode-core";
 import type { LineContext } from "./steps/types";
 
@@ -53,12 +54,23 @@ export class AnalysisRunner {
 		this.lineContext = createLineContext(this.state, this.meta);
 	}
 
-	/** Process one source line. `byteOffset` feeds `LineContext.progress`; pass 0 when not known. */
+	/**
+	 * Process one source line. `byteOffset` feeds `LineContext.progress`; pass 0 when not known.
+	 *
+	 * A line may hold more than one command (`splitCommands.ts`: `G90 G1 Z5` is two) — each is
+	 * applied to the state and shown to every collector in turn, exactly the way the transform pass's
+	 * `Pipeline.line()` treats it, so a collector sees the same per-command state a step's `onLine`
+	 * would later see for the same source line.
+	 */
 	line(raw: string, byteOffset = 0): void {
-		const token = tokenise(raw);
-		advance(this.state, token);
-		syncLineContext(this.lineContext, this.state, token, this.totalBytes, byteOffset);
-		for (const collector of this.collectors) collector.onLine(this.lineContext, raw);
+		const subLines = splitCommands(raw);
+		beginLine(this.state);
+		for (const subRaw of subLines) {
+			const token = tokenise(subRaw);
+			applyToken(this.state, token);
+			syncLineContext(this.lineContext, this.state, token, this.totalBytes, byteOffset);
+			for (const collector of this.collectors) collector.onLine(this.lineContext, subRaw);
+		}
 	}
 
 	/** Every collector's result, keyed by its id. */

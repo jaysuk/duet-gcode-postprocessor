@@ -527,6 +527,21 @@ describe("analyseText", () => {
 			expect(analysis.retractionStats).toEqual([{ tool: 0, count: 1, totalMm: 1 }]);
 		});
 	});
+
+	describe("a line holding more than one command (RRF: 'G90 G1 X10' is two)", () => {
+		it("counts every command on the line, not just the first", () => {
+			const analysis = analyseText("G90 G1 X10 Y10 E1 F1200");
+			expect(analysis.commandCounts.get("G90")).toBe(1);
+			expect(analysis.commandCounts.get("G1")).toBe(1);
+		});
+
+		it("tracks motion extents from a move riding along on a mode-change line", () => {
+			// Without the fix, tokenise() only ever sees "G90" here - the X/Y/Z move is invisible to
+			// extent tracking, so this would report `extents: null`
+			const analysis = analyseText("G90 G1 X10 Y20 Z0.3 F1200");
+			expect(analysis.extents).toEqual({ minX: 10, maxX: 10, minY: 20, maxY: 20, minZ: 0.3, maxZ: 0.3 });
+		});
+	});
 });
 
 describe("detectDialect", () => {
