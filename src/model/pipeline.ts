@@ -46,6 +46,12 @@ export interface PipelineOptions {
 	totalBytes?: number | null;
 	/** Emitted as the very first line of the output when set. */
 	stampLine?: string | null;
+	/** Emitted right after `stampLine` (or as the first line, if `stampLine` is unset) when set -
+	 *  `dwc-gcode-core`'s own "checked rrf=... plugin=... core=..." stamp, kept as a second, distinct
+	 *  field rather than folded into `stampLine` since the two are independent facts (this plugin's own
+	 *  idempotency marker vs. the shared core's "what was this last checked against") that a caller may
+	 *  set one, both, or neither of. */
+	coreStampLine?: string | null;
 	/** Stop recording individual changes past this many entries. Default 2000. */
 	maxDiffEntries?: number;
 	/** Results from a prior analysis pass (see `analysisPass.ts`), keyed by collector id. Empty when
@@ -65,6 +71,7 @@ export class Pipeline {
 	private readonly meta: SlicerMetadata;
 	private readonly totalBytes: number | null;
 	private readonly stampLine: string | null;
+	private readonly coreStampLine: string | null;
 	private readonly maxDiffEntries: number;
 	private readonly runContext: RunContext;
 	private readonly lineContext: MutableLineContext;
@@ -74,6 +81,7 @@ export class Pipeline {
 		this.meta = options.meta ?? emptyMetadata();
 		this.totalBytes = options.totalBytes ?? null;
 		this.stampLine = options.stampLine ?? null;
+		this.coreStampLine = options.coreStampLine ?? null;
 		this.maxDiffEntries = options.maxDiffEntries ?? DEFAULT_MAX_DIFF;
 		// The pre-scan already knows whether this file carries layer markers, so the state machine
 		// never has to guess on a file that has real ones
@@ -107,6 +115,7 @@ export class Pipeline {
 	begin(): Array<string> {
 		const out: Array<string> = [];
 		if (this.stampLine !== null) out.push(this.stampLine);
+		if (this.coreStampLine !== null) out.push(this.coreStampLine);
 		for (const transform of this.transforms) {
 			const emitted = transform.onStart?.(this.runContext);
 			if (Array.isArray(emitted)) out.push(...emitted);

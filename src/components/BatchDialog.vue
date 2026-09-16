@@ -80,7 +80,7 @@ import { computed, ref, watch } from "vue";
 import { useMachineStore } from "@/stores/machine";
 
 import { createGateway } from "../dwc/gateway";
-import { installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs } from "../dwc/machineSnapshot";
+import { installedPluginVersion, jobFileName, machineLimits, machineStatus, mainboardFirmwareVersion, toolHeaterConfigs } from "../dwc/machineSnapshot";
 import { MAX_BACKUPS, PLUGIN_MANIFEST_ID } from "../model/constants";
 import { exceedsBackupCap, runBatch, type BatchFileOutcome } from "../model/io/batch";
 import type { OutputMode } from "../model/io/plan";
@@ -160,6 +160,7 @@ async function runBatchInto(): Promise<void> {
 		suffix: suffix.value,
 		folder: folder.value,
 		pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
+		rrfVersion: mainboardFirmwareVersion(machineStore.model),
 		scriptsTrusted: props.scriptsTrusted,
 		limits: machineLimits(machineStore.model),
 		toolHeaters: toolHeaterConfigs(machineStore.model),

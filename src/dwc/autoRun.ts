@@ -37,7 +37,7 @@ import { recordError } from "dwc-plugin-runtime/diagnostics";
 
 import { createGateway } from "./gateway";
 import {
-	installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs,
+	installedPluginVersion, jobFileName, machineLimits, machineStatus, mainboardFirmwareVersion, toolHeaterConfigs,
 } from "./machineSnapshot";
 import { useRecipes } from "./recipeStore";
 import {
@@ -193,6 +193,7 @@ export async function handleFileUploaded(payload: FileUploadedPayload): Promise<
 			recipe,
 			plan,
 			pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
+			rrfVersion: mainboardFirmwareVersion(machineStore.model),
 			scriptsTrusted: false,
 			dryRun: false,
 			limits: machineLimits(machineStore.model),

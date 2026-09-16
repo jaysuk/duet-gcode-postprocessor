@@ -40,6 +40,7 @@ export interface RunBatchOptions {
 	suffix?: string;
 	folder?: string;
 	pluginVersion: string;
+	rrfVersion?: string | null;
 	scriptsTrusted: boolean;
 	limits?: ProcessOptions["limits"];
 	toolHeaters?: ProcessOptions["toolHeaters"];
@@ -125,6 +126,7 @@ export async function runBatch(options: RunBatchOptions): Promise<Array<BatchFil
 				recipe,
 				plan,
 				pluginVersion: options.pluginVersion,
+				rrfVersion: options.rrfVersion,
 				scriptsTrusted: options.scriptsTrusted,
 				dryRun: false,
 				limits: options.limits,

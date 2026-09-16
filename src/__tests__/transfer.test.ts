@@ -58,6 +58,41 @@ describe("processFile", () => {
 		expect(result.stats.linesChanged).toBe(3);
 	});
 
+	it("writes the dwc-gcode-core stamp after its own postprocessed-by stamp when the firmware version is known", async () => {
+		await run(gateway, { rrfVersion: "3.7.0-rc.1" });
+		const written = gateway.files.get(SOURCE)!;
+		const lines = written.split("\n");
+		expect(lines[0]).toMatch(/^; postprocessed-by: GCodePostProcessor /);
+		expect(lines[1]).toMatch(/^; dwc-gcode-core: checked rrf=3\.7\.0-rc\.1 plugin=GCodePostProcessor@0\.1\.0 core=\S+ at=\S+$/);
+	});
+
+	it("does not write the dwc-gcode-core stamp when the firmware version is unknown (never guessed)", async () => {
+		await run(gateway); // no rrfVersion override — defaults to undefined
+		const written = gateway.files.get(SOURCE)!;
+		expect(written).not.toContain("dwc-gcode-core: checked");
+	});
+
+	it("does not write the dwc-gcode-core stamp on a dry run, even with a known firmware version", async () => {
+		const result = await run(gateway, { rrfVersion: "3.7.0-rc.1", dryRun: true });
+		expect(result.stats.warnings).toEqual([]); // sanity: the run still completed normally
+		expect(gateway.files.get(SOURCE)).toBe(SAMPLE + "\n"); // untouched — dry run never writes
+	});
+
+	it("does not write the dwc-gcode-core stamp on a file kind that must never be stamped (e.g. a height map)", async () => {
+		// heightmap.csv's own loader requires line 1 to start with an exact literal comment - inserting
+		// anything before it breaks loading outright (dwc-gcode-core's stamp.ts, cited from RRF's
+		// HeightMap::LoadFromFile). classifyFile/stampable exist specifically to keep this plugin from
+		// ever doing that, no matter what recipe or firmware version is in play.
+		const heightMapSource = "0:/sys/heightmap.csv";
+		const hmGateway = new FakeGateway({ [heightMapSource]: SAMPLE + "\n" });
+		await run(hmGateway, {
+			sourcePath: heightMapSource,
+			plan: planOutput({ sourcePath: heightMapSource, mode: "inPlace", now: new Date("2026-08-30T11:22:33") }),
+			rrfVersion: "3.7.0-rc.1",
+		});
+		expect(hmGateway.files.get(heightMapSource)).not.toContain("dwc-gcode-core: checked");
+	});
+
 	it("skips a step whose condition is not met, and reports it as skipped rather than silently doing nothing", async () => {
 		// SAMPLE's own header identifies it as PrusaSlicer
 		const conditional: Recipe = {

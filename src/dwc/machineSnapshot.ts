@@ -49,6 +49,7 @@ interface LooseModel {
 	job?: { file?: { fileName?: string }; lastDuration?: number | null };
 	state?: { status?: string };
 	plugins?: Map<string, { version?: string }>;
+	boards?: Array<{ canAddress?: number | null; firmwareVersion?: string } | null>;
 }
 
 export function machineSnapshot(model: unknown): MachineSnapshot {
@@ -227,4 +228,17 @@ export function simulationStatus(model: unknown): { status: string | null; lastD
  */
 export function installedPluginVersion(model: unknown, manifestId: string): string {
 	return (model as LooseModel)?.plugins?.get(manifestId)?.version ?? "0.0.0";
+}
+
+/**
+ * The mainboard's own firmware version (`canAddress` 0, or the first board when that field is
+ * absent), for the `dwc-gcode-core` stamp's `rrf` field — same lookup other plugins in this family use
+ * (`resonance-lab`'s `firmwareUsesNewAccelScheme`, `duet-calibration-wizard`'s `model/machine.ts`).
+ * Null when disconnected or the model doesn't have a `boards` array yet - a file must never be stamped
+ * with a guessed version (see `stamp.ts`'s own `rrf` field being required, not defaulted).
+ */
+export function mainboardFirmwareVersion(model: unknown): string | null {
+	const boards = (model as LooseModel)?.boards ?? [];
+	const board = boards.find((b) => b !== null && b !== undefined && (b.canAddress ?? 0) === 0);
+	return typeof board?.firmwareVersion === "string" && board.firmwareVersion !== "" ? board.firmwareVersion : null;
 }

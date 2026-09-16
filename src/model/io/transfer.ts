@@ -15,8 +15,11 @@
  * bundle is a single IIFE with no dynamic import. See PLAN.md §3.2.
  */
 
+import { classifyFile, formatStampLine, stampable } from "dwc-gcode-core";
+
 import {
-	BACKUP_DIR, BACKUP_INDEX, MAX_BACKUPS, METADATA_SCAN_BYTES, OUTPUT_FLUSH_BYTES, READ_CHUNK_BYTES,
+	BACKUP_DIR, BACKUP_INDEX, MAX_BACKUPS, METADATA_SCAN_BYTES, OUTPUT_FLUSH_BYTES, PLUGIN_MANIFEST_ID,
+	READ_CHUNK_BYTES,
 } from "../constants";
 import { AnalysisRunner } from "../analysisPass";
 import { Analyser, type FileAnalysis } from "../analysis";
@@ -145,6 +148,11 @@ export interface ProcessOptions {
 	recipe: Recipe;
 	plan: OutputPlan;
 	pluginVersion: string;
+	/** The connected machine's own mainboard firmware version (`dwc/machineSnapshot.ts`'s
+	 *  `mainboardFirmwareVersion`), for the `dwc-gcode-core` stamp's `rrf` field. Null (or omitted)
+	 *  when disconnected or otherwise unknown - the core stamp is then skipped for this run entirely
+	 *  rather than writing one with a guessed version. */
+	rrfVersion?: string | null;
 	scriptsTrusted: boolean;
 	/** Dry run: everything is computed, nothing is written. */
 	dryRun: boolean;
@@ -299,13 +307,29 @@ export async function processFile(options: ProcessOptions): Promise<ProcessResul
 	}
 	const analysisResults: ReadonlyMap<string, unknown> = analysisResultsMut;
 
+	const runAt = options.now ?? new Date();
+
+	// dwc-gcode-core's own "checked rrf=... plugin=... core=..." stamp (task 09's user decision,
+	// distinct from this plugin's OWN "postprocessed-by" idempotency marker right above it) - only
+	// when the firmware version is actually known (never guessed - see ProcessOptions.rrfVersion's own
+	// doc comment) and this file's kind is one dwc-gcode-core's own `stampable()` allows (a height-map
+	// or probe-points file must never gain an extra leading line, or RRF's own loader breaks outright -
+	// classifyFile/stampable are exactly the check task 09 already worked out, reused here rather than
+	// re-derived). `formatStampLine`, not `writeStamp`: this plugin never holds a whole large file as
+	// one string (see this module's own header comment), so it emits the line itself as its own first
+	// output line, the same way it already does for its own stamp just below.
+	const coreStampLine = !options.dryRun && options.rrfVersion != null && stampable(classifyFile(sourcePath).kind)
+		? formatStampLine({ rrf: options.rrfVersion, pluginId: PLUGIN_MANIFEST_ID, pluginVersion: options.pluginVersion, at: runAt.toISOString() })
+		: null;
+
 	const transforms = buildTransforms(recipe, factoryCtx, meta);
 	const pipeline = new Pipeline({
 		transforms,
 		meta,
 		sourcePath,
 		totalBytes: blob.size,
-		stampLine: options.dryRun ? null : makeStamp(recipe, options.pluginVersion, options.now),
+		stampLine: options.dryRun ? null : makeStamp(recipe, options.pluginVersion, runAt),
+		coreStampLine,
 		analysisResults,
 	});
 	// A step a condition removed never became a Transform at all, so the pipeline itself has no idea

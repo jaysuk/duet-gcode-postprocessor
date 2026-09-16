@@ -105,6 +105,16 @@ describe("the pipeline", () => {
 		expect(output.split("\n")[0]).toBe("; stamp");
 	});
 
+	it("writes the core stamp as the first line when given one and no plugin stamp", () => {
+		const { output } = runToString({ transforms: [], coreStampLine: "; core stamp" }, "G28");
+		expect(output.split("\n")[0]).toBe("; core stamp");
+	});
+
+	it("writes the plugin stamp then the core stamp, in that order, when both are given", () => {
+		const { output } = runToString({ transforms: [], stampLine: "; stamp", coreStampLine: "; core stamp" }, "G28");
+		expect(output.split("\n").slice(0, 2)).toEqual(["; stamp", "; core stamp"]);
+	});
+
 	it("exposes machine state to a step through the line context", () => {
 		const seen: Array<{ layer: number; tool: number; z: number | null }> = [];
 		const spy: Transform = {

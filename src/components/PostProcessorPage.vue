@@ -326,7 +326,7 @@ import RunHistory from "./RunHistory.vue";
 import { isAutoRunEnabled, isAutoRunSilent, setAutoRunEnabled, setAutoRunSilent } from "../dwc/autoRun";
 import { useBreakpoint } from "../dwc/useBreakpoint";
 import { createGateway } from "../dwc/gateway";
-import { installedPluginVersion, jobFileName, machineLimits, machineStatus, toolHeaterConfigs } from "../dwc/machineSnapshot";
+import { installedPluginVersion, jobFileName, machineLimits, machineStatus, mainboardFirmwareVersion, toolHeaterConfigs } from "../dwc/machineSnapshot";
 import { usePluginSettings } from "../dwc/pluginSettings";
 import { scriptsTrusted, setScriptsTrusted, trustedRecipes, useRecipes } from "../dwc/recipeStore";
 import type { CheckResult } from "../model/checks";
@@ -587,6 +587,7 @@ async function run(dryRun: boolean): Promise<void> {
 		recipe: recipe.value,
 		plan: plan.value,
 		pluginVersion: installedPluginVersion(machineStore.model, PLUGIN_MANIFEST_ID),
+		rrfVersion: mainboardFirmwareVersion(machineStore.model),
 		scriptsTrusted: scriptsTrusted(recipe.value.id),
 		dryRun,
 		signal,
