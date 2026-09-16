@@ -1,8 +1,10 @@
 # A custom G-code editor — replacing Monaco, package outline and plan
 
-**Status: 2026-09-16. Discussion only — nothing built yet.** This document exists to turn a
-conversation into a plan before any code, the same convention `gcode-core-plan.md` followed for
-`dwc-gcode-core`. It is **cross-repo like that document was**: it will live here until (if) the new
+**Status: 2026-09-16. Stop points 2 and 3 resolved empirically (see their own section below) — CM6
+confirmed viable at the plugin's real 200 MB ceiling, with one honest caveat on memory. Nothing in
+the real package built yet.** This document exists to turn a conversation into a plan before any
+code, the same convention `gcode-core-plan.md` followed for `dwc-gcode-core`. It is **cross-repo
+like that document was**: it will live here until (if) the new
 package gets its own repo, but it directly concerns `Flexible-Layouts` and DWC core (read-only,
 never modified directly) as well as this one.
 
@@ -136,48 +138,97 @@ question, not a settled decision** — free-form typing has to work for hand-edi
 regardless of how completion/diagnostics are modelled, so stop point 1 below has to answer *how much*
 of real character-by-character editing still needs its own, non-structured path.
 
-### Decision 4 (stop point) — build the text-editing primitives on CodeMirror 6, not from scratch
+### Decision 4 — build the text-editing primitives on CodeMirror 6, not from scratch
 
-**Recommendation, not yet verified — see stop point 2.** "Our own custom version, customise as much
-as we like" does not require reinventing cursor/selection/undo/IME/clipboard from zero. CodeMirror 6
-(MIT, `@codemirror/state` + `@codemirror/view` + `@codemirror/commands`, pulled in à la carte) is
-built specifically to be extended rather than used as a monolith the way Monaco is — a G-code
-language mode, our own gutter widgets, our own linting source, and our own completion source are all
-first-class CM6 extension points, not workarounds. It has real large-document support Monaco lacks
-(though "real" needs to be measured, not assumed — stop point 2). This gets 100% of the
-customisability the user asked for while not spending months re-solving IME composition and undo-tree
-correctness, which add zero value for G-code and are exactly the kind of subtle-bug-prone problem
-worth not re-inventing. If stop point 2 shows CM6 cannot handle a real multi-hundred-thousand-line
-fixture acceptably, the fallback is a fully bespoke buffer — strictly more work, kept as the fallback
-rather than the default plan.
+**Confirmed 2026-09-16 — see stop point 2 for the real measurements.** "Our own custom version,
+customise as much as we like" does not require reinventing cursor/selection/undo/IME/clipboard from
+zero. CodeMirror 6 (MIT, `@codemirror/state` + `@codemirror/view` + `@codemirror/commands`, pulled in
+à la carte) is built specifically to be extended rather than used as a monolith the way Monaco is —
+a G-code language mode, our own gutter widgets, our own linting source, and our own completion source
+are all first-class CM6 extension points, not workarounds. Verified real large-document support
+Monaco lacks: every interactive operation (scroll, cursor jump, edit, type) measured constant-time
+against a real 200 MB/5.8M-line fixture, not just claimed. This gets 100% of the customisability the
+user asked for while not spending months re-solving IME composition and undo-tree correctness, which
+add zero value for G-code and are exactly the kind of subtle-bug-prone problem worth not re-inventing.
+The one real tradeoff the measurement surfaced — ~2.8× the raw file size in resident memory once a
+file is fully loaded into a CM6 document — is not a reason to abandon CM6 (a bespoke buffer would pay
+a similar or worse cost for the same "hold the whole document" requirement); it is a reason to not
+*always* hold the whole document that way, which is now folded into the viewport-model design (stop
+point 2's refinement) rather than left as a surprise for later.
 
 ## Stop points — resolve these before deep implementation
 
 Per this family's own convention (`docs/tasks/13-simulation-and-tail.md`'s pattern): a genuinely open
 question gets a first step that resolves it empirically, not a guess baked into the design.
 
-1. **How much of real editing needs free-form, non-structured text mutation?** Sit down with the
-   actual expected use (hand-tweaking a macro/start-gcode block vs. purely viewing+diagnosing a huge
-   sliced file) and decide whether Decision 3's "structured operations first" holds, or whether full
-   free-form editing is required everywhere from day one. This changes how much CM6's own
-   transaction/change model needs to be exposed vs. wrapped.
-2. **Verify CM6's real behaviour on a large fixture before committing to Decision 4.** Build a throwaway
-   prototype: load one of the golden-file fixtures' larger siblings (or a synthetically large one) into
-   a bare CM6 instance with a custom G-code `StreamLanguage`, and measure scroll/typing responsiveness.
-   Confirm it does NOT require the whole file as one in-memory string in the same way Monaco does (CM6's
-   `Text` type is a rope, not a flat string — verify this claim against CM6's own docs/source rather
-   than trusting general knowledge of it, matching this family's own standing rule).
-3. **How does a plugin ship a ~heavy dependency without bloating the always-loaded bundle?**
-   `duet-tool-align`'s lazy-fetched `opencv.bin` asset and `duet-gcode-postprocessor`'s own QuickJS
-   asset (`scripts/build-quickjs-asset.mjs`, task 14/15) are the established pattern in this family —
-   confirm CM6's real bundled size (likely far smaller than Monaco's ~3.8 MB, but measure, don't
-   assume) and decide whether it even needs the lazy-asset treatment or can just ship in the normal
-   bundle.
-4. **Does the workspace-shell's flat single-array of tabs (both prior-art files, and PR #517's
+1. **[Open] How much of real editing needs free-form, non-structured text mutation?** Sit down with
+   the actual expected use (hand-tweaking a macro/start-gcode block vs. purely viewing+diagnosing a
+   huge sliced file) and decide whether Decision 3's "structured operations first" holds, or whether
+   full free-form editing is required everywhere from day one. Does not block starting the core build
+   — CM6 supports both a structured-dispatch API and raw free-form typing equally natively, so this
+   only decides how much of the new package's own API surface leads with one over the other.
+
+2. **[Resolved 2026-09-16] Verify CM6's real behaviour on a large fixture before committing to
+   Decision 4.** Built a throwaway spike (`_spike-gcode-editor/`, sibling to this repo, not
+   committed anywhere — CM6's real `@codemirror/state`/`view`/`language`/`commands`, a minimal
+   `StreamLanguage` G-code highlighter, Playwright driving a real Chromium): a synthetic fixture built
+   to the plugin's own stated 200 MB ceiling (200,585,934 bytes, 5,813,888 lines), loaded via a
+   chunked `fetch` → line-array → `Text.of()` build that mirrors `transfer.ts`'s own streaming-reader
+   shape (never concatenating the whole file into one string at any point). Measured (Chromium,
+   this machine):
+
+   | Operation | Time |
+   |---|---|
+   | Load: fetch + decode + chunked `Text` build (one-time, on open) | 1,589 ms |
+   | `EditorState.create` | 6 ms |
+   | Initial `EditorView` mount/paint | 36 ms |
+   | Scroll to the very end of the document | 56 ms |
+   | Jump the cursor to line 250,000 (mid-document) + scroll into view | 39 ms |
+   | Insert a character at position 0 (worst case for a flat-string/array model) | 23 ms |
+   | Type 14 characters (Playwright's own per-keystroke overhead included) | 103 ms total |
+
+   Every interactive operation stayed roughly **constant regardless of document size** (near-identical
+   numbers were seen on a smaller 17.5 MB/510,000-line run first) — the hallmark of a real persistent
+   tree, not a flat buffer. Confirmed against the installed package's own compiled source, not
+   general knowledge: `@codemirror/state`'s `Text` is a real rope (`TextLeaf`/`TextNode`, leaves
+   capped at 32 lines, `TextNode.from` balances a tree — `dist/index.js`), and `Text.of(lines:
+   readonly string[])` takes an array of lines, not one flat string — so the claim holds, verified,
+   not assumed.
+
+   **Honest caveat this test also surfaced, which the original stop point's question didn't
+   anticipate:** a fully-loaded 200 MB document costs **~560 MB of resident JS heap**
+   (`performance.memory.usedJSHeapSize`, Chromium) — about **2.8×** the raw file size (UTF-16 string
+   storage plus rope/tree overhead). CM6 avoids Monaco's *single giant contiguous string* problem and
+   gives size-independent interaction performance, but it does **not** mean the file's content stops
+   being resident in memory once opened — a persistent-tree document is a different, much better cost
+   than one flat string, not a free lunch. On desktop hardware this is comfortably fine on its own
+   (Chromium's own heap ceiling on this machine measured ~4.4 GB), but it directly matters for the
+   workspace-shell's multi-tab design: **N tabs each holding a near-ceiling-sized file is roughly
+   N × 560 MB**, not free just because each tab is "just text." Decision 4 stands (CM6 is the right
+   base), but this refines it: **a genuinely huge file opened purely to view/diagnose (not edit)
+   should get a lighter, truly windowed read-only mode** that pages lines from the source `Blob`
+   as the viewport scrolls rather than building one `Text` for the whole file — reserving full CM6
+   documents for files a user is actually editing (typically far smaller than 200 MB) and for huge
+   files only once a user explicitly commits to editing one. This is a refinement to design, to be
+   made concrete when the core's viewport model is actually built (sequencing step 2), not a new open
+   stop point.
+
+3. **[Resolved 2026-09-16] How does a plugin ship a ~heavy dependency without bloating the
+   always-loaded bundle?** A real production IIFE build (Vite, matching this plugin's own bundling
+   approach) of `@codemirror/state` + `@codemirror/view` + `@codemirror/language` + `@codemirror/commands`
+   plus the app/highlighting glue: **288 KB minified, 94 KB gzipped**. (`@codemirror/autocomplete`,
+   `@codemirror/lint`, and `@codemirror/search` were installed but not yet wired into the spike, so
+   the real eventual number is somewhat larger — but nowhere near Monaco's own measured ~3.8 MB in
+   `ExplorerPanel.vue`, roughly **40× smaller** even before accounting for those.) **No lazy-asset
+   treatment needed** — unlike `duet-tool-align`'s OpenCV or this plugin's own QuickJS asset, this is
+   small enough to ship in the normal bundle.
+
+4. **[Open] Does the workspace-shell's flat single-array of tabs (both prior-art files, and PR #517's
    `groupId` extension) still work once tabs live in a Flexible-Layouts *widget* (a grid tile, not a
    full page)?** A widget's available space is much smaller than a page — confirm split-panes still
    make sense there at all, or whether split view is page/full-screen-only in that host, with the
    widget staying single-pane (`ExplorerPanel.vue`'s existing shape, just re-pointed at the new core).
+   Best resolved when actually building the Flexible-Layouts consumer (sequencing step 4), not before.
 
 ## Explicitly out of scope for this round
 
