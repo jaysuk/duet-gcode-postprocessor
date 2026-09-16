@@ -10,6 +10,7 @@ import DiffPreview from "../src/components/DiffPreview.vue";
 import FileInspector from "../src/components/FileInspector.vue";
 import GcodeBrowser from "../src/components/GcodeBrowser.vue";
 import GcodeEditor from "../src/components/GcodeEditor.vue";
+import GcodeWorkspace from "../src/components/GcodeWorkspace.vue";
 import PostProcessorPage from "../src/components/PostProcessorPage.vue";
 import PostProcessorWidget from "../src/components/PostProcessorWidget.vue";
 import RecipeEditor from "../src/components/RecipeEditor.vue";
@@ -156,6 +157,62 @@ describe("components mount", () => {
 			expect(wrapper.text()).toContain("L0");
 			expect(wrapper.text()).toContain("Z0.20");
 		});
+		wrapper.unmount();
+	});
+
+	it("mounts the workspace with nothing selected", () => {
+		const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: null } });
+		expect(wrapper.text()).toContain("Select a G-code file");
+		wrapper.unmount();
+	});
+
+	it("opens the initially-selected file with no tab strip shown for just one tab", async () => {
+		downloadMock.mockResolvedValue(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+		expect(wrapper.findAllComponents({ name: "VTab" }).length).toBe(0);
+		wrapper.unmount();
+	});
+
+	it("opens a second tab for a different file, keeping the first mounted", async () => {
+		downloadMock.mockResolvedValue(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+
+		await wrapper.setProps({ selectedPath: "0:/gcodes/b.g" });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("b.g"));
+		expect(wrapper.text()).toContain("a.g");
+		wrapper.unmount();
+	});
+
+	it("re-selecting an already-open file focuses it rather than opening a duplicate tab", async () => {
+		downloadMock.mockResolvedValue(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+
+		await wrapper.setProps({ selectedPath: "0:/gcodes/b.g" });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("b.g"));
+
+		await wrapper.setProps({ selectedPath: "0:/gcodes/a.g" });
+		await wrapper.vm.$nextTick();
+		const tabs = wrapper.findAll(".v-tab").map((t) => t.text());
+		expect(tabs.filter((t) => t.includes("a.g"))).toHaveLength(1);
+		wrapper.unmount();
+	});
+
+	it("closing one of two tabs drops back to a single, strip-less tab", async () => {
+		downloadMock.mockResolvedValue(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+		await wrapper.setProps({ selectedPath: "0:/gcodes/b.g" });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("b.g"));
+
+		const closeBtn = wrapper.findAll("button").find((b) => b.attributes("title")?.includes("Close b.g"));
+		expect(closeBtn).toBeDefined();
+		await closeBtn!.trigger("click");
+		await wrapper.vm.$nextTick();
+		expect(wrapper.text()).not.toContain("b.g");
+		expect(wrapper.findAllComponents({ name: "VTab" }).length).toBe(0); // back to one tab, strip hidden
 		wrapper.unmount();
 	});
 

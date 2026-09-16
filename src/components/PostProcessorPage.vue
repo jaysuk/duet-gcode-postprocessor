@@ -142,7 +142,7 @@
 					<FileInspector v-if="hasOpenedInspect" v-show="tab === 'inspect'" :path="selectedPath"
 								   @checked="onChecked" />
 
-					<GcodeEditor v-if="hasOpenedEdit" v-show="tab === 'edit'" :path="selectedPath" />
+					<GcodeWorkspace v-if="hasOpenedEdit" v-show="tab === 'edit'" :selected-path="selectedPath" />
 
 					<DiffPreview v-if="tab === 'preview'"
 								 :result="lastRun"
@@ -325,7 +325,7 @@ import CompareFiles from "./CompareFiles.vue";
 import DiffPreview from "./DiffPreview.vue";
 import FileInspector from "./FileInspector.vue";
 import GcodeBrowser from "./GcodeBrowser.vue";
-import GcodeEditor from "./GcodeEditor.vue";
+import GcodeWorkspace from "./GcodeWorkspace.vue";
 import RecipeEditor from "./RecipeEditor.vue";
 import RunHistory from "./RunHistory.vue";
 import { isAutoRunEnabled, isAutoRunSilent, setAutoRunEnabled, setAutoRunSilent } from "../dwc/autoRun";
