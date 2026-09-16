@@ -145,6 +145,20 @@ describe("components mount", () => {
 		wrapper.unmount();
 	});
 
+	it("shows the line-state gutter once the (deferred) index finishes building", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob([";LAYER_CHANGE\n;Z:0.20\nG1 Z0.2 F600\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => {
+			expect(wrapper.text()).toContain("G1 Z0.2 F600");
+		});
+		// The gutter's own build is deferred a tick past the editor mounting - wait for it too
+		await vi.waitFor(() => {
+			expect(wrapper.text()).toContain("L0");
+			expect(wrapper.text()).toContain("Z0.20");
+		});
+		wrapper.unmount();
+	});
+
 	it("mounts the diff preview with no run yet", () => {
 		const wrapper = mountInDwc(DiffPreview, {
 			props: { result: null, recipe: null, sourceName: "" },

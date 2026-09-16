@@ -13,6 +13,14 @@
 	font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
 	font-size: 0.8125rem;
 }
+.gcode-editor-host :deep(.cm-gcode-line-state-gutter) {
+	color: rgba(var(--v-theme-on-surface), 0.6);
+	font-size: 0.6875rem;
+	padding: 0 0.5em;
+}
+.gcode-editor-host :deep(.cm-gcode-line-state) {
+	white-space: pre;
+}
 </style>
 
 <template>
@@ -63,6 +71,8 @@ import { useMachineStore } from "@/stores/machine";
 import { createGateway } from "../dwc/gateway";
 import { mainboardFirmwareVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
+import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
+import { lineStateGutter } from "../model/gcode/lineStateGutter";
 
 const props = defineProps<{ path: string | null }>();
 
@@ -78,10 +88,15 @@ const editorInstance = shallowRef<EditorInstance | null>(null);
 const editorReady = ref(false);
 
 let loadedPath: string | null = null;
+// Read by lineStateGutter's markers() callback on every repaint - not a ref, since a gutter
+// recompute is forced explicitly (see load()) rather than through Vue's own reactivity, and this
+// value can be read many times per second while scrolling a large file.
+let lineIndex: LineStateIndex | null = null;
 
 function editorExtensions() {
 	return [
 		lineNumbers(),
+		lineStateGutter(() => lineIndex),
 		gcodeLanguage,
 		syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 		gcodeLintUi(),
@@ -94,6 +109,7 @@ function destroyEditor(): void {
 	editorInstance.value = null;
 	editorReady.value = false;
 	loadedPath = null;
+	lineIndex = null;
 }
 
 async function load(path: string): Promise<void> {
@@ -117,6 +133,21 @@ async function load(path: string): Promise<void> {
 		});
 		loadedPath = path;
 		editorReady.value = true;
+
+		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
+		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently
+		// sequential - see lineState.ts's own doc comment) - running it before the editor's own
+		// createEditorInstance call would delay the first paint by the same amount on a huge
+		// file. Deferring lets the editor mount and paint first; the gutter simply stays empty
+		// (lineStateGutter's own documented behaviour for a null index) until this resolves.
+		// NOT chunked/yielding yet - a real, known scope boundary for a later pass if a very
+		// large file's index build is ever shown to cost enough to matter on real hardware.
+		const instance = editorInstance.value;
+		setTimeout(() => {
+			if (editorInstance.value !== instance) return; // superseded by a newer load() already
+			lineIndex = buildLineStateIndex(instance.view.state.doc);
+			instance.view.dispatch({}); // force the gutter to pick up the now-ready index
+		}, 0);
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
 	} finally {
