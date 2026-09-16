@@ -7,9 +7,10 @@
  */
 
 import {
-	registerEmbeddableComponent, registerPluginMessages, registerRoute, unregisterEmbeddableComponent,
-	unregisterRoute,
+	registerEmbeddableComponent, registerPluginContextMenuItem, registerPluginMessages, registerRoute,
+	unregisterEmbeddableComponent, unregisterRoute,
 } from "@/plugins";
+import { ContextMenuType } from "@/stores/ui";
 import Events from "@/utils/events";
 import { clearAnnouncedUpdate, installErrorCapture } from "dwc-plugin-runtime";
 
@@ -28,9 +29,26 @@ registerRoute(PostProcessorPage, {
 			icon: "mdi-file-replace-outline",
 			caption: "plugins.gCodePostProcessor.menuCaption",
 			path: ROUTE_PATH,
+			// Deep-link form: /Plugins/GCodePostProcessor/<volume>/<sd-path> opens straight to that
+			// file's Edit tab - mirrors DWC's own bundled GCodeViewer plugin's identical
+			// :volume?/:path(.*)? pattern, the established convention for this exact case.
+			routePath: `${ROUTE_PATH}/:volume?/:path(.*)?`,
 		},
 	},
 });
+
+// The right-click "check for errors" / "edit" entry this whole feature started from - shown on
+// G-code file rows in both the Jobs page and the Explorer's gcode folders (ContextMenuType only
+// has one member, JobFileList, but FileList.vue shows these on any gcode directory, not just the
+// dedicated Jobs list). Same mechanism DWC's own bundled GCodeViewer plugin uses for its
+// "view as 3D model" entry - confirmed real and current by reading that plugin's own index.ts.
+registerPluginContextMenuItem(
+	"Edit in G-code Post-Processor",
+	ROUTE_PATH,
+	"mdi-file-replace-outline",
+	"gCodePostProcessor.editFile",
+	ContextMenuType.JobFileList,
+);
 
 // registerEmbeddableComponent needs DWC 3.7.0-alpha.7+; guard so an older 3.7 still gets the page
 let embedded = false;

@@ -312,6 +312,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { AboutDialog, type AboutExtraAction } from "dwc-plugin-runtime";
 import { buildReport, copyReport, downloadReport, recordError } from "dwc-plugin-runtime/diagnostics";
 import { downloadBlob } from "dwc-plugin-runtime/download";
@@ -332,6 +333,7 @@ import { useBreakpoint } from "../dwc/useBreakpoint";
 import { createGateway } from "../dwc/gateway";
 import { installedPluginVersion, jobFileName, machineLimits, machineStatus, mainboardFirmwareVersion, toolHeaterConfigs } from "../dwc/machineSnapshot";
 import { usePluginSettings } from "../dwc/pluginSettings";
+import { sdPathFromRouteParams, type RouteParams } from "../model/routeFile";
 import { scriptsTrusted, setScriptsTrusted, trustedRecipes, useRecipes } from "../dwc/recipeStore";
 import type { CheckResult } from "../model/checks";
 import { DOCS_URL, LS_SELECTED_FILE, PLUGIN_MANIFEST_ID } from "../model/constants";
@@ -372,6 +374,16 @@ const autoRunSilent = ref(isAutoRunSilent());
 const confirmOpen = ref(false);
 const startAfterApply = ref(false);
 const selectedPath = ref<string | null>(readStoredPath());
+
+// Deep-link support for the right-click "Edit in G-code Post-Processor" context-menu item
+// (index.ts's registerPluginContextMenuItem + the routePath registered alongside this page's
+// plain path) - see model/routeFile.ts for the pure param-parsing rule and why it is tested there.
+const route = useRoute();
+watch(() => sdPathFromRouteParams(route.params as RouteParams), (path) => {
+	if (path === "") return;
+	selectedPath.value = path;
+	tab.value = "edit";
+}, { immediate: true });
 const outputMode = ref<OutputMode>("alongside");
 const suffix = ref(".pp");
 const folder = ref("0:/gcodes/postprocessed");
