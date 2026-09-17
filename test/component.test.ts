@@ -160,6 +160,41 @@ describe("components mount", () => {
 		wrapper.unmount();
 	});
 
+	it("opens in dark mode when DWC's own darkTheme setting is already on", async () => {
+		dwc.settings.darkTheme = true;
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		document.body.appendChild(wrapper.element); // getComputedStyle needs a connected element
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+
+		const cmEditor = wrapper.find(".cm-editor");
+		expect(cmEditor.exists()).toBe(true);
+		const bg = getComputedStyle(cmEditor.element).backgroundColor;
+		expect(bg).not.toBe(""); // oneDarkTheme's own background, not the browser default
+		expect(bg).not.toBe("rgba(0, 0, 0, 0)");
+
+		wrapper.unmount();
+	});
+
+	it("follows a live darkTheme toggle without reloading the file", async () => {
+		dwc.settings.darkTheme = false;
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		document.body.appendChild(wrapper.element);
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+
+		const cmEditor = wrapper.find(".cm-editor");
+		const lightBg = getComputedStyle(cmEditor.element).backgroundColor;
+
+		dwc.settings.darkTheme = true;
+		await nextTick();
+		const darkBg = getComputedStyle(cmEditor.element).backgroundColor;
+		expect(darkBg).not.toBe(lightBg);
+		expect(wrapper.text()).toContain("G28"); // same document - not a reload
+
+		wrapper.unmount();
+	});
+
 	it("mounts the workspace with nothing selected", () => {
 		const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: null } });
 		expect(wrapper.text()).toContain("Select a G-code file");

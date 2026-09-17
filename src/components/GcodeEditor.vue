@@ -58,16 +58,16 @@
  * separate scope for a follow-up once this path is proven against a real machine.
  */
 import { onUnmounted, ref, shallowRef, watch } from "vue";
-import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { lintGutter } from "@codemirror/lint";
 import { lineNumbers } from "@codemirror/view";
 import { diagnoseDocument, parseDocument } from "dwc-gcode-core";
 import {
-	applyDiagnostics, buildDocFromChunks, createEditorInstance, gcodeLanguage, gcodeLintUi,
-	type EditorInstance,
+	applyDiagnostics, buildDocFromChunks, createEditorInstance, createThemeController,
+	gcodeCompletion, gcodeLanguage, gcodeLintUi, type EditorInstance, type ThemeController,
 } from "dwc-gcode-editor";
 
 import { useMachineStore } from "@/stores/machine";
+import { useSettingsStore } from "@/stores/settings";
 import { createGateway } from "../dwc/gateway";
 import { mainboardFirmwareVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
@@ -77,6 +77,9 @@ import { lineStateGutter } from "../model/gcode/lineStateGutter";
 const props = defineProps<{ path: string | null }>();
 
 const machineStore = useMachineStore();
+// Narrow cast, matching this repo's own convention (pluginSettings.ts's SettingsLike) rather than
+// importing DWC's full settings store type - this component only ever reads the one field.
+const settingsStore = useSettingsStore() as unknown as { darkTheme: boolean };
 const editorHostEl = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const checking = ref(false);
@@ -92,13 +95,17 @@ let loadedPath: string | null = null;
 // recompute is forced explicitly (see load()) rather than through Vue's own reactivity, and this
 // value can be read many times per second while scrolling a large file.
 let lineIndex: LineStateIndex | null = null;
+// One ThemeController per live editor instance (a Compartment belongs to exactly one EditorView) -
+// recreated on every load(), read by the darkTheme watcher below to push a live swap.
+let themeController: ThemeController | null = null;
 
-function editorExtensions() {
+function editorExtensions(theme: ThemeController) {
 	return [
 		lineNumbers(),
 		lineStateGutter(() => lineIndex),
 		gcodeLanguage,
-		syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+		theme.extension,
+		gcodeCompletion(),
 		gcodeLintUi(),
 		lintGutter(),
 	];
@@ -110,6 +117,7 @@ function destroyEditor(): void {
 	editorReady.value = false;
 	loadedPath = null;
 	lineIndex = null;
+	themeController = null;
 }
 
 async function load(path: string): Promise<void> {
@@ -126,10 +134,11 @@ async function load(path: string): Promise<void> {
 		const doc = await buildDocFromChunks(blobToTextChunks(blob));
 		if (props.path !== path || editorHostEl.value === null) return;
 
+		themeController = createThemeController(settingsStore.darkTheme);
 		editorInstance.value = createEditorInstance({
 			doc,
 			parent: editorHostEl.value,
-			extensions: editorExtensions(),
+			extensions: editorExtensions(themeController),
 		});
 		loadedPath = path;
 		editorReady.value = true;
@@ -166,6 +175,14 @@ watch(() => props.path, (path) => {
 // flush() always runs first - see dwc-gcode-editor's own editorCore.ts doc comment for the gap
 // this closes (PR #517's "unmounting a dirty editor would silently lose the edits").
 onUnmounted(() => destroyEditor());
+
+// Follow DWC's own dark/light toggle live - the same flag MonacoEditor.vue reads to pick "vs" vs
+// "vs-dark". Only meaningful once an instance exists; a toggle flip with no file open just becomes
+// the initial value the next load() reads via createThemeController above.
+watch(() => settingsStore.darkTheme, (dark) => {
+	const instance = editorInstance.value;
+	if (instance !== null && themeController !== null) themeController.setDark(instance.view, dark);
+});
 
 async function checkForErrors(): Promise<void> {
 	const instance = editorInstance.value;
