@@ -74,11 +74,19 @@ export function resolveKnownPath(path: string, state: MachineState): EvalValue |
 
 /** Walks `doc` in real execution order and derives the machine state after each step. A real,
  *  synchronous O(steps) cost - callers defer this the same way `GcodeEditor.vue` already defers
- *  `buildLineStateIndex`, so it doesn't delay the editor's first paint. */
+ *  `buildLineStateIndex`, so it doesn't delay the editor's first paint.
+ *
+ *  `objectModelVersion`, when given, is passed straight through to `walkExecution`'s own option of the
+ *  same name: every referenced object-model path is checked against `dwc-gcode-core`'s schema for that
+ *  exact RRF version, turning a typo'd/nonexistent path into a hard error instead of a pause asking
+ *  for a value that could never be right. Callers should only ever pass a version confirmed to have
+ *  real schema data (`machineSnapshot.ts`'s `trackedObjectModelVersion` does that check) - passing an
+ *  untracked version makes `walkExecution` throw internally on every blocking condition instead. */
 export function buildExecutionIndex(
 	doc: Text,
 	resolvePath: (path: string) => EvalValue,
 	resolveMessageBox: (prompt: MessageBoxPrompt) => MessageBoxAnswer,
+	objectModelVersion?: string,
 ): ExecutionIndex {
 	const gdoc = parseDocument(doc.toString());
 	const state = createState();
@@ -90,6 +98,7 @@ export function buildExecutionIndex(
 			return known !== undefined ? known : resolvePath(path);
 		},
 		resolveMessageBox,
+		objectModelVersion,
 		onStep: (step) => {
 			applyLineToState(state, doc.line(step.line + 1).text);
 			steps.push({ line: step.line, state: { ...state } });

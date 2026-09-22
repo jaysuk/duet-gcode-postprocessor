@@ -209,6 +209,26 @@ describe("buildExecutionIndex answers homed status from a G28 already walked pas
 	});
 });
 
+describe("buildExecutionIndex's objectModelVersion passthrough", () => {
+	it("with no version given, an unknown/typo'd path just pauses like any other", () => {
+		const doc = docOf(["if bogus.path.here > 0", "    G1 X1"]);
+		const r = buildExecutionIndex(doc, noOverrides(), noMessageBoxes());
+		expect(r.status).toBe("paused");
+	});
+
+	it("with a tracked version given, an unknown/typo'd path is a hard error instead", () => {
+		const doc = docOf(["if bogus.path.here > 0", "    G1 X1"]);
+		const r = buildExecutionIndex(doc, noOverrides(), noMessageBoxes(), "3.7.0-rc.1");
+		expect(r.status).toBe("error");
+	});
+
+	it("a real, known path still resolves normally through the caller's resolvePath", () => {
+		const doc = docOf(["if move.speedFactor > 0", "    G1 X1"]);
+		const r = buildExecutionIndex(doc, () => 1, noMessageBoxes(), "3.7.0-rc.1");
+		expect(r.status).toBe("complete");
+	});
+});
+
 describe("simulated-value persistence", () => {
 	it("round-trips through localStorage, keyed by file path", () => {
 		const path = "0:/gcodes/persistence-test-1.gcode";

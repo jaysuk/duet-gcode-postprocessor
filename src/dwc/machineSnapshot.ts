@@ -4,6 +4,8 @@
  * change breaks here rather than in eight different rules.
  */
 
+import { OBJECT_MODEL_VERSIONS } from "dwc-gcode-core";
+
 import { emptySnapshot, type MachineSnapshot } from "../model/checks";
 import type { MachineLimits } from "../model/gcode/timeModel";
 import type { HeaterModel, ToolConfig, ToolHeaterConfig } from "../model/preheat";
@@ -241,4 +243,22 @@ export function mainboardFirmwareVersion(model: unknown): string | null {
 	const boards = (model as LooseModel)?.boards ?? [];
 	const board = boards.find((b) => b !== null && b !== undefined && (b.canAddress ?? 0) === 0);
 	return typeof board?.firmwareVersion === "string" && board.firmwareVersion !== "" ? board.firmwareVersion : null;
+}
+
+/**
+ * The connected mainboard's firmware version, but ONLY when `dwc-gcode-core`'s object-model schema
+ * has real data for that EXACT version string — for `walkExecution`'s own `objectModelVersion` option
+ * (offline stepper: flag a typo'd/nonexistent object-model path as a hard error instead of pausing to
+ * ask for a value that could never be right). Deliberately NOT a "nearest version" fallback: a real
+ * board's `firmwareVersion` can carry a build suffix (`"3.7.0-rc.1+1"`) or simply predate/postdate the
+ * small tracked window (`OBJECT_MODEL_VERSIONS`), and passing an untracked string straight through
+ * would make `walkExecution` throw internally on EVERY blocking condition (a much worse outcome than
+ * today's plain "always pause and ask") rather than fail closed to the existing, safe behaviour.
+ * `undefined` (not `null`, to match `walkExecution`'s own optional-option convention) whenever the
+ * exact string isn't a known, `hasData: true` entry — including when disconnected.
+ */
+export function trackedObjectModelVersion(model: unknown): string | undefined {
+	const version = mainboardFirmwareVersion(model);
+	if (version === null) return undefined;
+	return OBJECT_MODEL_VERSIONS.find((v) => v.version === version && v.hasData)?.version;
 }

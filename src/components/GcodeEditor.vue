@@ -96,7 +96,7 @@ import EditorColorSettingsDialog from "./EditorColorSettingsDialog.vue";
 import GcodeStepperPanel from "./GcodeStepperPanel.vue";
 import { createGateway } from "../dwc/gateway";
 import { editorColorScheme, loadEditorColorScheme } from "../dwc/editorColorSettings";
-import { mainboardFirmwareVersion } from "../dwc/machineSnapshot";
+import { mainboardFirmwareVersion, trackedObjectModelVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
 import { buildExecutionIndex, type ExecutionIndex } from "../model/gcode/executionIndex";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
@@ -201,6 +201,7 @@ function rebuildExecutionIndex(): void {
 			instance.view.state.doc,
 			createSimulatedResolvePath(simulatedOverrides.value),
 			createMessageBoxResolver(messageBoxAnswers.value),
+			trackedObjectModelVersion(machineStore.model),
 		);
 		const total = executionIndex.value.steps.length;
 		stepperStep.value = total === 0 ? 0 : Math.min(stepperStep.value, total - 1);

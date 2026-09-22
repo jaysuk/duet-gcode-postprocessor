@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	installedPluginVersion, jobFileName, machineLimits, machineLimitsComplete, machineStatus,
-	simulationStatus, toolHeaterConfigs,
+	mainboardFirmwareVersion, simulationStatus, toolHeaterConfigs, trackedObjectModelVersion,
 } from "../dwc/machineSnapshot";
 
 describe("installedPluginVersion", () => {
@@ -20,6 +20,44 @@ describe("installedPluginVersion", () => {
 	it("returns the installed version when present", () => {
 		const model = { plugins: new Map([["GCodePostProcessor", { version: "0.3.1" }]]) };
 		expect(installedPluginVersion(model, "GCodePostProcessor")).toBe("0.3.1");
+	});
+});
+
+describe("mainboardFirmwareVersion", () => {
+	it("returns null when disconnected or there's no boards array yet", () => {
+		expect(mainboardFirmwareVersion({})).toBeNull();
+		expect(mainboardFirmwareVersion(null)).toBeNull();
+	});
+
+	it("reads the board at canAddress 0", () => {
+		const model = { boards: [{ canAddress: 0, firmwareVersion: "3.7.0-rc.1" }, { canAddress: 1, firmwareVersion: "1.0" }] };
+		expect(mainboardFirmwareVersion(model)).toBe("3.7.0-rc.1");
+	});
+
+	it("falls back to the first board when none carries an explicit canAddress", () => {
+		const model = { boards: [{ firmwareVersion: "3.6.3" }] };
+		expect(mainboardFirmwareVersion(model)).toBe("3.6.3");
+	});
+});
+
+describe("trackedObjectModelVersion", () => {
+	it("returns the version when it's an exact, hasData:true match in OBJECT_MODEL_VERSIONS", () => {
+		const model = { boards: [{ canAddress: 0, firmwareVersion: "3.7.0-rc.1" }] };
+		expect(trackedObjectModelVersion(model)).toBe("3.7.0-rc.1");
+	});
+
+	it("returns undefined for a real RRF tag with no usable schema data (hasData: false)", () => {
+		const model = { boards: [{ canAddress: 0, firmwareVersion: "3.7.0-alpha.2" }] };
+		expect(trackedObjectModelVersion(model)).toBeUndefined();
+	});
+
+	it("returns undefined for a version string not in the tracked window at all (e.g. a build suffix)", () => {
+		const model = { boards: [{ canAddress: 0, firmwareVersion: "3.7.0-rc.1+1" }] };
+		expect(trackedObjectModelVersion(model)).toBeUndefined();
+	});
+
+	it("returns undefined when disconnected", () => {
+		expect(trackedObjectModelVersion({})).toBeUndefined();
 	});
 });
 
