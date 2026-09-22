@@ -44,6 +44,7 @@
 				<v-btn v-if="editorReady" variant="text" icon="mdi-help-circle-outline" title="G-code reference" :href="docsUrl" target="_blank" rel="noopener noreferrer" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-format-indent-increase" title="Align comments" @click="alignComments" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-restore" :disabled="!dirty" title="Revert" @click="revert" />
+				<v-btn variant="text" icon="mdi-palette" title="Editor colors" @click="colorSettingsOpen = true" />
 				<span class="text-caption text-medium-emphasis text-truncate">
 						{{ path }}<span v-if="dirty" class="text-warning">&nbsp;*</span>
 					</span>
@@ -54,6 +55,8 @@
 
 			<div ref="editorHostEl" class="gcode-editor-host flex-grow-1"></div>
 		</template>
+
+		<EditorColorSettingsDialog v-model="colorSettingsOpen" />
 	</div>
 </template>
 
@@ -78,7 +81,9 @@ import type { Text } from "@codemirror/state";
 
 import { useMachineStore } from "@/stores/machine";
 import { useSettingsStore } from "@/stores/settings";
+import EditorColorSettingsDialog from "./EditorColorSettingsDialog.vue";
 import { createGateway } from "../dwc/gateway";
+import { editorColorScheme, loadEditorColorScheme } from "../dwc/editorColorSettings";
 import { mainboardFirmwareVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
@@ -102,6 +107,7 @@ const editorReady = ref(false);
 const dirty = ref(false);
 const cursorCode = ref<string | null>(null);
 const cursorInExpression = ref(false);
+const colorSettingsOpen = ref(false);
 
 const docsUrl = computed(() => {
 	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
@@ -173,6 +179,10 @@ async function load(path: string): Promise<void> {
 		if (props.path !== path || editorHostEl.value === null) return;
 		const doc = await buildDocFromChunks(blobToTextChunks(blob));
 		if (props.path !== path || editorHostEl.value === null) return;
+		// A no-op after the first real call this session (every GcodeEditor.vue instance calls this
+		// on load - see editorColorSettings.ts's own doc comment for the shared-load pattern).
+		await loadEditorColorScheme();
+		if (props.path !== path || editorHostEl.value === null) return;
 
 		themeController = createThemeController(settingsStore.darkTheme);
 		originalDoc = doc;
@@ -181,6 +191,9 @@ async function load(path: string): Promise<void> {
 			parent: editorHostEl.value,
 			extensions: editorExtensions(themeController),
 		});
+		// Applied right after creation, in the same synchronous block, so there's no visible flash of
+		// the fixed theme before the loaded custom colors (if any) take over.
+		themeController.setCustomColors(editorInstance.value.view, editorColorScheme.value);
 		loadedPath = path;
 		editorReady.value = true;
 		dirty.value = false;
@@ -224,6 +237,14 @@ onUnmounted(() => destroyEditor());
 watch(() => settingsStore.darkTheme, (dark) => {
 	const instance = editorInstance.value;
 	if (instance !== null && themeController !== null) themeController.setDark(instance.view, dark);
+});
+
+// Live, site-wide colour updates: a Save from ANY open tab's settings dialog (this instance's own, or
+// a different tab's) updates the shared editorColorScheme ref, which every open instance is watching -
+// not just the one that opened the dialog.
+watch(editorColorScheme, (scheme) => {
+	const instance = editorInstance.value;
+	if (instance !== null && themeController !== null) themeController.setCustomColors(instance.view, scheme);
 });
 
 async function checkForErrors(): Promise<void> {

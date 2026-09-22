@@ -17,6 +17,7 @@ import PostProcessorWidget from "../src/components/PostProcessorWidget.vue";
 import RecipeEditor from "../src/components/RecipeEditor.vue";
 import RunHistory from "../src/components/RunHistory.vue";
 import StepFields from "../src/components/StepFields.vue";
+import { resetEditorColorSettingsForTests } from "../src/dwc/editorColorSettings";
 import { LARGE_FILE_WARN_BYTES } from "../src/model/constants";
 import { createRecipe, newUid } from "../src/model/recipe";
 import { defaultConfig, STEP_DEFINITIONS } from "../src/model/steps/registry";
@@ -39,6 +40,32 @@ vi.mock("../src/dwc/gateway", () => ({
 	}),
 }));
 
+// The color-settings feature talks to useMachineStore().download/upload directly (not through
+// ../src/dwc/gateway, which is scoped to the plugin's own file-processing pipeline) - the test kit's
+// own stub does not implement either (a documented gotcha across this plugin family), so this wraps
+// the real stub with a tiny in-memory file store, keyed by filename, shared across the whole test file.
+const colorFiles = new Map<string, string>();
+vi.mock("@/stores/machine", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/stores/machine")>();
+	return {
+		...actual,
+		useMachineStore: () => {
+			const real = actual.useMachineStore();
+			return {
+				...real,
+				async download(options: { filename: string }) {
+					const content = colorFiles.get(options.filename);
+					if (content === undefined) throw new Error("not found");
+					return content;
+				},
+				async upload(options: { filename: string; content: Blob }) {
+					colorFiles.set(options.filename, await options.content.text());
+				},
+			};
+		},
+	};
+});
+
 const buildReportMock = vi.fn((opts: unknown) => opts);
 const downloadReportMock = vi.fn();
 const copyReportMock = vi.fn().mockResolvedValue(true);
@@ -56,6 +83,8 @@ describe("components mount", () => {
 		sizeOfMock.mockResolvedValue(null);
 		downloadMock.mockReset();
 		downloadMock.mockRejectedValue(new Error("No such file"));
+		colorFiles.clear();
+		resetEditorColorSettingsForTests();
 	});
 
 	it("mounts the page", () => {
@@ -312,6 +341,102 @@ describe("components mount", () => {
 		vm.editorInstance.view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", bubbles: true, cancelable: true }));
 		expect(wrapper.find(".cm-gcodeQuickSearch").exists()).toBe(true);
 		wrapper.unmount();
+	});
+
+	it("opens the color settings dialog via the toolbar button", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+
+		const settingsBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Editor colors");
+		await settingsBtn!.trigger("click");
+		expect(document.body.textContent).toContain("Editor colors");
+		expect(document.body.textContent).toContain("0:/sys/dwc-gcode-editor.colors.json");
+		// One color input per category, for the initially-shown Light tab.
+		expect(document.body.querySelectorAll("input[type=color]").length).toBe(10);
+		wrapper.unmount();
+	});
+
+	it("Save persists the scheme to the SD card and applies it live to the same instance", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		document.body.appendChild(wrapper.element); // getComputedStyle needs a connected element
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Editor colors")!.trigger("click");
+		const bgInput = document.body.querySelector("#gcode-editor-color-background") as HTMLInputElement;
+		bgInput.value = "#123456";
+		bgInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+		const saveBtn = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Save");
+		saveBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		await flushPromises();
+
+		expect(colorFiles.get("0:/sys/dwc-gcode-editor.colors.json")).toContain("#123456");
+		const cmEditor = wrapper.find(".cm-editor");
+		expect(getComputedStyle(cmEditor.element).backgroundColor).toBe("#123456");
+		wrapper.unmount();
+	});
+
+	it("Cancel closes the dialog without persisting or applying anything", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Editor colors")!.trigger("click");
+		const bgInput = document.body.querySelector("#gcode-editor-color-background") as HTMLInputElement;
+		bgInput.value = "#123456";
+		bgInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+		const cancelBtn = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Cancel");
+		cancelBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		await flushPromises();
+
+		expect(colorFiles.size).toBe(0);
+		wrapper.unmount();
+	});
+
+	it("Reset to defaults resets the visible color inputs", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Editor colors")!.trigger("click");
+		const bgInput = document.body.querySelector("#gcode-editor-color-background") as HTMLInputElement;
+		const originalDefault = bgInput.value;
+		bgInput.value = "#123456";
+		bgInput.dispatchEvent(new Event("input", { bubbles: true }));
+		await nextTick();
+		expect(bgInput.value).toBe("#123456");
+
+		const resetBtn = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Reset to defaults");
+		resetBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		await nextTick();
+		expect(bgInput.value).toBe(originalDefault);
+		wrapper.unmount();
+	});
+
+	it("a saved scheme applies live to a DIFFERENT already-open editor instance, not just the one that saved it", async () => {
+		downloadMock.mockResolvedValue(new Blob(["G1 X10\n"]));
+		const a = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/a.g" } });
+		document.body.appendChild(a.element);
+		await vi.waitFor(() => expect(a.text()).toContain("G1 X10"));
+		const b = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/b.g" } });
+		document.body.appendChild(b.element);
+		await vi.waitFor(() => expect(b.text()).toContain("G1 X10"));
+
+		await a.findAll("button").find((btn) => btn.attributes("title") === "Editor colors")!.trigger("click");
+		const bgInput = document.body.querySelector("#gcode-editor-color-background") as HTMLInputElement;
+		bgInput.value = "#654321";
+		bgInput.dispatchEvent(new Event("input", { bubbles: true }));
+		const saveBtn = Array.from(document.body.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Save");
+		saveBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+		await flushPromises();
+
+		const bCmEditor = b.find(".cm-editor");
+		expect(getComputedStyle(bCmEditor.element).backgroundColor).toBe("#654321");
+		a.unmount();
+		b.unmount();
 	});
 
 	it("mounts the workspace with nothing selected", () => {
