@@ -115,3 +115,58 @@ describe("machine state", () => {
 		expect(run(["G1 X1", "G1 X2"]).state.lineNo).toBe(2);
 	});
 });
+
+describe("position tracking", () => {
+	it("is null before any move on that axis", () => {
+		const state = createState();
+		expect(state.x).toBeNull();
+		expect(state.y).toBeNull();
+		expect(state.e).toBeNull();
+	});
+
+	it("tracks absolute X/Y from G1", () => {
+		const { state } = run(["G1 X10 Y20", "G1 X15"]);
+		expect(state.x).toBe(15);
+		expect(state.y).toBe(20); // unmentioned on the second move - stays where it was
+	});
+
+	it("accumulates X/Y under G91, same as Z already does", () => {
+		const { state } = run(["G90", "G1 X10 Y10", "G91", "G1 X1 Y-2"]);
+		expect(state.x).toBeCloseTo(11);
+		expect(state.y).toBeCloseTo(8);
+	});
+
+	it("tracks extrusion, absolute by default and accumulating under M83", () => {
+		const { state } = run(["G1 X10 E5", "G1 X20 E8"]);
+		expect(state.e).toBe(8); // absolute E - the second move's E is a new total, not a delta
+
+		const relative = run(["M83", "G1 X10 E1", "G1 X20 E1.5"]).state;
+		expect(relative.e).toBeCloseTo(2.5);
+	});
+
+	it("G92 sets X/Y/Z/E outright, regardless of G90/G91", () => {
+		const { state } = run(["G91", "G1 X5", "G92 X0 Y0 Z0 E0"]);
+		expect(state.x).toBe(0);
+		expect(state.y).toBe(0);
+		expect(state.z).toBe(0);
+		expect(state.e).toBe(0);
+	});
+
+	it("G2/G3 arc moves update the destination position the same way G1 does", () => {
+		const g2 = run(["G1 X0 Y0", "G2 X10 Y10 I5 J0"]).state;
+		expect(g2.x).toBe(10);
+		expect(g2.y).toBe(10);
+
+		const g3 = run(["G1 X0 Y0", "G3 X10 Y0 I5 J0"]).state;
+		expect(g3.x).toBe(10);
+		expect(g3.y).toBe(0);
+	});
+
+	it("an arc move does NOT trigger the geometric layer-change fallback, unlike a plain G1 Z rise", () => {
+		// Deliberate scope boundary (see state.ts's own comment on the G2/G3 case) - not asserting
+		// arcs never change layers, just that this fallback specifically doesn't guess at it.
+		const { state } = run(["G1 Z0.2", "G2 X10 Y10 Z0.4 I5 J0"]);
+		expect(state.layer).toBe(0);
+		expect(state.z).toBeCloseTo(0.4);
+	});
+});

@@ -343,6 +343,94 @@ describe("components mount", () => {
 		wrapper.unmount();
 	});
 
+	it("the stepper toggle shows/hides the scrub bar panel", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+
+		expect(wrapper.text()).not.toContain("Line 1 /");
+		const stepperBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file");
+		await stepperBtn!.trigger("click");
+		expect(wrapper.text()).toContain("Line 1 /");
+
+		await stepperBtn!.trigger("click");
+		expect(wrapper.text()).not.toContain("Line 1 /");
+		wrapper.unmount();
+	});
+
+	it("stepping forward highlights the next line and shows its derived state", async () => {
+		// T0 must be its own command token (a bare "T0" parameter on a G1 line is not valid RRF
+		// syntax and state.ts's own tool tracking only fires on a real T-letter command).
+		downloadMock.mockResolvedValueOnce(new Blob([";LAYER_CHANGE\nT0\nG1 X10 Y10 F1200\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10 Y10 F1200"));
+		// The line-state index build is deferred a tick past mounting (see GcodeEditor.vue's own
+		// comment on this) - the stepper's readout depends on it the same way the gutter test above does.
+		await vi.waitFor(() => expect(wrapper.text()).toContain("L0")); // gutter proves the index is ready
+
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		expect(wrapper.find(".cm-gcodeCurrentLine").exists()).toBe(true);
+		expect(wrapper.find(".cm-gcodeCurrentLine").text()).toContain(";LAYER_CHANGE");
+
+		const stepForward = wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward one line");
+		await stepForward!.trigger("click");
+		await stepForward!.trigger("click");
+		expect(wrapper.find(".cm-gcodeCurrentLine").text()).toContain("G1 X10 Y10 F1200");
+		expect(wrapper.text()).toContain("Layer 0");
+		expect(wrapper.text()).toContain("X10.00");
+		expect(wrapper.text()).toContain("Y10.00");
+		expect(wrapper.text()).toContain("Tool 0");
+		expect(wrapper.text()).toContain("F1200");
+		wrapper.unmount();
+	});
+
+	it("step back and forward are disabled at the file's own bounds", async () => {
+		// No trailing newline: a Text built from a string ending in "\n" has an extra, empty final
+		// line after it (verified directly, not assumed - see dwc-gcode-editor's own currentLine.ts
+		// tests for the same real CM6 behaviour) - this fixture's true last line is "G1 X10" itself.
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+
+		const stepBack = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step back one line");
+		const stepForward = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward one line");
+		expect(stepBack()!.attributes("disabled")).toBeDefined(); // already at line 1
+
+		await stepForward()!.trigger("click");
+		expect(stepForward()!.attributes("disabled")).toBeDefined(); // now at the last line (2)
+		expect(stepBack()!.attributes("disabled")).toBeUndefined();
+		wrapper.unmount();
+	});
+
+	it("closing the stepper clears the current-line highlight", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+
+		const stepperBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file");
+		await stepperBtn!.trigger("click");
+		expect(wrapper.find(".cm-gcodeCurrentLine").exists()).toBe(true);
+		await stepperBtn!.trigger("click");
+		expect(wrapper.find(".cm-gcodeCurrentLine").exists()).toBe(false);
+		wrapper.unmount();
+	});
+
+	it("switching to a different file resets the stepper back to line 1", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10\nG1 X20\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/a.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X20"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward one line")!.trigger("click");
+		expect(wrapper.text()).toContain("Line 2 /");
+
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X99\n"]));
+		await wrapper.setProps({ path: "0:/gcodes/b.g" });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X99"));
+		expect(wrapper.text()).toContain("Line 1 /");
+		wrapper.unmount();
+	});
+
 	it("opens the color settings dialog via the toolbar button", async () => {
 		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10\n"]));
 		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });

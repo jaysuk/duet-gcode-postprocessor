@@ -45,6 +45,8 @@
 				<v-btn v-if="editorReady" variant="text" icon="mdi-format-indent-increase" title="Align comments" @click="alignComments" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-restore" :disabled="!dirty" title="Revert" @click="revert" />
 				<v-btn variant="text" icon="mdi-palette" title="Editor colors" @click="colorSettingsOpen = true" />
+				<v-btn v-if="editorReady" variant="text" :color="stepperOpen ? 'primary' : undefined" icon="mdi-motion-play-outline"
+					   title="Step through file" @click="stepperOpen = !stepperOpen" />
 				<span class="text-caption text-medium-emphasis text-truncate">
 						{{ path }}<span v-if="dirty" class="text-warning">&nbsp;*</span>
 					</span>
@@ -52,6 +54,9 @@
 
 			<v-alert v-if="error !== null" type="error" variant="tonal" density="compact" class="mb-2">{{ error }}</v-alert>
 			<v-progress-linear v-if="busy" indeterminate class="mb-2" />
+
+			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-line="stepperLine" :total-lines="stepperTotalLines"
+								:state="stepperState" class="mb-2" @update:current-line="setStepperLine" />
 
 			<div ref="editorHostEl" class="gcode-editor-host flex-grow-1"></div>
 		</template>
@@ -73,20 +78,21 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import { diagnoseDocument, parseDocument } from "dwc-gcode-core";
 import {
 	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
-	createThemeController, gcodeCompletion, gcodeLanguage, gcodeLintUi, gcodeQuickSearchKeymap,
-	gcodeSearch, isInsideExpression, openExpressionQuickSearch, openGcodeQuickSearch, openSearchPanel,
-	type EditorInstance, type ThemeController,
+	createThemeController, gcodeCompletion, gcodeCurrentLine, gcodeLanguage, gcodeLintUi,
+	gcodeQuickSearchKeymap, gcodeSearch, isInsideExpression, openExpressionQuickSearch,
+	openGcodeQuickSearch, openSearchPanel, setCurrentLine, type EditorInstance, type ThemeController,
 } from "dwc-gcode-editor";
 import type { Text } from "@codemirror/state";
 
 import { useMachineStore } from "@/stores/machine";
 import { useSettingsStore } from "@/stores/settings";
 import EditorColorSettingsDialog from "./EditorColorSettingsDialog.vue";
+import GcodeStepperPanel from "./GcodeStepperPanel.vue";
 import { createGateway } from "../dwc/gateway";
 import { editorColorScheme, loadEditorColorScheme } from "../dwc/editorColorSettings";
 import { mainboardFirmwareVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
-import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
+import { buildLineStateIndex, stateAtLine, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
 
 const props = defineProps<{ path: string | null }>();
@@ -108,6 +114,12 @@ const dirty = ref(false);
 const cursorCode = ref<string | null>(null);
 const cursorInExpression = ref(false);
 const colorSettingsOpen = ref(false);
+const stepperOpen = ref(false);
+const stepperLine = ref(1);
+// shallowRef, not a plain let: the stepper panel's own state readout is a real Vue computed that
+// needs to re-render once the deferred background build below finishes - lineStateGutter's own
+// getIndex() callback reads .value the same way it read the plain variable before.
+const lineIndex = shallowRef<LineStateIndex | null>(null);
 
 const docsUrl = computed(() => {
 	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
@@ -117,15 +129,28 @@ const docsUrl = computed(() => {
 // Matches MonacoEditor.vue's own toolbar wording exactly ("Find Code (F4)" / "Find Expression (F4)").
 const quickSearchTitle = computed(() => cursorInExpression.value ? "Find Expression (F4)" : "Find Code (F4)");
 
+// Offline file-stepper: totalLines prefers the finished index (built asynchronously, see load()
+// below) but falls back to the live doc's own line count so the slider has a real bound immediately
+// on open, not "1" until the background build finishes.
+const stepperTotalLines = computed(() => lineIndex.value?.totalLines ?? editorInstance.value?.view.state.doc.lines ?? 1);
+const stepperState = computed(() => {
+	const index = lineIndex.value;
+	const instance = editorInstance.value;
+	if (index === null || instance === null) return null;
+	return stateAtLine(index, instance.view.state.doc, stepperLine.value);
+});
+
+watch([stepperOpen, stepperLine], ([open, line]) => {
+	const instance = editorInstance.value;
+	if (instance === null) return;
+	setCurrentLine(instance.view, open ? line : null, { scroll: open });
+});
+
 let loadedPath: string | null = null;
 // Snapshot of the document as loaded, for revert() - a real CM6 Text (not a string) so reverting is a
 // single `insert: originalDoc` change, no string round-trip needed (ChangeSpec's own `insert` field
 // accepts a Text directly).
 let originalDoc: Text | null = null;
-// Read by lineStateGutter's markers() callback on every repaint - not a ref, since a gutter
-// recompute is forced explicitly (see load()) rather than through Vue's own reactivity, and this
-// value can be read many times per second while scrolling a large file.
-let lineIndex: LineStateIndex | null = null;
 // One ThemeController per live editor instance (a Compartment belongs to exactly one EditorView) -
 // recreated on every load(), read by the darkTheme watcher below to push a live swap.
 let themeController: ThemeController | null = null;
@@ -133,7 +158,7 @@ let themeController: ThemeController | null = null;
 function editorExtensions(theme: ThemeController) {
 	return [
 		lineNumbers(),
-		lineStateGutter(() => lineIndex),
+		lineStateGutter(() => lineIndex.value),
 		gcodeLanguage,
 		theme.extension,
 		gcodeCompletion(),
@@ -141,6 +166,7 @@ function editorExtensions(theme: ThemeController) {
 		lintGutter(),
 		gcodeSearch(),
 		gcodeQuickSearchKeymap(() => machineStore.model),
+		gcodeCurrentLine(),
 		EditorView.updateListener.of((update) => {
 			if (update.docChanged) dirty.value = true;
 			if (update.docChanged || update.selectionSet) {
@@ -158,12 +184,13 @@ function destroyEditor(): void {
 	editorInstance.value = null;
 	editorReady.value = false;
 	loadedPath = null;
-	lineIndex = null;
+	lineIndex.value = null;
 	themeController = null;
 	originalDoc = null;
 	dirty.value = false;
 	cursorCode.value = null;
 	cursorInExpression.value = false;
+	stepperLine.value = 1;
 }
 
 async function load(path: string): Promise<void> {
@@ -209,7 +236,7 @@ async function load(path: string): Promise<void> {
 		const instance = editorInstance.value;
 		setTimeout(() => {
 			if (editorInstance.value !== instance) return; // superseded by a newer load() already
-			lineIndex = buildLineStateIndex(instance.view.state.doc);
+			lineIndex.value = buildLineStateIndex(instance.view.state.doc);
 			instance.view.dispatch({}); // force the gutter to pick up the now-ready index
 		}, 0);
 	} catch (e) {
@@ -278,6 +305,10 @@ function openCodeSearch(): void {
 	if (instance === null) return;
 	if (cursorInExpression.value) openExpressionQuickSearch(instance.view, machineStore.model);
 	else openGcodeQuickSearch(instance.view);
+}
+
+function setStepperLine(line: number): void {
+	stepperLine.value = Math.min(Math.max(1, line), stepperTotalLines.value);
 }
 
 function alignComments(): void {

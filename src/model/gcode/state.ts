@@ -19,8 +19,16 @@ export interface MachineState {
 	lineNo: number;
 	/** 0-based layer index; -1 before the first layer marker. */
 	layer: number;
+	/** Last commanded X, or null before any X move. */
+	x: number | null;
+	/** Last commanded Y, or null before any Y move. */
+	y: number | null;
 	/** Last commanded Z, or null before any Z move. */
 	z: number | null;
+	/** Running extruder position for the active tool, or null before any extrusion. An E move in
+	 *  relative mode (M83) accumulates onto this the same way a relative X/Y/Z move accumulates onto
+	 *  {@link x}/{@link y}/{@link z} under G91 - see {@link relativeE}. */
+	e: number | null;
 	/** Active tool number; -1 when none has been selected. */
 	tool: number;
 	/** Last commanded feedrate (mm/min), or null. */
@@ -60,7 +68,10 @@ export function createState(options: { geometricFallback?: boolean } = {}): Mach
 		geometricFallback: options.geometricFallback !== false,
 		lineNo: 0,
 		layer: -1,
+		x: null,
+		y: null,
 		z: null,
+		e: null,
 		tool: -1,
 		feedrate: null,
 		relativeMoves: false,
@@ -171,16 +182,32 @@ function applyComment(state: MachineState, comment: string): void {
 	}
 }
 
+/** Absolute-or-relative axis update, matching how G91 already applies to Z above: a relative move
+ *  accumulates onto the running position, an absolute one replaces it outright. Shared by X/Y (no
+ *  layer-detection side effect) and, via {@link applyExtrusion}, E under M83. */
+function applyAxisPosition(current: number | null, commanded: number, relative: boolean): number {
+	return relative && current !== null ? current + commanded : commanded;
+}
+
+function applyExtrusion(state: MachineState, e: number | null): void {
+	if (e !== null) state.e = applyAxisPosition(state.e, e, state.relativeE);
+}
+
 function applyG(state: MachineState, token: Tokenised): void {
 	switch (token.number) {
 		case 0:
 		case 1: {
 			const params = parseParams(token.body);
+			const x = paramNumber(params, "X");
+			const y = paramNumber(params, "Y");
 			const z = paramNumber(params, "Z");
+			const e = paramNumber(params, "E");
 			const f = paramNumber(params, "F");
 			if (f !== null) state.feedrate = f;
+			if (x !== null) state.x = applyAxisPosition(state.x, x, state.relativeMoves);
+			if (y !== null) state.y = applyAxisPosition(state.y, y, state.relativeMoves);
 			if (z !== null) {
-				const newZ = state.relativeMoves && state.z !== null ? state.z + z : z;
+				const newZ = applyAxisPosition(state.z, z, state.relativeMoves);
 				// Geometric fallback: only for files with no layer marker at all, and only on a
 				// Z-only rise (a move that also travels in XY is a ramp, not a layer change)
 				if (state.geometricFallback && !state.sawLayerMarker && newZ > (state.z ?? -Infinity)) {
@@ -192,6 +219,28 @@ function applyG(state: MachineState, token: Tokenised): void {
 				}
 				state.z = newZ;
 			}
+			applyExtrusion(state, e);
+			break;
+		}
+		// Arc moves (G2 clockwise / G3 counter-clockwise): X/Y/Z/E name the same destination
+		// coordinates a G1 would (RRF's own DoArcMove, Hardware-independent of I/J/R, reads them via
+		// the same per-axis parameter path a straight move does). Deliberately NOT given the G0/G1
+		// case's geometric layer-fallback: that heuristic is specifically about a plain Z-only rise
+		// during printing, and arcs combined with a layer change are not a pattern worth guessing at
+		// without a real example to verify against.
+		case 2:
+		case 3: {
+			const params = parseParams(token.body);
+			const x = paramNumber(params, "X");
+			const y = paramNumber(params, "Y");
+			const z = paramNumber(params, "Z");
+			const e = paramNumber(params, "E");
+			const f = paramNumber(params, "F");
+			if (f !== null) state.feedrate = f;
+			if (x !== null) state.x = applyAxisPosition(state.x, x, state.relativeMoves);
+			if (y !== null) state.y = applyAxisPosition(state.y, y, state.relativeMoves);
+			if (z !== null) state.z = applyAxisPosition(state.z, z, state.relativeMoves);
+			applyExtrusion(state, e);
 			break;
 		}
 		case 90:
@@ -201,8 +250,17 @@ function applyG(state: MachineState, token: Tokenised): void {
 			state.relativeMoves = true;
 			break;
 		case 92: {
-			const z = paramNumber(parseParams(token.body), "Z");
+			const params = parseParams(token.body);
+			const x = paramNumber(params, "X");
+			const y = paramNumber(params, "Y");
+			const z = paramNumber(params, "Z");
+			const e = paramNumber(params, "E");
+			// G92 sets the CURRENT position without moving there - always absolute, regardless of
+			// G90/G91, since it's redefining what "here" means rather than commanding a move.
+			if (x !== null) state.x = x;
+			if (y !== null) state.y = y;
 			if (z !== null) state.z = z;
+			if (e !== null) state.e = e;
 			break;
 		}
 	}
