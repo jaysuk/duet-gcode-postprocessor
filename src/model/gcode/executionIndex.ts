@@ -14,7 +14,7 @@
  */
 
 import type { Text } from "@codemirror/state";
-import { parseDocument, walkExecution, type EvalValue } from "dwc-gcode-core";
+import { parseDocument, walkExecution, type EvalValue, type MessageBoxAnswer, type MessageBoxPrompt } from "dwc-gcode-core";
 
 import { applyLineToState } from "./lineState";
 import { createState, type MachineState } from "./state";
@@ -31,6 +31,9 @@ export type ExecutionIndex =
 	/** Stopped at a condition needing a value `resolvePath` doesn't have - `steps` holds everything
 	 *  executed before it. Rebuild with a `resolvePath` that now answers `path` to get further. */
 	| { status: "paused"; steps: ReadonlyArray<ExecutionStepState>; line: number; path: string }
+	/** Stopped at a blocking `M291` needing an answer `resolveMessageBox` doesn't have - same shape,
+	 *  same "rebuild once you have one" story, just triggered by a command instead of a path. */
+	| { status: "message-box"; steps: ReadonlyArray<ExecutionStepState>; line: number; prompt: MessageBoxPrompt }
 	| { status: "error"; steps: ReadonlyArray<ExecutionStepState>; line: number; message: string };
 
 /**
@@ -59,7 +62,11 @@ export function resolveKnownPath(path: string, state: MachineState): EvalValue |
 /** Walks `doc` in real execution order and derives the machine state after each step. A real,
  *  synchronous O(steps) cost - callers defer this the same way `GcodeEditor.vue` already defers
  *  `buildLineStateIndex`, so it doesn't delay the editor's first paint. */
-export function buildExecutionIndex(doc: Text, resolvePath: (path: string) => EvalValue): ExecutionIndex {
+export function buildExecutionIndex(
+	doc: Text,
+	resolvePath: (path: string) => EvalValue,
+	resolveMessageBox: (prompt: MessageBoxPrompt) => MessageBoxAnswer,
+): ExecutionIndex {
 	const gdoc = parseDocument(doc.toString());
 	const state = createState();
 	const steps: Array<ExecutionStepState> = [];
@@ -69,6 +76,7 @@ export function buildExecutionIndex(doc: Text, resolvePath: (path: string) => Ev
 			const known = resolveKnownPath(path, state);
 			return known !== undefined ? known : resolvePath(path);
 		},
+		resolveMessageBox,
 		onStep: (step) => {
 			applyLineToState(state, doc.line(step.line + 1).text);
 			steps.push({ line: step.line, state: { ...state } });
@@ -78,6 +86,7 @@ export function buildExecutionIndex(doc: Text, resolvePath: (path: string) => Ev
 	switch (outcome.status) {
 		case "complete": return { status: "complete", steps };
 		case "paused": return { status: "paused", steps, line: outcome.line, path: outcome.path };
+		case "message-box": return { status: "message-box", steps, line: outcome.line, prompt: outcome.prompt };
 		case "error": return { status: "error", steps, line: outcome.line, message: outcome.message };
 		default: {
 			const exhaustive: never = outcome;

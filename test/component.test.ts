@@ -422,6 +422,62 @@ describe("components mount", () => {
 		wrapper.unmount();
 	});
 
+	it("a blocking M291 (OK box) pauses the walk with a prompt, and clicking OK continues", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(['G28\nM291 P"Ready?" R"Confirm" S2\nG1 X10\n']));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Confirm"));
+		expect(wrapper.text()).toContain("Ready?");
+
+		const okBtn = wrapper.findAll("button").find((b) => b.text() === "OK");
+		expect(okBtn).toBeDefined();
+		await okBtn!.trigger("click");
+
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"));
+		// The prompt's own OK button is gone (the answer is now only a removable chip - "Ready?"
+		// legitimately still appears there, e.g. "Message box answers: Ready? → OK").
+		expect(wrapper.findAll("button").find((b) => b.text() === "OK")).toBeUndefined();
+		wrapper.unmount();
+	});
+
+	it("a blocking M291 value box (S5) validates the input and its answer reaches 'input' on a later line", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(['M291 P"How many?" S5 L0 H10\nif input > 3\n    G1 X1\nG1 Y1\n']));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 Y1"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("How many?"));
+
+		const submitBtn = () => wrapper.findAll("button").find((b) => b.text() === "Submit");
+		expect(submitBtn()!.attributes("disabled")).toBeDefined(); // nothing typed yet
+
+		const input = wrapper.find('input[placeholder^="number"]');
+		expect(input.exists()).toBe(true);
+		await input.setValue("15"); // out of the H10 bound
+		expect(submitBtn()!.attributes("disabled")).toBeDefined();
+
+		await input.setValue("7");
+		expect(submitBtn()!.attributes("disabled")).toBeUndefined();
+		await submitBtn()!.trigger("click");
+
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 4"));
+		wrapper.unmount();
+	});
+
+	it("cancelling an OK/Cancel M291 aborts the walk, matching RRF's own default", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(['G28\nM291 P"Continue?" S3\nG1 X10\n']));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Continue?"));
+
+		await wrapper.findAll("button").find((b) => b.text() === "Cancel")!.trigger("click");
+
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2")); // only G28 + the M291 line itself
+		expect(wrapper.findAll("button").find((b) => b.text() === "Cancel")).toBeUndefined();
+		wrapper.unmount();
+	});
+
 	it("switching to a different file resets the stepper back to line 1", async () => {
 		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10\nG1 X20\n"]));
 		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/a.g" } });

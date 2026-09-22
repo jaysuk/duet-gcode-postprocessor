@@ -57,9 +57,12 @@
 
 			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-step="stepperStep" :total-steps="stepperTotalSteps"
 								:line="stepperDisplayLine" :state="stepperState" :status="stepperStatus" :pending-path="stepperPendingPath"
-								:error-message="stepperErrorMessage" :simulated-values="simulatedValuesList" class="mb-2"
+								:message-box-prompt="stepperMessageBoxPrompt" :error-message="stepperErrorMessage"
+								:simulated-values="simulatedValuesList" :message-box-answers="messageBoxAnswersList" class="mb-2"
 								@update:current-step="setStepperStep" @resolve-path="resolveSimulatedPath"
-								@remove-simulated-value="removeSimulatedValue" @reset-simulated-values="resetSimulatedValues" />
+								@remove-simulated-value="removeSimulatedValue" @reset-simulated-values="resetSimulatedValues"
+								@resolve-message-box="resolveMessageBoxPrompt" @remove-message-box-answer="removeMessageBoxAnswer"
+								@reset-message-box-answers="resetMessageBoxAnswers" />
 
 			<div ref="editorHostEl" class="gcode-editor-host flex-grow-1"></div>
 		</template>
@@ -78,7 +81,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { lintGutter } from "@codemirror/lint";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { diagnoseDocument, parseDocument, type EvalValue } from "dwc-gcode-core";
+import { diagnoseDocument, parseDocument, type EvalValue, type MessageBoxAnswer } from "dwc-gcode-core";
 import {
 	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
 	createThemeController, gcodeCompletion, gcodeCurrentLine, gcodeLanguage, gcodeLintUi,
@@ -98,6 +101,10 @@ import { blobToTextChunks } from "../model/gcode/editorDoc";
 import { buildExecutionIndex, type ExecutionIndex } from "../model/gcode/executionIndex";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
+import {
+	createMessageBoxResolver, loadMessageBoxAnswers, messageBoxKey, saveMessageBoxAnswers,
+	type MessageBoxAnswerOverrides,
+} from "../model/gcode/messageBoxAnswers";
 import {
 	createSimulatedResolvePath, loadSimulatedOverrides, parseSimulatedValueInput, saveSimulatedOverrides,
 	type SimulatedValueOverrides,
@@ -139,6 +146,9 @@ const stepperStep = ref(0);
 // (`"sensors.gpIn[0].value"`), populated via the stepper panel's pause/prompt UI. A shallowRef holding
 // a fresh Map on every change (rather than mutating in place) so Vue's reactivity actually notices.
 const simulatedOverrides = shallowRef<SimulatedValueOverrides>(new Map());
+// Remembered answers to blocking M291 message boxes, keyed by the prompt's own content
+// (messageBoxKey) - same shallowRef-holds-a-fresh-Map convention as simulatedOverrides above.
+const messageBoxAnswers = shallowRef<MessageBoxAnswerOverrides>(new Map());
 
 const docsUrl = computed(() => {
 	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
@@ -162,6 +172,10 @@ const stepperPendingPath = computed(() => {
 	const index = executionIndex.value;
 	return index?.status === "paused" ? index.path : null;
 });
+const stepperMessageBoxPrompt = computed(() => {
+	const index = executionIndex.value;
+	return index?.status === "message-box" ? index.prompt : null;
+});
 const stepperErrorMessage = computed(() => {
 	const index = executionIndex.value;
 	return index?.status === "error" ? index.message : null;
@@ -183,7 +197,11 @@ function rebuildExecutionIndex(): void {
 	if (instance === null) return;
 	setTimeout(() => {
 		if (editorInstance.value !== instance) return; // superseded by a newer load() already
-		executionIndex.value = buildExecutionIndex(instance.view.state.doc, createSimulatedResolvePath(simulatedOverrides.value));
+		executionIndex.value = buildExecutionIndex(
+			instance.view.state.doc,
+			createSimulatedResolvePath(simulatedOverrides.value),
+			createMessageBoxResolver(messageBoxAnswers.value),
+		);
 		const total = executionIndex.value.steps.length;
 		stepperStep.value = total === 0 ? 0 : Math.min(stepperStep.value, total - 1);
 	}, 0);
@@ -211,6 +229,30 @@ function resetSimulatedValues(): void {
 	rebuildExecutionIndex();
 }
 
+function resolveMessageBoxPrompt(answer: MessageBoxAnswer): void {
+	const prompt = stepperMessageBoxPrompt.value;
+	if (prompt === null) return;
+	const next = new Map(messageBoxAnswers.value);
+	next.set(messageBoxKey(prompt), answer);
+	messageBoxAnswers.value = next;
+	if (loadedPath !== null) saveMessageBoxAnswers(loadedPath, next);
+	rebuildExecutionIndex();
+}
+
+function removeMessageBoxAnswer(key: string): void {
+	const next = new Map(messageBoxAnswers.value);
+	next.delete(key);
+	messageBoxAnswers.value = next;
+	if (loadedPath !== null) saveMessageBoxAnswers(loadedPath, next);
+	rebuildExecutionIndex();
+}
+
+function resetMessageBoxAnswers(): void {
+	messageBoxAnswers.value = new Map();
+	if (loadedPath !== null) saveMessageBoxAnswers(loadedPath, messageBoxAnswers.value);
+	rebuildExecutionIndex();
+}
+
 function formatEvalValue(v: EvalValue): string {
 	if (v === null) return "null";
 	if (Array.isArray(v)) return `[${v.map(formatEvalValue).join(", ")}]`;
@@ -218,8 +260,28 @@ function formatEvalValue(v: EvalValue): string {
 	return String(v);
 }
 
+function formatMessageBoxAnswer(answer: MessageBoxAnswer): string {
+	if (answer.cancelled) return "Cancel";
+	if (answer.input === null) return "OK";
+	return typeof answer.input === "string" ? JSON.stringify(answer.input) : String(answer.input);
+}
+
 const simulatedValuesList = computed(() => [...simulatedOverrides.value.entries()]
 	.map(([path, value]) => ({ path, display: formatEvalValue(value) })));
+
+const messageBoxAnswersList = computed(() => [...messageBoxAnswers.value.entries()]
+	.map(([key, answer]) => {
+		// The key IS the prompt's own JSON serialisation (messageBoxKey) - reusing it here avoids
+		// storing the prompt a second time just for display purposes.
+		let message = key;
+		try {
+			message = (JSON.parse(key) as { message: string }).message;
+		} catch {
+			// Malformed/foreign key (shouldn't happen - messageBoxKey always produces valid JSON) -
+			// fall back to showing the raw key rather than breaking the whole list over one entry.
+		}
+		return { key, display: `${message} → ${formatMessageBoxAnswer(answer)}` };
+	}));
 
 let loadedPath: string | null = null;
 // Snapshot of the document as loaded, for revert() - a real CM6 Text (not a string) so reverting is a
@@ -262,6 +324,7 @@ function destroyEditor(): void {
 	lineIndex.value = null;
 	executionIndex.value = null;
 	simulatedOverrides.value = new Map();
+	messageBoxAnswers.value = new Map();
 	themeController = null;
 	originalDoc = null;
 	dirty.value = false;
@@ -302,6 +365,7 @@ async function load(path: string): Promise<void> {
 		editorReady.value = true;
 		dirty.value = false;
 		simulatedOverrides.value = loadSimulatedOverrides(path);
+		messageBoxAnswers.value = loadMessageBoxAnswers(path);
 
 		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
 		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently
