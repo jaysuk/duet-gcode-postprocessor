@@ -10,16 +10,18 @@
 <template>
 	<div>
 		<div class="d-flex align-center ga-2">
-			<v-btn icon="mdi-skip-previous" size="small" variant="text" :disabled="currentLine <= 1"
-				   title="Step back one line" @click="emit('update:currentLine', currentLine - 1)" />
-			<v-slider :model-value="currentLine" :min="1" :max="Math.max(1, totalLines)" :step="1" hide-details
+			<v-btn icon="mdi-skip-previous" size="small" variant="text" :disabled="currentStep <= 0"
+				   title="Step back" @click="emit('update:currentStep', currentStep - 1)" />
+			<v-slider :model-value="currentStep" :min="0" :max="Math.max(0, totalSteps - 1)" :step="1" hide-details
 					  density="compact" class="flex-grow-1"
-					  @update:model-value="(v: number) => emit('update:currentLine', Math.round(v))" />
-			<v-btn icon="mdi-skip-next" size="small" variant="text" :disabled="currentLine >= totalLines"
-				   title="Step forward one line" @click="emit('update:currentLine', currentLine + 1)" />
-			<span class="text-caption text-medium-emphasis" style="min-width: 6rem; text-align: right">
-				Line {{ currentLine }} / {{ totalLines }}
+					  @update:model-value="(v: number) => emit('update:currentStep', Math.round(v))" />
+			<v-btn icon="mdi-skip-next" size="small" variant="text" :disabled="currentStep >= totalSteps - 1"
+				   title="Step forward" @click="emit('update:currentStep', currentStep + 1)" />
+			<span class="text-caption text-medium-emphasis" style="min-width: 9rem; text-align: right">
+				Step {{ totalSteps === 0 ? 0 : currentStep + 1 }} / {{ totalSteps }}<template v-if="line !== null"> (line {{ line }})</template>
 			</span>
+			<v-btn v-if="hasSimulatedValues" icon="mdi-refresh" size="small" variant="text"
+				   title="Clear simulated values" @click="emit('reset-simulated-values')" />
 		</div>
 		<div class="stepper-state text-caption text-medium-emphasis mt-1">
 			<template v-if="state !== null">
@@ -34,26 +36,60 @@
 				<span v-if="state.object !== null">Object {{ state.object }}</span>
 				<span v-if="state.featureType !== null">{{ state.featureType }}</span>
 			</template>
-			<span v-else class="font-italic">No state derived yet at this line.</span>
+			<span v-else class="font-italic">No state derived yet at this step.</span>
 		</div>
+
+		<v-alert v-if="status === 'paused' && pendingPath !== null" type="warning" variant="tonal" density="compact" class="mt-2">
+			<div class="d-flex align-center ga-2 flex-wrap">
+				<span>Execution depends on <code>{{ pendingPath }}</code>, which has no known value offline — what should the simulation use?</span>
+				<v-text-field v-model="promptValue" density="compact" hide-details variant="outlined" style="max-width: 10rem"
+							  placeholder="e.g. 1, true, ..." @keyup.enter="submitPrompt" />
+				<v-btn size="small" color="warning" variant="tonal" :disabled="promptValue.trim() === ''" @click="submitPrompt">Apply</v-btn>
+			</div>
+		</v-alert>
+		<v-alert v-else-if="status === 'error' && errorMessage !== null" type="error" variant="tonal" density="compact" class="mt-2">
+			{{ errorMessage }}
+		</v-alert>
 	</div>
 </template>
 
 <script setup lang="ts">
 /**
- * Purely presentational: the offline file-stepper's scrub bar + step buttons + a readout of the
- * machine state {@link MachineState} derives at the current line. Owns no state of its own beyond the
- * slider's live drag value - `GcodeEditor.vue` (the wiring layer) supplies `currentLine`/`totalLines`/
- * `state` and applies `update:currentLine` back to its own source of truth (which also drives
- * `dwc-gcode-editor`'s `setCurrentLine` highlight - this component has no opinion on that, or on
- * anything involving the live `EditorView`).
+ * Purely presentational: the offline stepper's scrub bar + step buttons + a readout of the machine
+ * state {@link MachineState} derives at the current EXECUTION STEP (not physical line — a false
+ * `if`/`while` branch contributes no steps, a loop body contributes one step per iteration; see
+ * `executionIndex.ts`), plus the "paused, needs a simulated value" prompt for a condition that
+ * references an object-model path this offline simulation can't know (no live machine). Owns no state
+ * of its own beyond the slider's live drag value and the prompt's text input — `GcodeEditor.vue` (the
+ * wiring layer) supplies everything else and applies `update:currentStep`/`resolve-path`/
+ * `reset-simulated-values` back to its own source of truth.
  */
+import { ref, watch } from "vue";
 import type { MachineState } from "../model/gcode/state";
 
-defineProps<{
-	currentLine: number;
-	totalLines: number;
+const props = defineProps<{
+	currentStep: number;
+	totalSteps: number;
+	/** 1-based physical line the current step executes, for display and editor highlighting — null
+	 *  when there's no step to show yet (e.g. an empty file, or paused before any step completed). */
+	line: number | null;
 	state: MachineState | null;
+	status: "complete" | "paused" | "error";
+	pendingPath: string | null;
+	errorMessage: string | null;
+	hasSimulatedValues: boolean;
 }>();
-const emit = defineEmits<{ "update:currentLine": [number] }>();
+const emit = defineEmits<{
+	"update:currentStep": [number];
+	"resolve-path": [path: string, rawValue: string];
+	"reset-simulated-values": [];
+}>();
+
+const promptValue = ref("");
+watch(() => props.pendingPath, () => { promptValue.value = ""; });
+
+function submitPrompt(): void {
+	if (props.pendingPath === null || promptValue.value.trim() === "") return;
+	emit("resolve-path", props.pendingPath, promptValue.value);
+}
 </script>

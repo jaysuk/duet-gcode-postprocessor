@@ -27,7 +27,10 @@ export interface LineStateIndex {
 
 const DEFAULT_CHECKPOINT_EVERY = 500;
 
-function applyLineToState(state: MachineState, raw: string): void {
+/** Applies one physical line's effect to `state` in place — shared with `executionIndex.ts`, which
+ *  needs the exact same per-line update but drives it from a non-linear (branch/loop-aware) sequence
+ *  of lines rather than this module's own flat 1..N walk. */
+export function applyLineToState(state: MachineState, raw: string): void {
 	const subLines = splitCommands(raw);
 	beginLine(state);
 	for (const subRaw of subLines) applyToken(state, tokenise(subRaw));

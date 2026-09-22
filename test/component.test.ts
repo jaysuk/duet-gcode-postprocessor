@@ -348,13 +348,15 @@ describe("components mount", () => {
 		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
 		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
 
-		expect(wrapper.text()).not.toContain("Line 1 /");
+		expect(wrapper.text()).not.toContain("Step 1 /");
 		const stepperBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file");
 		await stepperBtn!.trigger("click");
-		expect(wrapper.text()).toContain("Line 1 /");
+		// The execution-order index (unlike the old flat one) has no synchronous line-count fallback -
+		// it needs the deferred parse+walk to actually finish before "Step 1 / N" is real.
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 /"));
 
 		await stepperBtn!.trigger("click");
-		expect(wrapper.text()).not.toContain("Line 1 /");
+		expect(wrapper.text()).not.toContain("Step 1 /");
 		wrapper.unmount();
 	});
 
@@ -369,12 +371,15 @@ describe("components mount", () => {
 		await vi.waitFor(() => expect(wrapper.text()).toContain("L0")); // gutter proves the index is ready
 
 		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		// The execution-order index is a second, separately-deferred build (see GcodeEditor.vue's own
+		// comment) - wait for it too, not just the gutter's lineIndex, before driving the stepper.
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"));
 		expect(wrapper.find(".cm-gcodeCurrentLine").exists()).toBe(true);
 		expect(wrapper.find(".cm-gcodeCurrentLine").text()).toContain(";LAYER_CHANGE");
 
-		const stepForward = wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward one line");
-		await stepForward!.trigger("click");
-		await stepForward!.trigger("click");
+		const stepForward = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward");
+		await stepForward()!.trigger("click");
+		await stepForward()!.trigger("click");
 		expect(wrapper.find(".cm-gcodeCurrentLine").text()).toContain("G1 X10 Y10 F1200");
 		expect(wrapper.text()).toContain("Layer 0");
 		expect(wrapper.text()).toContain("X10.00");
@@ -392,9 +397,10 @@ describe("components mount", () => {
 		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
 		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X10"));
 		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
 
-		const stepBack = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step back one line");
-		const stepForward = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward one line");
+		const stepBack = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step back");
+		const stepForward = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward");
 		expect(stepBack()!.attributes("disabled")).toBeDefined(); // already at line 1
 
 		await stepForward()!.trigger("click");
@@ -421,13 +427,14 @@ describe("components mount", () => {
 		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/a.g" } });
 		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X20"));
 		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
-		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward one line")!.trigger("click");
-		expect(wrapper.text()).toContain("Line 2 /");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward")!.trigger("click");
+		expect(wrapper.text()).toContain("Step 2 /");
 
 		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X99\n"]));
 		await wrapper.setProps({ path: "0:/gcodes/b.g" });
 		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X99"));
-		expect(wrapper.text()).toContain("Line 1 /");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 /"));
 		wrapper.unmount();
 	});
 

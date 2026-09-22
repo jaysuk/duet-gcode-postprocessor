@@ -55,8 +55,11 @@
 			<v-alert v-if="error !== null" type="error" variant="tonal" density="compact" class="mb-2">{{ error }}</v-alert>
 			<v-progress-linear v-if="busy" indeterminate class="mb-2" />
 
-			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-line="stepperLine" :total-lines="stepperTotalLines"
-								:state="stepperState" class="mb-2" @update:current-line="setStepperLine" />
+			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-step="stepperStep" :total-steps="stepperTotalSteps"
+								:line="stepperDisplayLine" :state="stepperState" :status="stepperStatus" :pending-path="stepperPendingPath"
+								:error-message="stepperErrorMessage" :has-simulated-values="simulatedOverrides.size > 0" class="mb-2"
+								@update:current-step="setStepperStep" @resolve-path="resolveSimulatedPath"
+								@reset-simulated-values="resetSimulatedValues" />
 
 			<div ref="editorHostEl" class="gcode-editor-host flex-grow-1"></div>
 		</template>
@@ -92,8 +95,10 @@ import { createGateway } from "../dwc/gateway";
 import { editorColorScheme, loadEditorColorScheme } from "../dwc/editorColorSettings";
 import { mainboardFirmwareVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
-import { buildLineStateIndex, stateAtLine, type LineStateIndex } from "../model/gcode/lineState";
+import { buildExecutionIndex, type ExecutionIndex } from "../model/gcode/executionIndex";
+import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
+import { createSimulatedResolvePath, parseSimulatedValueInput, type SimulatedValueOverrides } from "../model/gcode/simulatedValues";
 
 const props = defineProps<{ path: string | null }>();
 
@@ -115,11 +120,22 @@ const cursorCode = ref<string | null>(null);
 const cursorInExpression = ref(false);
 const colorSettingsOpen = ref(false);
 const stepperOpen = ref(false);
-const stepperLine = ref(1);
 // shallowRef, not a plain let: the stepper panel's own state readout is a real Vue computed that
 // needs to re-render once the deferred background build below finishes - lineStateGutter's own
 // getIndex() callback reads .value the same way it read the plain variable before.
 const lineIndex = shallowRef<LineStateIndex | null>(null);
+
+// Offline CONDITIONAL stepping: executionIndex.value is null until the deferred build in load()
+// below finishes, same tradeoff lineIndex makes. stepperStep indexes executionIndex.steps (0-based -
+// a step, not a physical line, since a false if/while branch contributes none and a loop body
+// contributes one per iteration), never a raw line number - see executionIndex.ts's own doc comment.
+const executionIndex = shallowRef<ExecutionIndex | null>(null);
+const stepperStep = ref(0);
+// User-supplied hypothetical values for object-model paths a condition referenced but this offline
+// simulation (no live machine) has no way to know - keyed by the exact concrete path
+// (`"sensors.gpIn[0].value"`), populated via the stepper panel's pause/prompt UI. A shallowRef holding
+// a fresh Map on every change (rather than mutating in place) so Vue's reactivity actually notices.
+const simulatedOverrides = shallowRef<SimulatedValueOverrides>(new Map());
 
 const docsUrl = computed(() => {
 	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
@@ -129,22 +145,58 @@ const docsUrl = computed(() => {
 // Matches MonacoEditor.vue's own toolbar wording exactly ("Find Code (F4)" / "Find Expression (F4)").
 const quickSearchTitle = computed(() => cursorInExpression.value ? "Find Expression (F4)" : "Find Code (F4)");
 
-// Offline file-stepper: totalLines prefers the finished index (built asynchronously, see load()
-// below) but falls back to the live doc's own line count so the slider has a real bound immediately
-// on open, not "1" until the background build finishes.
-const stepperTotalLines = computed(() => lineIndex.value?.totalLines ?? editorInstance.value?.view.state.doc.lines ?? 1);
-const stepperState = computed(() => {
-	const index = lineIndex.value;
-	const instance = editorInstance.value;
-	if (index === null || instance === null) return null;
-	return stateAtLine(index, instance.view.state.doc, stepperLine.value);
+const stepperTotalSteps = computed(() => executionIndex.value?.steps.length ?? 0);
+const stepperCurrentStepInfo = computed(() => executionIndex.value?.steps[stepperStep.value] ?? null);
+// 1-based, matching setCurrentLine's own convention - executionIndex.ts's steps are 0-based physical
+// line indices (dwc-gcode-core's own convention, shared with `walkExecution`).
+const stepperDisplayLine = computed(() => {
+	const info = stepperCurrentStepInfo.value;
+	return info === null ? null : info.line + 1;
+});
+const stepperState = computed(() => stepperCurrentStepInfo.value?.state ?? null);
+const stepperStatus = computed(() => executionIndex.value?.status ?? "complete");
+const stepperPendingPath = computed(() => {
+	const index = executionIndex.value;
+	return index?.status === "paused" ? index.path : null;
+});
+const stepperErrorMessage = computed(() => {
+	const index = executionIndex.value;
+	return index?.status === "error" ? index.message : null;
 });
 
-watch([stepperOpen, stepperLine], ([open, line]) => {
+watch([stepperOpen, stepperDisplayLine], ([open, line]) => {
 	const instance = editorInstance.value;
 	if (instance === null) return;
 	setCurrentLine(instance.view, open ? line : null, { scroll: open });
 });
+
+/** Rebuilds executionIndex from the live doc and the current simulatedOverrides - the same deferred
+ *  (setTimeout) pattern load() already uses for lineIndex, so a rebuild (e.g. right after the user
+ *  answers a pause prompt) doesn't block the next paint. Clamps stepperStep back into range, since a
+ *  new simulated value can shrink OR grow the step count (a newly-false branch skips a body that used
+ *  to run; a newly-resolved pause can run much further than before). */
+function rebuildExecutionIndex(): void {
+	const instance = editorInstance.value;
+	if (instance === null) return;
+	setTimeout(() => {
+		if (editorInstance.value !== instance) return; // superseded by a newer load() already
+		executionIndex.value = buildExecutionIndex(instance.view.state.doc, createSimulatedResolvePath(simulatedOverrides.value));
+		const total = executionIndex.value.steps.length;
+		stepperStep.value = total === 0 ? 0 : Math.min(stepperStep.value, total - 1);
+	}, 0);
+}
+
+function resolveSimulatedPath(path: string, rawValue: string): void {
+	const next = new Map(simulatedOverrides.value);
+	next.set(path, parseSimulatedValueInput(rawValue));
+	simulatedOverrides.value = next;
+	rebuildExecutionIndex();
+}
+
+function resetSimulatedValues(): void {
+	simulatedOverrides.value = new Map();
+	rebuildExecutionIndex();
+}
 
 let loadedPath: string | null = null;
 // Snapshot of the document as loaded, for revert() - a real CM6 Text (not a string) so reverting is a
@@ -185,12 +237,14 @@ function destroyEditor(): void {
 	editorReady.value = false;
 	loadedPath = null;
 	lineIndex.value = null;
+	executionIndex.value = null;
+	simulatedOverrides.value = new Map();
 	themeController = null;
 	originalDoc = null;
 	dirty.value = false;
 	cursorCode.value = null;
 	cursorInExpression.value = false;
-	stepperLine.value = 1;
+	stepperStep.value = 0;
 }
 
 async function load(path: string): Promise<void> {
@@ -239,6 +293,7 @@ async function load(path: string): Promise<void> {
 			lineIndex.value = buildLineStateIndex(instance.view.state.doc);
 			instance.view.dispatch({}); // force the gutter to pick up the now-ready index
 		}, 0);
+		rebuildExecutionIndex();
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
 	} finally {
@@ -307,8 +362,9 @@ function openCodeSearch(): void {
 	else openGcodeQuickSearch(instance.view);
 }
 
-function setStepperLine(line: number): void {
-	stepperLine.value = Math.min(Math.max(1, line), stepperTotalLines.value);
+function setStepperStep(step: number): void {
+	const maxStep = Math.max(0, stepperTotalSteps.value - 1);
+	stepperStep.value = Math.min(Math.max(0, step), maxStep);
 }
 
 function alignComments(): void {
