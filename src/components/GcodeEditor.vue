@@ -98,7 +98,10 @@ import { blobToTextChunks } from "../model/gcode/editorDoc";
 import { buildExecutionIndex, type ExecutionIndex } from "../model/gcode/executionIndex";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
-import { createSimulatedResolvePath, parseSimulatedValueInput, type SimulatedValueOverrides } from "../model/gcode/simulatedValues";
+import {
+	createSimulatedResolvePath, loadSimulatedOverrides, parseSimulatedValueInput, saveSimulatedOverrides,
+	type SimulatedValueOverrides,
+} from "../model/gcode/simulatedValues";
 
 const props = defineProps<{ path: string | null }>();
 
@@ -190,11 +193,13 @@ function resolveSimulatedPath(path: string, rawValue: string): void {
 	const next = new Map(simulatedOverrides.value);
 	next.set(path, parseSimulatedValueInput(rawValue));
 	simulatedOverrides.value = next;
+	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, next);
 	rebuildExecutionIndex();
 }
 
 function resetSimulatedValues(): void {
 	simulatedOverrides.value = new Map();
+	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, simulatedOverrides.value);
 	rebuildExecutionIndex();
 }
 
@@ -278,6 +283,7 @@ async function load(path: string): Promise<void> {
 		loadedPath = path;
 		editorReady.value = true;
 		dirty.value = false;
+		simulatedOverrides.value = loadSimulatedOverrides(path);
 
 		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
 		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently

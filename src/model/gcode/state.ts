@@ -37,6 +37,17 @@ export interface MachineState {
 	relativeMoves: boolean;
 	/** True after M83 (relative extrusion), false after M82. */
 	relativeE: boolean;
+	/** True once a `G28` covering this axis has been seen (bare `G28` homes all three; `G28 X`/`G28 Y`/
+	 *  `G28 Z` home only the named ones). A simplification, not real RRF homing semantics - RRF only
+	 *  actually sets an axis's homed bit once the homing MACRO it runs (`homeall.g`/`homex.g`/...)
+	 *  completes successfully (an endstop really triggering during a `G1 H1` move), which this tracker
+	 *  has no way to simulate. For a single-file offline stepper "a G28 covering this axis was executed
+	 *  earlier in the file" is the useful, honest question to answer instead - see
+	 *  `executionIndex.ts`'s own `resolveKnownPath` for how this is used. Assumes the default RRF axis
+	 *  order (0=X, 1=Y, 2=Z) - a config that reassigns axis letters via `M584` isn't accounted for. */
+	homedX: boolean;
+	homedY: boolean;
+	homedZ: boolean;
 	/** Current object label from M486, or null. */
 	object: string | null;
 	/** Current feature type from the slicer's `;TYPE:` comment, or null. */
@@ -76,6 +87,9 @@ export function createState(options: { geometricFallback?: boolean } = {}): Mach
 		feedrate: null,
 		relativeMoves: false,
 		relativeE: false,
+		homedX: false,
+		homedY: false,
+		homedZ: false,
 		object: null,
 		featureType: null,
 		layerChanged: false,
@@ -241,6 +255,17 @@ function applyG(state: MachineState, token: Tokenised): void {
 			if (y !== null) state.y = applyAxisPosition(state.y, y, state.relativeMoves);
 			if (z !== null) state.z = applyAxisPosition(state.z, z, state.relativeMoves);
 			applyExtrusion(state, e);
+			break;
+		}
+		case 28: {
+			// Bare G28 homes every axis it knows about; G28 X/Y/Z homes only the named ones - see
+			// MachineState.homedX's own doc comment for what "homed" means here (a simplification, not
+			// real endstop-triggered semantics).
+			const params = parseParams(token.body);
+			const hasAny = params.some((p) => p.letter === "X" || p.letter === "Y" || p.letter === "Z");
+			if (!hasAny || params.some((p) => p.letter === "X")) state.homedX = true;
+			if (!hasAny || params.some((p) => p.letter === "Y")) state.homedY = true;
+			if (!hasAny || params.some((p) => p.letter === "Z")) state.homedZ = true;
 			break;
 		}
 		case 90:

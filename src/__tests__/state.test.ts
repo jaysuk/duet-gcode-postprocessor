@@ -170,3 +170,33 @@ describe("position tracking", () => {
 		expect(state.z).toBeCloseTo(0.4);
 	});
 });
+
+describe("homing tracking (G28)", () => {
+	it("starts unhomed", () => {
+		const state = createState();
+		expect(state.homedX).toBe(false);
+		expect(state.homedY).toBe(false);
+		expect(state.homedZ).toBe(false);
+	});
+
+	it("a bare G28 homes all three axes", () => {
+		const { state } = run(["G28"]);
+		expect(state.homedX).toBe(true);
+		expect(state.homedY).toBe(true);
+		expect(state.homedZ).toBe(true);
+	});
+
+	it("G28 with named axes only homes those", () => {
+		const { state } = run(["G28 X Y"]);
+		expect(state.homedX).toBe(true);
+		expect(state.homedY).toBe(true);
+		expect(state.homedZ).toBe(false);
+	});
+
+	it("a single-axis G28 doesn't un-home the others", () => {
+		const { state } = run(["G28", "G28 X"]);
+		expect(state.homedX).toBe(true);
+		expect(state.homedY).toBe(true);
+		expect(state.homedZ).toBe(true);
+	});
+});

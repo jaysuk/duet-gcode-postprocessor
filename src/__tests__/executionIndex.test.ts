@@ -1,9 +1,24 @@
 import { Text } from "@codemirror/state";
 import { UnresolvedPathError, type EvalValue } from "dwc-gcode-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { buildExecutionIndex } from "../model/gcode/executionIndex";
-import { createSimulatedResolvePath, parseSimulatedValueInput, type SimulatedValueOverrides } from "../model/gcode/simulatedValues";
+// This harness's happy-dom `localStorage` is a non-functional stub (`localStorage.setItem` is not a
+// function — same environment gap `autoRun.test.ts` documents and works around for `recipeStore`). A
+// tiny in-memory stand-in is the only way to exercise the persistence tests below; real DWC runs in an
+// actual browser, where the real localStorage works.
+const memoryStorage = new Map<string, string>();
+vi.stubGlobal("localStorage", {
+	getItem: (key: string) => memoryStorage.get(key) ?? null,
+	setItem: (key: string, value: string) => { memoryStorage.set(key, value); },
+	removeItem: (key: string) => { memoryStorage.delete(key); },
+});
+
+import { buildExecutionIndex, resolveKnownPath } from "../model/gcode/executionIndex";
+import {
+	createSimulatedResolvePath, loadSimulatedOverrides, parseSimulatedValueInput, saveSimulatedOverrides,
+	type SimulatedValueOverrides,
+} from "../model/gcode/simulatedValues";
+import { createState } from "../model/gcode/state";
 
 function docOf(lines: Array<string>): Text {
 	return Text.of(lines);
@@ -107,5 +122,88 @@ describe("parseSimulatedValueInput", () => {
 		const v = parseSimulatedValueInput("0");
 		expect(v).toBe(0);
 		expect(typeof v).toBe("number");
+	});
+});
+
+describe("resolveKnownPath", () => {
+	it("answers move.axes[0..2].homed from tracked state", () => {
+		const state = createState();
+		state.homedX = true;
+		expect(resolveKnownPath("move.axes[0].homed", state)).toBe(true);
+		expect(resolveKnownPath("move.axes[1].homed", state)).toBe(false);
+		expect(resolveKnownPath("move.axes[2].homed", state)).toBe(false);
+	});
+
+	it("returns undefined (not a value) for anything it doesn't track, so the caller falls through", () => {
+		expect(resolveKnownPath("sensors.gpIn[0].value", createState())).toBeUndefined();
+		expect(resolveKnownPath("move.axes[3].homed", createState())).toBeUndefined();
+	});
+});
+
+describe("buildExecutionIndex answers homed status from a G28 already walked past", () => {
+	it("resolves move.axes[0].homed from an earlier bare G28 without ever consulting the caller's resolvePath", () => {
+		const doc = docOf(["G28", "if move.axes[0].homed", "    G1 X1", "G1 Y1"]);
+		const resolvePath = () => { throw new Error("should not be called - homed status is already known"); };
+		const r = buildExecutionIndex(doc, resolvePath);
+		expect(r.status).toBe("complete");
+		expect(r.steps.map((s) => s.line)).toEqual([0, 1, 2, 3]);
+	});
+
+	it("confidently answers false (not a pause) when a DIFFERENT axis was homed", () => {
+		// G28 Y genuinely tells us X was NOT homed - false is a real, known answer here, not
+		// "unresolved". The body never runs and the caller's resolvePath is never consulted.
+		const doc = docOf(["G28 Y", "if move.axes[0].homed", "    G1 X1", "G1 Y1"]);
+		const resolvePath = () => { throw new Error("should not be called - homed status is already known"); };
+		const r = buildExecutionIndex(doc, resolvePath);
+		expect(r.status).toBe("complete");
+		expect(r.steps.map((s) => s.line)).toEqual([0, 1, 3]); // line 2 ("G1 X1") never runs
+	});
+
+	it("before any G28 at all, also confidently answers false - 'not yet homed' is the honest starting state", () => {
+		// No prior evidence of homing IS "not homed" for an isolated single-file walk (there's no
+		// wider context to be uncertain about) - the same reasoning that makes this useful for
+		// stepping through a homing macro itself, which typically starts with exactly this check.
+		const doc = docOf(["if move.axes[0].homed", "    G1 X1", "G1 Y1"]);
+		const resolvePath = () => { throw new Error("should not be called - homed status is already known"); };
+		const r = buildExecutionIndex(doc, resolvePath);
+		expect(r.status).toBe("complete");
+		expect(r.steps.map((s) => s.line)).toEqual([0, 2]); // line 1 ("G1 X1") never runs
+	});
+
+	it("still asks the caller for anything it doesn't track itself, even after homing", () => {
+		const doc = docOf(["G28", "if sensors.gpIn[0].value > 0", "    G1 X1"]);
+		const r = buildExecutionIndex(doc, noOverrides());
+		expect(r.status).toBe("paused");
+		expect(r).toMatchObject({ path: "sensors.gpIn[0].value" });
+	});
+});
+
+describe("simulated-value persistence", () => {
+	it("round-trips through localStorage, keyed by file path", () => {
+		const path = "0:/gcodes/persistence-test-1.gcode";
+		const overrides: SimulatedValueOverrides = new Map([["sensors.gpIn[0].value", 1], ["state.status", "idle"]]);
+		saveSimulatedOverrides(path, overrides);
+		expect(loadSimulatedOverrides(path)).toEqual(overrides);
+	});
+
+	it("a different file path gets its own, independent entry", () => {
+		const pathA = "0:/gcodes/persistence-test-a.gcode";
+		const pathB = "0:/gcodes/persistence-test-b.gcode";
+		saveSimulatedOverrides(pathA, new Map([["x", 1]]));
+		saveSimulatedOverrides(pathB, new Map([["x", 2]]));
+		expect(loadSimulatedOverrides(pathA).get("x")).toBe(1);
+		expect(loadSimulatedOverrides(pathB).get("x")).toBe(2);
+	});
+
+	it("loading a path with nothing saved returns an empty map, not an error", () => {
+		expect(loadSimulatedOverrides("0:/gcodes/never-saved.gcode").size).toBe(0);
+	});
+
+	it("saving an empty map clears any previously-saved entry rather than leaving a stale one", () => {
+		const path = "0:/gcodes/persistence-test-clear.gcode";
+		saveSimulatedOverrides(path, new Map([["x", 1]]));
+		expect(loadSimulatedOverrides(path).size).toBe(1);
+		saveSimulatedOverrides(path, new Map());
+		expect(loadSimulatedOverrides(path).size).toBe(0);
 	});
 });
