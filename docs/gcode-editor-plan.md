@@ -79,7 +79,7 @@ later change of mind on any row as a plan update, not a reason to distrust the r
 | Screen-reader / ARIA, keyboard nav, high-contrast theme | **Keep (basic)** | Cheap, real value, not the deep accessibility engineering IME/bidi would be. |
 | Command palette, rebindable keymaps | **Skip** | No one remaps keys in a G-code viewer. |
 | **G-code-native gutter**: per-line toolhead position/Z/layer/tool from `state.ts` | **Build — new** | Monaco has no concept of this; this is the actual "and more." |
-| **Scrub bar / step-through** tied to machine state | **Build — new, offline first** | The "step through a file" feature from earlier; live single-step (sending real commands) is an explicitly separate, later phase — this plugin deliberately has no `sendCode` today (`docs/tasks/13-simulation-and-tail.md`'s own stop point). |
+| **Scrub bar / step-through** tied to machine state | **Build — new, offline first — offline half DONE 2026-09-22** | The "step through a file" feature from earlier; live single-step (sending real commands) is an explicitly separate, later phase — this plugin deliberately has no `sendCode` today (`docs/tasks/13-simulation-and-tail.md`'s own stop point). Offline scrub bar + step buttons + derived-state readout shipped (`GcodeStepperPanel.vue`, `GcodeEditor.vue`, `state.ts`'s new X/Y/E tracking, `dwc-gcode-editor` v0.8.0's `gcodeCurrentLine()`). Live single-stepping against real hardware remains a separate, unstarted, higher-risk follow-on needing its own safety design. |
 | Flush-before-unmount/hide contract | **Build — new** | Closes the exact gap PR #517 had to work around for Monaco. |
 
 ## Architecture
