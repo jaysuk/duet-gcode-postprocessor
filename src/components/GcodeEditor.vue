@@ -57,9 +57,9 @@
 
 			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-step="stepperStep" :total-steps="stepperTotalSteps"
 								:line="stepperDisplayLine" :state="stepperState" :status="stepperStatus" :pending-path="stepperPendingPath"
-								:error-message="stepperErrorMessage" :has-simulated-values="simulatedOverrides.size > 0" class="mb-2"
+								:error-message="stepperErrorMessage" :simulated-values="simulatedValuesList" class="mb-2"
 								@update:current-step="setStepperStep" @resolve-path="resolveSimulatedPath"
-								@reset-simulated-values="resetSimulatedValues" />
+								@remove-simulated-value="removeSimulatedValue" @reset-simulated-values="resetSimulatedValues" />
 
 			<div ref="editorHostEl" class="gcode-editor-host flex-grow-1"></div>
 		</template>
@@ -78,7 +78,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { lintGutter } from "@codemirror/lint";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { diagnoseDocument, parseDocument } from "dwc-gcode-core";
+import { diagnoseDocument, parseDocument, type EvalValue } from "dwc-gcode-core";
 import {
 	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
 	createThemeController, gcodeCompletion, gcodeCurrentLine, gcodeLanguage, gcodeLintUi,
@@ -197,11 +197,29 @@ function resolveSimulatedPath(path: string, rawValue: string): void {
 	rebuildExecutionIndex();
 }
 
+function removeSimulatedValue(path: string): void {
+	const next = new Map(simulatedOverrides.value);
+	next.delete(path);
+	simulatedOverrides.value = next;
+	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, next);
+	rebuildExecutionIndex();
+}
+
 function resetSimulatedValues(): void {
 	simulatedOverrides.value = new Map();
 	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, simulatedOverrides.value);
 	rebuildExecutionIndex();
 }
+
+function formatEvalValue(v: EvalValue): string {
+	if (v === null) return "null";
+	if (Array.isArray(v)) return `[${v.map(formatEvalValue).join(", ")}]`;
+	if (typeof v === "string") return JSON.stringify(v);
+	return String(v);
+}
+
+const simulatedValuesList = computed(() => [...simulatedOverrides.value.entries()]
+	.map(([path, value]) => ({ path, display: formatEvalValue(value) })));
 
 let loadedPath: string | null = null;
 // Snapshot of the document as loaded, for revert() - a real CM6 Text (not a string) so reverting is a

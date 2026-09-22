@@ -181,7 +181,7 @@ describe("buildExecutionIndex answers homed status from a G28 already walked pas
 describe("simulated-value persistence", () => {
 	it("round-trips through localStorage, keyed by file path", () => {
 		const path = "0:/gcodes/persistence-test-1.gcode";
-		const overrides: SimulatedValueOverrides = new Map([["sensors.gpIn[0].value", 1], ["state.status", "idle"]]);
+		const overrides: SimulatedValueOverrides = new Map<string, EvalValue>([["sensors.gpIn[0].value", 1], ["state.status", "idle"]]);
 		saveSimulatedOverrides(path, overrides);
 		expect(loadSimulatedOverrides(path)).toEqual(overrides);
 	});

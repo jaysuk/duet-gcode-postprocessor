@@ -20,9 +20,18 @@
 			<span class="text-caption text-medium-emphasis" style="min-width: 9rem; text-align: right">
 				Step {{ totalSteps === 0 ? 0 : currentStep + 1 }} / {{ totalSteps }}<template v-if="line !== null"> (line {{ line }})</template>
 			</span>
-			<v-btn v-if="hasSimulatedValues" icon="mdi-refresh" size="small" variant="text"
-				   title="Clear simulated values" @click="emit('reset-simulated-values')" />
 		</div>
+
+		<div v-if="simulatedValues.length > 0" class="d-flex align-center ga-1 flex-wrap mt-1">
+			<span class="text-caption text-medium-emphasis">Simulated:</span>
+			<v-chip v-for="sv in simulatedValues" :key="sv.path" size="x-small" closable
+					title="Click × to forget this simulated value" @click:close="emit('remove-simulated-value', sv.path)">
+				{{ sv.path }} = {{ sv.display }}
+			</v-chip>
+			<v-btn icon="mdi-refresh" size="x-small" variant="text" title="Clear all simulated values"
+				   @click="emit('reset-simulated-values')" />
+		</div>
+
 		<div class="stepper-state text-caption text-medium-emphasis mt-1">
 			<template v-if="state !== null">
 				<span v-if="state.layer >= 0">Layer {{ state.layer }}</span>
@@ -59,10 +68,11 @@
  * state {@link MachineState} derives at the current EXECUTION STEP (not physical line — a false
  * `if`/`while` branch contributes no steps, a loop body contributes one step per iteration; see
  * `executionIndex.ts`), plus the "paused, needs a simulated value" prompt for a condition that
- * references an object-model path this offline simulation can't know (no live machine). Owns no state
- * of its own beyond the slider's live drag value and the prompt's text input — `GcodeEditor.vue` (the
- * wiring layer) supplies everything else and applies `update:currentStep`/`resolve-path`/
- * `reset-simulated-values` back to its own source of truth.
+ * references an object-model path this offline simulation can't know (no live machine), and the list
+ * of simulated values currently in effect, each individually removable. Owns no state of its own
+ * beyond the slider's live drag value and the prompt's text input — `GcodeEditor.vue` (the wiring
+ * layer) supplies everything else and applies `update:currentStep`/`resolve-path`/
+ * `remove-simulated-value`/`reset-simulated-values` back to its own source of truth.
  */
 import { ref, watch } from "vue";
 import type { MachineState } from "../model/gcode/state";
@@ -77,11 +87,14 @@ const props = defineProps<{
 	status: "complete" | "paused" | "error";
 	pendingPath: string | null;
 	errorMessage: string | null;
-	hasSimulatedValues: boolean;
+	/** Every simulated value currently in effect, `display` already formatted for read-only display —
+	 *  this component stays free of `dwc-gcode-core`'s `EvalValue` formatting concerns. */
+	simulatedValues: ReadonlyArray<{ path: string; display: string }>;
 }>();
 const emit = defineEmits<{
 	"update:currentStep": [number];
 	"resolve-path": [path: string, rawValue: string];
+	"remove-simulated-value": [path: string];
 	"reset-simulated-values": [];
 }>();
 
