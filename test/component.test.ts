@@ -478,6 +478,24 @@ describe("components mount", () => {
 		wrapper.unmount();
 	});
 
+	it("a blocking M291 choice box (S4) shows a button per choice, and the answer's chosen text shows in the answer chip", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(['M291 P"Pick a mode" S4 K{"Fast","Quiet"}\nif input = 1\n    G1 X1\nG1 Y1\n']));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 Y1"));
+		await wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!.trigger("click");
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Pick a mode"));
+
+		const fastBtn = wrapper.findAll("button").find((b) => b.text() === "Fast");
+		const quietBtn = wrapper.findAll("button").find((b) => b.text() === "Quiet");
+		expect(fastBtn).toBeDefined();
+		expect(quietBtn).toBeDefined();
+
+		await quietBtn!.trigger("click"); // index 1 - the fixture's "if input = 1" branch
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 4"));
+		expect(wrapper.text()).toContain("Pick a mode → Quiet"); // the answer chip shows the chosen TEXT, not "1"
+		wrapper.unmount();
+	});
+
 	it("switching to a different file resets the stepper back to line 1", async () => {
 		downloadMock.mockResolvedValueOnce(new Blob(["G28\nG1 X10\nG1 X20\n"]));
 		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/a.g" } });

@@ -81,7 +81,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { lintGutter } from "@codemirror/lint";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { diagnoseDocument, parseDocument, type EvalValue, type MessageBoxAnswer } from "dwc-gcode-core";
+import { diagnoseDocument, parseDocument, type EvalValue, type MessageBoxAnswer, type MessageBoxPrompt } from "dwc-gcode-core";
 import {
 	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
 	createThemeController, gcodeCompletion, gcodeCurrentLine, gcodeLanguage, gcodeLintUi,
@@ -260,9 +260,15 @@ function formatEvalValue(v: EvalValue): string {
 	return String(v);
 }
 
-function formatMessageBoxAnswer(answer: MessageBoxAnswer): string {
+/** `prompt` is the SAME prompt the answer was originally given for (recovered from the content key -
+ *  see `messageBoxAnswersList` below), which lets a choice answer show the chosen option's own TEXT
+ *  rather than just its opaque index. */
+function formatMessageBoxAnswer(answer: MessageBoxAnswer, prompt: MessageBoxPrompt | null): string {
 	if (answer.cancelled) return "Cancel";
 	if (answer.input === null) return "OK";
+	if (prompt?.mode === "choice" && typeof answer.input === "number") {
+		return prompt.choices[answer.input] ?? `#${answer.input}`;
+	}
 	return typeof answer.input === "string" ? JSON.stringify(answer.input) : String(answer.input);
 }
 
@@ -273,14 +279,15 @@ const messageBoxAnswersList = computed(() => [...messageBoxAnswers.value.entries
 	.map(([key, answer]) => {
 		// The key IS the prompt's own JSON serialisation (messageBoxKey) - reusing it here avoids
 		// storing the prompt a second time just for display purposes.
-		let message = key;
+		let prompt: MessageBoxPrompt | null = null;
 		try {
-			message = (JSON.parse(key) as { message: string }).message;
+			prompt = JSON.parse(key) as MessageBoxPrompt;
 		} catch {
 			// Malformed/foreign key (shouldn't happen - messageBoxKey always produces valid JSON) -
 			// fall back to showing the raw key rather than breaking the whole list over one entry.
 		}
-		return { key, display: `${message} → ${formatMessageBoxAnswer(answer)}` };
+		const message = prompt?.message ?? key;
+		return { key, display: `${message} → ${formatMessageBoxAnswer(answer, prompt)}` };
 	}));
 
 let loadedPath: string | null = null;

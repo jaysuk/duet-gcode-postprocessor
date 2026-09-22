@@ -147,6 +147,28 @@ describe("resolveKnownPath", () => {
 		expect(resolveKnownPath("sensors.gpIn[0].value", createState())).toBeUndefined();
 		expect(resolveKnownPath("move.axes[3].homed", createState())).toBeUndefined();
 	});
+
+	it("answers move.axes[0..2].userPosition from the last commanded X/Y/Z", () => {
+		const state = createState();
+		state.x = 12.5;
+		state.y = 0;
+		expect(resolveKnownPath("move.axes[0].userPosition", state)).toBe(12.5);
+		expect(resolveKnownPath("move.axes[1].userPosition", state)).toBe(0); // teeth: 0 is a real known value
+		expect(resolveKnownPath("move.axes[2].userPosition", state)).toBeUndefined(); // never moved yet
+	});
+
+	it("does NOT answer machinePosition - workplace/tool offsets aren't tracked, so claiming to know it would be dishonest", () => {
+		const state = createState();
+		state.x = 12.5;
+		expect(resolveKnownPath("move.axes[0].machinePosition", state)).toBeUndefined();
+	});
+
+	it("answers state.currentTool from the last T command, including 'none selected' (-1)", () => {
+		const state = createState();
+		expect(resolveKnownPath("state.currentTool", state)).toBe(-1);
+		state.tool = 2;
+		expect(resolveKnownPath("state.currentTool", state)).toBe(2);
+	});
 });
 
 describe("buildExecutionIndex answers homed status from a G28 already walked past", () => {

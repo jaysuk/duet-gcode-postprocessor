@@ -39,22 +39,35 @@ export type ExecutionIndex =
 /**
  * Answers an object-model path from state this plugin's own `MachineState` ALREADY tracks, as of the
  * point the walk has reached so far - `undefined` (never a real `EvalValue`) means "not one of these,
- * fall through to the next resolver" rather than "unknown". Currently just axis-homed status
- * (`move.axes[0..2].homed`, assuming the default X/Y/Z axis order - see `MachineState.homedX`'s own
- * doc comment for exactly what "homed" means here and why it's a simplification, not real RRF
- * semantics). `state.homedX`/`Y`/`Z` default to `false`, so a homed check answers confidently even
- * BEFORE any `G28` has run in the walk - "no evidence of homing yet" genuinely IS "not homed" for an
- * isolated single-file walk with no wider context, and it's exactly the useful answer when the file
- * being stepped is a homing macro itself (which typically opens with `if !move.axes[0].homed`, e.g.
- * RRF's own `homeall.g`). Deliberately small otherwise: every other object-model path this plugin
- * doesn't itself track (temperatures, endstops, GPIO, ...) still falls through to asking the user,
- * which is the honest answer for a plugin with no live machine connection.
+ * fall through to the next resolver" rather than "unknown". Assumes the default X/Y/Z axis order
+ * throughout (a config that reassigns axis letters via `M584` isn't accounted for) and stays
+ * deliberately small otherwise: every other object-model path this plugin doesn't itself track
+ * (temperatures, endstops, GPIO, ...) still falls through to asking the user, which is the honest
+ * answer for a plugin with no live machine connection.
+ *
+ * - `move.axes[0..2].homed` - see `MachineState.homedX`'s own doc comment for exactly what "homed"
+ *   means here and why it's a simplification, not real RRF semantics. `state.homedX`/`Y`/`Z` default
+ *   to `false`, so a homed check answers confidently even BEFORE any `G28` has run in the walk - "no
+ *   evidence of homing yet" genuinely IS "not homed" for an isolated single-file walk with no wider
+ *   context, and it's exactly the useful answer when the file being stepped is a homing macro itself
+ *   (which typically opens with `if !move.axes[0].homed`, e.g. RRF's own `homeall.g`).
+ * - `move.axes[0..2].userPosition` - the last COMMANDED coordinate (`state.x`/`y`/`z`), `undefined`
+ *   (fall through) before any move on that axis. Deliberately NOT `machinePosition` too - real RRF's
+ *   `machinePosition` can differ from the commanded position by workplace and tool-length offsets,
+ *   neither of which this tracker has any visibility into, so claiming to know it would be a
+ *   materially less honest simplification than this one.
+ * - `state.currentTool` - directly `state.tool` (`-1` when none selected, matching both this
+ *   tracker's own convention and RRF's real one for this specific path).
  */
 export function resolveKnownPath(path: string, state: MachineState): EvalValue | undefined {
 	switch (path) {
 		case "move.axes[0].homed": return state.homedX;
 		case "move.axes[1].homed": return state.homedY;
 		case "move.axes[2].homed": return state.homedZ;
+		case "move.axes[0].userPosition": return state.x ?? undefined;
+		case "move.axes[1].userPosition": return state.y ?? undefined;
+		case "move.axes[2].userPosition": return state.z ?? undefined;
+		case "state.currentTool": return state.tool;
 		default: return undefined;
 	}
 }

@@ -80,6 +80,14 @@
 					<v-btn size="small" color="warning" variant="tonal" @click="emit('resolve-message-box', { input: null, cancelled: false })">OK</v-btn>
 					<v-btn size="small" variant="text" @click="emit('resolve-message-box', { input: null, cancelled: true })">Cancel</v-btn>
 				</div>
+				<div v-else-if="messageBoxPrompt.mode === 'choice'" class="d-flex ga-2 flex-wrap">
+					<v-btn v-for="(choice, i) in messageBoxPrompt.choices" :key="i" size="small"
+						   :color="i === messageBoxPrompt.defaultIndex ? 'warning' : undefined"
+						   :variant="i === messageBoxPrompt.defaultIndex ? 'tonal' : 'outlined'"
+						   @click="emit('resolve-message-box', { input: i, cancelled: false })">
+						{{ choice }}
+					</v-btn>
+				</div>
 				<div v-else class="d-flex align-center ga-2">
 					<v-text-field v-model="messageBoxValue" density="compact" hide-details variant="outlined" style="max-width: 12rem"
 								  :placeholder="messageBoxPlaceholder" @keyup.enter="submitMessageBoxValue" />
@@ -156,7 +164,7 @@ watch(() => props.messageBoxPrompt, (prompt) => {
 
 const messageBoxPlaceholder = computed(() => {
 	const prompt = props.messageBoxPrompt;
-	if (prompt === null || prompt.mode === "ok" || prompt.mode === "okCancel") return "";
+	if (prompt === null || prompt.mode === "ok" || prompt.mode === "okCancel" || prompt.mode === "choice") return "";
 	if (prompt.mode === "string") return "text";
 	const bounds = [prompt.min !== null ? `min ${prompt.min}` : null, prompt.max !== null ? `max ${prompt.max}` : null]
 		.filter((b) => b !== null).join(", ");
