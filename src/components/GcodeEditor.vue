@@ -39,6 +39,7 @@
 					{{ diagnosticCount === 0 ? "No issues found" : `${diagnosticCount} issue${diagnosticCount === 1 ? "" : "s"} found` }}
 				</span>
 				<v-spacer />
+				<v-btn v-if="editorReady" variant="text" icon="mdi-tag-search" :title="quickSearchTitle" @click="openCodeSearch" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-magnify" title="Search (Ctrl+F)" @click="openSearch" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-help-circle-outline" title="G-code reference" :href="docsUrl" target="_blank" rel="noopener noreferrer" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-format-indent-increase" title="Align comments" @click="alignComments" />
@@ -69,7 +70,8 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import { diagnoseDocument, parseDocument } from "dwc-gcode-core";
 import {
 	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
-	createThemeController, gcodeCompletion, gcodeLanguage, gcodeLintUi, gcodeSearch, openSearchPanel,
+	createThemeController, gcodeCompletion, gcodeLanguage, gcodeLintUi, gcodeQuickSearchKeymap,
+	gcodeSearch, isInsideExpression, openExpressionQuickSearch, openGcodeQuickSearch, openSearchPanel,
 	type EditorInstance, type ThemeController,
 } from "dwc-gcode-editor";
 import type { Text } from "@codemirror/state";
@@ -99,11 +101,15 @@ const editorInstance = shallowRef<EditorInstance | null>(null);
 const editorReady = ref(false);
 const dirty = ref(false);
 const cursorCode = ref<string | null>(null);
+const cursorInExpression = ref(false);
 
 const docsUrl = computed(() => {
 	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
 	return cursorCode.value !== null ? `${base}/${cursorCode.value}` : base;
 });
+
+// Matches MonacoEditor.vue's own toolbar wording exactly ("Find Code (F4)" / "Find Expression (F4)").
+const quickSearchTitle = computed(() => cursorInExpression.value ? "Find Expression (F4)" : "Find Code (F4)");
 
 let loadedPath: string | null = null;
 // Snapshot of the document as loaded, for revert() - a real CM6 Text (not a string) so reverting is a
@@ -128,9 +134,15 @@ function editorExtensions(theme: ThemeController) {
 		gcodeLintUi(),
 		lintGutter(),
 		gcodeSearch(),
+		gcodeQuickSearchKeymap(() => machineStore.model),
 		EditorView.updateListener.of((update) => {
 			if (update.docChanged) dirty.value = true;
-			if (update.docChanged || update.selectionSet) cursorCode.value = codeAtCursor(update.view);
+			if (update.docChanged || update.selectionSet) {
+				cursorCode.value = codeAtCursor(update.view);
+				const line = update.state.doc.lineAt(update.state.selection.main.head);
+				const beforeCursor = line.text.slice(0, update.state.selection.main.head - line.from);
+				cursorInExpression.value = isInsideExpression(beforeCursor);
+			}
 		}),
 	];
 }
@@ -145,6 +157,7 @@ function destroyEditor(): void {
 	originalDoc = null;
 	dirty.value = false;
 	cursorCode.value = null;
+	cursorInExpression.value = false;
 }
 
 async function load(path: string): Promise<void> {
@@ -234,6 +247,16 @@ async function checkForErrors(): Promise<void> {
 function openSearch(): void {
 	const instance = editorInstance.value;
 	if (instance !== null) openSearchPanel(instance.view);
+}
+
+// Matches MonacoEditor.vue's own searchGcode(): the toolbar button always calls this one function,
+// which picks G/M-code search vs. object-model-path search off where the cursor sits - the same
+// switch the F4 keybinding (gcodeQuickSearchKeymap, in editorExtensions above) already makes.
+function openCodeSearch(): void {
+	const instance = editorInstance.value;
+	if (instance === null) return;
+	if (cursorInExpression.value) openExpressionQuickSearch(instance.view, machineStore.model);
+	else openGcodeQuickSearch(instance.view);
 }
 
 function alignComments(): void {
