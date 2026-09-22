@@ -39,7 +39,13 @@
 					{{ diagnosticCount === 0 ? "No issues found" : `${diagnosticCount} issue${diagnosticCount === 1 ? "" : "s"} found` }}
 				</span>
 				<v-spacer />
-				<span class="text-caption text-medium-emphasis text-truncate">{{ path }}</span>
+				<v-btn v-if="editorReady" variant="text" icon="mdi-magnify" title="Search (Ctrl+F)" @click="openSearch" />
+				<v-btn v-if="editorReady" variant="text" icon="mdi-help-circle-outline" title="G-code reference" :href="docsUrl" target="_blank" rel="noopener noreferrer" />
+				<v-btn v-if="editorReady" variant="text" icon="mdi-format-indent-increase" title="Align comments" @click="alignComments" />
+				<v-btn v-if="editorReady" variant="text" icon="mdi-restore" :disabled="!dirty" title="Revert" @click="revert" />
+				<span class="text-caption text-medium-emphasis text-truncate">
+						{{ path }}<span v-if="dirty" class="text-warning">&nbsp;*</span>
+					</span>
 			</div>
 
 			<v-alert v-if="error !== null" type="error" variant="tonal" density="compact" class="mb-2">{{ error }}</v-alert>
@@ -57,14 +63,16 @@
  * the full tabs/split-panes workspace shell `dwc-gcode-editor/workspace` provides — that is real,
  * separate scope for a follow-up once this path is proven against a real machine.
  */
-import { onUnmounted, ref, shallowRef, watch } from "vue";
+import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { lintGutter } from "@codemirror/lint";
-import { lineNumbers } from "@codemirror/view";
+import { EditorView, lineNumbers } from "@codemirror/view";
 import { diagnoseDocument, parseDocument } from "dwc-gcode-core";
 import {
-	applyDiagnostics, buildDocFromChunks, createEditorInstance, createThemeController,
-	gcodeCompletion, gcodeLanguage, gcodeLintUi, type EditorInstance, type ThemeController,
+	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
+	createThemeController, gcodeCompletion, gcodeLanguage, gcodeLintUi, gcodeSearch, openSearchPanel,
+	type EditorInstance, type ThemeController,
 } from "dwc-gcode-editor";
+import type { Text } from "@codemirror/state";
 
 import { useMachineStore } from "@/stores/machine";
 import { useSettingsStore } from "@/stores/settings";
@@ -89,8 +97,19 @@ const diagnosticCount = ref<number | null>(null);
 // reactive-proxy it (it would silently break CM6's own internal identity checks)
 const editorInstance = shallowRef<EditorInstance | null>(null);
 const editorReady = ref(false);
+const dirty = ref(false);
+const cursorCode = ref<string | null>(null);
+
+const docsUrl = computed(() => {
+	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
+	return cursorCode.value !== null ? `${base}/${cursorCode.value}` : base;
+});
 
 let loadedPath: string | null = null;
+// Snapshot of the document as loaded, for revert() - a real CM6 Text (not a string) so reverting is a
+// single `insert: originalDoc` change, no string round-trip needed (ChangeSpec's own `insert` field
+// accepts a Text directly).
+let originalDoc: Text | null = null;
 // Read by lineStateGutter's markers() callback on every repaint - not a ref, since a gutter
 // recompute is forced explicitly (see load()) rather than through Vue's own reactivity, and this
 // value can be read many times per second while scrolling a large file.
@@ -108,6 +127,11 @@ function editorExtensions(theme: ThemeController) {
 		gcodeCompletion(),
 		gcodeLintUi(),
 		lintGutter(),
+		gcodeSearch(),
+		EditorView.updateListener.of((update) => {
+			if (update.docChanged) dirty.value = true;
+			if (update.docChanged || update.selectionSet) cursorCode.value = codeAtCursor(update.view);
+		}),
 	];
 }
 
@@ -118,6 +142,9 @@ function destroyEditor(): void {
 	loadedPath = null;
 	lineIndex = null;
 	themeController = null;
+	originalDoc = null;
+	dirty.value = false;
+	cursorCode.value = null;
 }
 
 async function load(path: string): Promise<void> {
@@ -135,6 +162,7 @@ async function load(path: string): Promise<void> {
 		if (props.path !== path || editorHostEl.value === null) return;
 
 		themeController = createThemeController(settingsStore.darkTheme);
+		originalDoc = doc;
 		editorInstance.value = createEditorInstance({
 			doc,
 			parent: editorHostEl.value,
@@ -142,6 +170,7 @@ async function load(path: string): Promise<void> {
 		});
 		loadedPath = path;
 		editorReady.value = true;
+		dirty.value = false;
 
 		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
 		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently
@@ -201,4 +230,29 @@ async function checkForErrors(): Promise<void> {
 		checking.value = false;
 	}
 }
+
+function openSearch(): void {
+	const instance = editorInstance.value;
+	if (instance !== null) openSearchPanel(instance.view);
+}
+
+function alignComments(): void {
+	const instance = editorInstance.value;
+	if (instance !== null) alignLineComments(instance.view);
+}
+
+// Resets the buffer back to what load() originally fetched - in-session edits only, since this
+// component never saves anywhere (view + diagnose + edit, no upload path at all).
+function revert(): void {
+	const instance = editorInstance.value;
+	if (instance === null || originalDoc === null) return;
+	instance.view.dispatch({ changes: { from: 0, to: instance.view.state.doc.length, insert: originalDoc } });
+	dirty.value = false;
+}
+
+// Exposed purely for testability, matching GcodeCmEditor.vue's own established precedent in
+// Flexible-Layouts - lets a test drive a real CM6 edit/selection directly rather than faking a DOM
+// input event (see dwc-gcode-editor's own gotcha: synthetic DOM events don't reliably reach CM6's
+// internal handlers the way `view.dispatch()` does).
+defineExpose({ editorInstance });
 </script>

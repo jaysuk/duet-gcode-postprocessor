@@ -1,6 +1,7 @@
 import { defineComponent, h, nextTick } from "vue";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EditorView } from "@codemirror/view";
 import { dwc, mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
 
 import BackupManager from "../src/components/BackupManager.vue";
@@ -191,6 +192,82 @@ describe("components mount", () => {
 		const darkBg = getComputedStyle(cmEditor.element).backgroundColor;
 		expect(darkBg).not.toBe(lightBg);
 		expect(wrapper.text()).toContain("G28"); // same document - not a reload
+
+		wrapper.unmount();
+	});
+
+	it("opens the search panel via the toolbar Search button", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10\nG1 X20\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G1 X20"));
+
+		expect(wrapper.find(".cm-search").exists()).toBe(false);
+		const searchBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Search (Ctrl+F)");
+		await searchBtn!.trigger("click");
+		expect(wrapper.find(".cm-search").exists()).toBe(true);
+		wrapper.unmount();
+	});
+
+	it("the docs-link button follows the cursor onto whatever code it sits on", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\nM104 S200\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("M104"));
+
+		const docsLink = () => wrapper.findAll("a").find((a) => a.attributes("title") === "G-code reference");
+		// cursorCode only updates off a real dispatched transaction (the updateListener never fires
+		// for the view's initial creation), so it starts at the base URL regardless of where the
+		// initial selection sits, until the first real edit or selection change.
+		expect(docsLink()!.attributes("href")).toBe("https://docs.duet3d.com/en/User_manual/Reference/Gcodes");
+
+		const vm = wrapper.vm as unknown as { editorInstance: { view: EditorView } };
+		vm.editorInstance.view.dispatch({ selection: { anchor: 1 } }); // inside "G28"
+		await nextTick();
+		expect(docsLink()!.attributes("href")).toBe("https://docs.duet3d.com/en/User_manual/Reference/Gcodes/G28");
+
+		const m104Pos = vm.editorInstance.view.state.doc.toString().indexOf("M104") + 1;
+		vm.editorInstance.view.dispatch({ selection: { anchor: m104Pos } });
+		await nextTick();
+		expect(docsLink()!.attributes("href")).toBe("https://docs.duet3d.com/en/User_manual/Reference/Gcodes/M104");
+
+		// Move onto the blank end of the (comment-free) line - no command there at all.
+		vm.editorInstance.view.dispatch({ selection: { anchor: vm.editorInstance.view.state.doc.length } });
+		await nextTick();
+		expect(docsLink()!.attributes("href")).toBe("https://docs.duet3d.com/en/User_manual/Reference/Gcodes");
+
+		wrapper.unmount();
+	});
+
+	it("aligns comments via the toolbar button - a real column change, undoable as one step", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G1 X10 ;short\nG1 X10 Y20 ;longer\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("longer"));
+
+		const alignBtn = wrapper.findAll("button").find((b) => b.attributes("title") === "Align comments");
+		await alignBtn!.trigger("click");
+		await nextTick();
+		// "G1 X10" pads out to "G1 X10 Y20"'s column (10 chars + 1) once aligned.
+		expect(wrapper.text()).toContain("G1 X10     ;short");
+		wrapper.unmount();
+	});
+
+	it("reverts to the loaded content and disables itself once clean again", async () => {
+		downloadMock.mockResolvedValueOnce(new Blob(["G28\n"]));
+		const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/gcodes/sample.g" } });
+		await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+
+		const revertBtn = () => wrapper.findAll("button").find((b) => b.attributes("title") === "Revert");
+		expect(revertBtn()!.attributes("disabled")).toBeDefined(); // nothing to revert yet
+
+		const vm = wrapper.vm as unknown as { editorInstance: { view: EditorView } };
+		vm.editorInstance.view.dispatch({ changes: { from: 3, insert: "\nG1 X10" } });
+		await nextTick();
+		expect(wrapper.text()).toContain("G1 X10");
+		expect(revertBtn()!.attributes("disabled")).toBeUndefined(); // now dirty, revert is live
+
+		await revertBtn()!.trigger("click");
+		await nextTick();
+		expect(vm.editorInstance.view.state.doc.toString()).toBe("G28\n");
+		expect(revertBtn()!.attributes("disabled")).toBeDefined(); // clean again
 
 		wrapper.unmount();
 	});
