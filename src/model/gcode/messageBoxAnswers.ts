@@ -1,35 +1,15 @@
 /**
- * The user-facing side of simulating a blocking `M291` message box — `walkExecution`
- * (`dwc-gcode-core`) pauses at one via `UnresolvedMessageBoxError`; this module is the map of
- * "what would I click/type/choose here" answers the user has supplied, and the `resolveMessageBox`
- * callback `executionIndex.ts` wires to `walkExecution`, backed by that map.
- *
- * Keyed by the prompt's own CONTENT (`messageBoxKey`), not by line number — `walkExecution`'s
- * `resolveMessageBox` only receives the parsed prompt, not which line triggered it, and content-based
- * identity is the same philosophy `simulatedValues.ts`'s object-model-path overrides already use (two
- * occurrences that ask the exact same question share one remembered answer).
+ * The persistence half of simulating a blocking `M291` message box — the pure resolver logic
+ * (`messageBoxKey`, `createMessageBoxResolver`, the `MessageBoxAnswerOverrides` type) now lives in
+ * `dwc-gcode-core/stepper/messageBoxAnswers` (shared with `Flexible-Layouts`) and is re-exported
+ * here unchanged; this module keeps only what's inherently host-specific: `localStorage`-backed
+ * persistence, which `dwc-gcode-core` can't depend on (zero runtime dependencies, no browser APIs).
  */
 
-import { UnresolvedMessageBoxError, type MessageBoxAnswer, type MessageBoxPrompt } from "dwc-gcode-core";
+import type { MessageBoxAnswer } from "dwc-gcode-core";
+import { createMessageBoxResolver, messageBoxKey, type MessageBoxAnswerOverrides } from "dwc-gcode-core/stepper/messageBoxAnswers";
 
-export type MessageBoxAnswerOverrides = ReadonlyMap<string, MessageBoxAnswer>;
-
-/** A stable content key for a prompt — two prompts that ask the exact same question (same mode,
- *  message, title and limits) get the same key, so an earlier answer to one is reused for the other. */
-export function messageBoxKey(prompt: MessageBoxPrompt): string {
-	return JSON.stringify(prompt);
-}
-
-/** Builds a `walkExecution`-compatible `resolveMessageBox`: answers from `overrides` when this exact
- *  prompt has a remembered answer, otherwise throws `UnresolvedMessageBoxError` so the walk pauses
- *  there and the caller can prompt for one. */
-export function createMessageBoxResolver(overrides: MessageBoxAnswerOverrides): (prompt: MessageBoxPrompt) => MessageBoxAnswer {
-	return (prompt) => {
-		const answer = overrides.get(messageBoxKey(prompt));
-		if (answer === undefined) throw new UnresolvedMessageBoxError();
-		return answer;
-	};
-}
+export { createMessageBoxResolver, messageBoxKey, type MessageBoxAnswerOverrides };
 
 // ── persistence ──────────────────────────────────────────────────────────────────────────────────
 //

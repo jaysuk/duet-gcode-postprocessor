@@ -9,8 +9,8 @@ import { arcMoveLength } from "./gcode/arcFit";
 import { bareMacroName, detectDialect, type DialectReport } from "./gcode/dialect";
 import { normaliseFeature, type Feature } from "./gcode/features";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
-import { applyToken, beginLine, createState, type MachineState } from "./gcode/state";
-import { splitCommands } from "./gcode/splitCommands";
+import { applyToken, beginLine, createState, type MachineState } from "dwc-gcode-core/stepper/machineState";
+import { splitCommands } from "dwc-gcode-core/stepper/splitCommands";
 import { TimeEstimator, type MachineLimits } from "./gcode/timeModel";
 import {
 	findParam, paramNumber, parseParams, readToolTemperatureSetting, tokenise, unquoteString,

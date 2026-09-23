@@ -5,7 +5,7 @@ import variant from "@jitl/quickjs-singlefile-cjs-release-sync";
 
 import { createGcodeApi } from "../model/steps/scriptApi";
 import { SandboxEngine, serialiseLineState } from "../model/steps/quickjs/sandboxEngine";
-import { createState } from "../model/gcode/state";
+import { createState } from "dwc-gcode-core/stepper/machineState";
 import { emptyMetadata } from "../model/gcode/metadata";
 import { tokenise } from "dwc-gcode-core";
 import type { LineContext } from "../model/steps/types";

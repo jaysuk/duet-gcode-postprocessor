@@ -26,7 +26,7 @@
 
 import { arcMoveLength } from "./arcFit";
 import { paramNumber, parseParams, type Tokenised } from "dwc-gcode-core";
-import type { MachineState } from "./state";
+import type { MachineState } from "dwc-gcode-core/stepper/machineState";
 
 export interface MachineLimits {
 	/** Per-axis maximum speed, mm/s (M203, converted from the object model's native units — see

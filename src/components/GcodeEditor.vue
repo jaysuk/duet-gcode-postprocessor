@@ -98,7 +98,7 @@ import { createGateway } from "../dwc/gateway";
 import { editorColorScheme, loadEditorColorScheme } from "../dwc/editorColorSettings";
 import { mainboardFirmwareVersion, trackedObjectModelVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
-import { buildExecutionIndex, type ExecutionIndex } from "../model/gcode/executionIndex";
+import { buildExecutionIndex, type ExecutionIndex } from "dwc-gcode-core/stepper/executionIndex";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
 import {
@@ -198,7 +198,7 @@ function rebuildExecutionIndex(): void {
 	setTimeout(() => {
 		if (editorInstance.value !== instance) return; // superseded by a newer load() already
 		executionIndex.value = buildExecutionIndex(
-			instance.view.state.doc,
+			instance.view.state.doc.toString(),
 			createSimulatedResolvePath(simulatedOverrides.value),
 			createMessageBoxResolver(messageBoxAnswers.value),
 			trackedObjectModelVersion(machineStore.model),

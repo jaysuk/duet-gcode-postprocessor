@@ -7,7 +7,7 @@ import {
 	__resetQuickJsLoaderForTests, __setQuickJsLoadedForTests, ensureQuickJsLoaded, getLoadedQuickJs,
 } from "../model/steps/quickjs/loader";
 import { scriptStep } from "../model/steps/script";
-import { createState } from "../model/gcode/state";
+import { createState } from "dwc-gcode-core/stepper/machineState";
 import { emptyMetadata } from "../model/gcode/metadata";
 import { tokenise } from "dwc-gcode-core";
 import type { LineContext, RunContext, StepFactoryContext } from "../model/steps/types";

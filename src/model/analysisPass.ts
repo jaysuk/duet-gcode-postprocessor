@@ -13,8 +13,8 @@
 
 import { createLineContext, syncLineContext, type MutableLineContext } from "./pipeline";
 import { emptyMetadata, type SlicerMetadata } from "./gcode/metadata";
-import { applyToken, beginLine, createState, type MachineState } from "./gcode/state";
-import { splitCommands } from "./gcode/splitCommands";
+import { applyToken, beginLine, createState, type MachineState } from "dwc-gcode-core/stepper/machineState";
+import { splitCommands } from "dwc-gcode-core/stepper/splitCommands";
 import { tokenise } from "dwc-gcode-core";
 import type { LineContext } from "./steps/types";
 

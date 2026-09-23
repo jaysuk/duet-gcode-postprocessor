@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { newQuickJSWASMModuleFromVariant } from "quickjs-emscripten-core";
 import variant from "@jitl/quickjs-singlefile-cjs-release-sync";
 
-import { createState } from "../model/gcode/state";
+import { createState } from "dwc-gcode-core/stepper/machineState";
 import { emptyMetadata, parseMetadata } from "../model/gcode/metadata";
 import { SandboxEngine, serialiseLineState } from "../model/steps/quickjs/sandboxEngine";
 import { tokenise } from "dwc-gcode-core";

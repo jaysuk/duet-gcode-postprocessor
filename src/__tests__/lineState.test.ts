@@ -1,19 +1,13 @@
 import { Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { buildLineStateIndex, statesForLineRange, stateAtLine } from "../model/gcode/lineState";
-import { createState, applyToken, beginLine } from "../model/gcode/state";
-import { splitCommands } from "../model/gcode/splitCommands";
-import { tokenise } from "dwc-gcode-core";
+import { applyLineToState, createState } from "dwc-gcode-core/stepper/machineState";
 
 /** Reference implementation: replay from line 1 every time. Slow, obviously correct - the
  *  invariant every checkpoint-based lookup must match. */
 function naiveStateAtLine(doc: Text, lineNo: number) {
 	const state = createState();
-	for (let n = 1; n <= lineNo; n++) {
-		const subLines = splitCommands(doc.line(n).text);
-		beginLine(state);
-		for (const sub of subLines) applyToken(state, tokenise(sub));
-	}
+	for (let n = 1; n <= lineNo; n++) applyLineToState(state, doc.line(n).text);
 	return state;
 }
 

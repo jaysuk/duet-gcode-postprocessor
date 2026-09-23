@@ -3,7 +3,7 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { formatLineStateLabel, lineStateGutter } from "../model/gcode/lineStateGutter";
 import { buildLineStateIndex } from "../model/gcode/lineState";
-import { createState } from "../model/gcode/state";
+import { createState } from "dwc-gcode-core/stepper/machineState";
 
 describe("formatLineStateLabel", () => {
 	it("shows nothing for the untouched initial state", () => {

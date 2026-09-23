@@ -8,7 +8,7 @@
 
 import type { AnalysisCollector } from "../analysisPass";
 import type { SlicerMetadata } from "../gcode/metadata";
-import type { MachineState } from "../gcode/state";
+import type { MachineState } from "dwc-gcode-core/stepper/machineState";
 import type { MachineLimits } from "../gcode/timeModel";
 import type { Tokenised } from "dwc-gcode-core";
 import type { ToolConfig } from "../preheat";

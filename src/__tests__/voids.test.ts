@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { normaliseFeature, type Feature } from "../model/gcode/features";
-import { advance, createState } from "../model/gcode/state";
+import { advance, createState } from "dwc-gcode-core/stepper/machineState";
 import { paramNumber, parseParams, tokenise } from "dwc-gcode-core";
 import { VoidDetector, type VoidSegment } from "../model/gcode/voids";
 

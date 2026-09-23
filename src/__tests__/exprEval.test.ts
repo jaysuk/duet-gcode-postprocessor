@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { emptyMetadata } from "../model/gcode/metadata";
 import { buildExprScope, compileExpr } from "../model/gcode/exprEval";
-import { createState } from "../model/gcode/state";
+import { createState } from "dwc-gcode-core/stepper/machineState";
 import type { LineContext } from "../model/steps/types";
 import { tokenise } from "dwc-gcode-core";
 import { rulesStep } from "../model/steps/rules";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { advance, createState } from "../model/gcode/state";
+import { advance, createState } from "dwc-gcode-core/stepper/machineState";
 import { tokenise } from "dwc-gcode-core";
 import { moveTime, TimeEstimator, type MachineLimits } from "../model/gcode/timeModel";
 

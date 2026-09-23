@@ -3,7 +3,7 @@
  * G-code-native panel `dwc-gcode-editor` deliberately has no opinion on (its own doc comment: "this
  * package has no opinion on what that gutter shows").
  *
- * `state.ts`'s tracker is inherently sequential (each line's effect depends on every line before
+ * `dwc-gcode-core/stepper/machineState`'s tracker is inherently sequential (each line's effect depends on every line before
  * it), so answering "what's the state at line 4,000,000" naively means replaying 4 million lines —
  * fine once, expensive on every scroll/cursor-move in a huge file. This builds a sparse index of
  * checkpoints (one full `MachineState` snapshot every `checkpointEvery` lines) once, then answers
@@ -12,10 +12,8 @@
  */
 
 import type { Text } from "@codemirror/state";
-import { tokenise } from "dwc-gcode-core";
 
-import { applyToken, beginLine, createState, type MachineState } from "./state";
-import { splitCommands } from "./splitCommands";
+import { applyLineToState, createState, type MachineState } from "dwc-gcode-core/stepper/machineState";
 
 export interface LineStateIndex {
 	readonly checkpointEvery: number;
@@ -26,15 +24,6 @@ export interface LineStateIndex {
 }
 
 const DEFAULT_CHECKPOINT_EVERY = 500;
-
-/** Applies one physical line's effect to `state` in place — shared with `executionIndex.ts`, which
- *  needs the exact same per-line update but drives it from a non-linear (branch/loop-aware) sequence
- *  of lines rather than this module's own flat 1..N walk. */
-export function applyLineToState(state: MachineState, raw: string): void {
-	const subLines = splitCommands(raw);
-	beginLine(state);
-	for (const subRaw of subLines) applyToken(state, tokenise(subRaw));
-}
 
 /** Walks the whole document once. A real, one-time O(n) cost (paid once when a file is opened, not
  *  on every render) — the same tradeoff `AnalysisRunner`'s own full-file pass already makes for

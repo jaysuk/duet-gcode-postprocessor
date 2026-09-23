@@ -17,7 +17,7 @@ import { RangeSetBuilder, type Extension } from "@codemirror/state";
 import { EditorView, GutterMarker, gutter } from "@codemirror/view";
 
 import { statesForLineRange, type LineStateIndex } from "./lineState";
-import type { MachineState } from "./state";
+import type { MachineState } from "dwc-gcode-core/stepper/machineState";
 
 class LineStateMarker extends GutterMarker {
 	constructor(private readonly label: string) {

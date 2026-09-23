@@ -117,7 +117,7 @@
  */
 import { computed, ref, watch } from "vue";
 import type { MessageBoxAnswer, MessageBoxPrompt } from "dwc-gcode-core";
-import type { MachineState } from "../model/gcode/state";
+import type { MachineState } from "dwc-gcode-core/stepper/machineState";
 
 const props = defineProps<{
 	currentStep: number;
