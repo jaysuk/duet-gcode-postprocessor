@@ -47,9 +47,6 @@
 				<v-btn variant="text" icon="mdi-palette" title="Editor colors" @click="colorSettingsOpen = true" />
 				<v-btn v-if="editorReady" variant="text" :color="stepperOpen ? 'primary' : undefined" icon="mdi-motion-play-outline"
 					   title="Step through file" @click="stepperOpen = !stepperOpen" />
-				<span class="text-caption text-medium-emphasis text-truncate">
-						{{ path }}<span v-if="dirty" class="text-warning">&nbsp;*</span>
-					</span>
 			</div>
 
 			<v-alert v-if="error !== null" type="error" variant="tonal" density="compact" class="mb-2">{{ error }}</v-alert>
