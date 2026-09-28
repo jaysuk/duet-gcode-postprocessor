@@ -382,11 +382,152 @@ describe("components mount", () => {
 		await stepForward()!.trigger("click");
 		expect(wrapper.find(".cm-gcodeCurrentLine").text()).toContain("G1 X10 Y10 F1200");
 		expect(wrapper.text()).toContain("Layer 0");
-		expect(wrapper.text()).toContain("X10.00");
-		expect(wrapper.text()).toContain("Y10.00");
+		// Each axis is its own card, position large, with how far this step moved it.
+		expect(wrapper.find('[data-axis="X"]').text()).toContain("10.000");
+		// No delta from a position that was never known (there is nothing to subtract), but the card is
+		// marked as the axis this step moved; the delta itself is covered by the starting-position test.
+		expect(wrapper.find('[data-axis="X"]').classes()).toContain("axis-card--changed");
+		expect(wrapper.find('[data-axis="Z"]').classes()).not.toContain("axis-card--changed");
+		expect(wrapper.find('[data-axis="Y"]').text()).toContain("10.000");
+		expect(wrapper.find('[data-axis="Z"]').text()).toContain("—"); // never positioned
 		expect(wrapper.text()).toContain("Tool 0");
 		expect(wrapper.text()).toContain("F1200");
 		wrapper.unmount();
+	});
+
+	describe("the stepper as a macro-testing scenario", () => {
+		const stepperButton = (wrapper: ReturnType<typeof mountInDwc>) =>
+			wrapper.findAll("button").find((b) => b.attributes("title") === "Step through file")!;
+		const stepForward = (wrapper: ReturnType<typeof mountInDwc>) =>
+			wrapper.findAll("button").find((b) => b.attributes("title") === "Step forward")!;
+
+		async function openStepper(text: string): Promise<ReturnType<typeof mountInDwc>> {
+			downloadMock.mockResolvedValueOnce(new Blob([text]));
+			const wrapper = mountInDwc(GcodeEditor, { props: { path: "0:/macros/test.g" } });
+			await vi.waitFor(() => expect(wrapper.find(".cm-content").exists()).toBe(true));
+			await stepperButton(wrapper).trigger("click");
+			return wrapper;
+		}
+
+		async function openScenario(wrapper: ReturnType<typeof mountInDwc>): Promise<void> {
+			await wrapper.find("[data-scenario-panel] button").trigger("click");
+		}
+
+		async function typeInto(wrapper: ReturnType<typeof mountInDwc>, label: string, value: string): Promise<void> {
+			const input = wrapper.find(`input[aria-label="${label}"]`);
+			expect(input.exists(), `no input labelled "${label}"`).toBe(true);
+			await input.setValue(value);
+			await input.trigger("blur"); // fields commit on blur/Enter, not per keystroke
+		}
+
+		it("shows the line as evaluated, in the panel and beneath the line in the editor", async () => {
+			const wrapper = await openStepper("var a = 5\nG1 X{var.a * 2} Y1\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2")); // the trailing blank line isn't a step
+			await stepForward(wrapper).trigger("click");
+
+			expect(wrapper.find('[data-readout="source"]').text()).toBe("G1 X{var.a * 2} Y1");
+			expect(wrapper.find('[data-readout="evaluated"]').text()).toBe("G1 X10 Y1");
+			expect(wrapper.find(".cm-gcodeEvaluatedLine").text()).toBe("G1 X10 Y1");
+			wrapper.unmount();
+		});
+
+		it("shows no evaluated line for a line with nothing to evaluate", async () => {
+			const wrapper = await openStepper("G28\nG1 X10\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+			expect(wrapper.find('[data-readout="evaluated"]').exists()).toBe(false);
+			expect(wrapper.find(".cm-gcodeEvaluatedLine").exists()).toBe(false);
+			wrapper.unmount();
+		});
+
+		it("shows an if's outcome and an assignment's result", async () => {
+			const wrapper = await openStepper("var n = 3\nif var.n > 2\n    set var.n = var.n + 1\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"));
+			await stepForward(wrapper).trigger("click");
+			expect(wrapper.find('[data-readout="evaluated"]').text()).toBe("if var.n > 2 → true");
+			await stepForward(wrapper).trigger("click");
+			expect(wrapper.find('[data-readout="evaluated"]').text()).toBe("set var.n = var.n + 1 → var.n = 4"); // (.text() trims the source line's own indent)
+			wrapper.unmount();
+		});
+
+		it("lists the variables with what the step changed", async () => {
+			const wrapper = await openStepper("var n = 3\nset var.n = var.n + 1\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+			expect(wrapper.find('[data-variable="var.n"]').text()).toContain("3");
+			expect(wrapper.find('[data-variable="var.n"]').text()).toContain("new");
+			await stepForward(wrapper).trigger("click");
+			expect(wrapper.find('[data-variable="var.n"]').text()).toContain("4");
+			expect(wrapper.find('[data-variable="var.n"]').text()).toContain("was 3");
+			wrapper.unmount();
+		});
+
+		it("a starting position gives a relative move something to be relative to", async () => {
+			const wrapper = await openStepper("G91\nG1 X5\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+			await stepForward(wrapper).trigger("click");
+			expect(wrapper.find('[data-axis="X"]').text()).toContain("5.000"); // no start: relative from nothing
+
+			await openScenario(wrapper);
+			await typeInto(wrapper, "Start X", "100");
+			await vi.waitFor(() => expect(wrapper.find('[data-axis="X"]').text()).toContain("105.000"));
+			expect(wrapper.find('[data-axis="X"]').text()).toContain("+5.000");
+			wrapper.unmount();
+		});
+
+		it("can add another axis and give it a starting position", async () => {
+			const wrapper = await openStepper("G91\nG1 U2\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+			await openScenario(wrapper);
+			expect(wrapper.find('[data-scenario-axis="U"]').exists()).toBe(false);
+
+			// Adding via the select: drive the component's own emit, as the select's popup can't be clicked in happy-dom.
+			const scenario = wrapper.findComponent({ name: "StepperScenarioPanel" });
+			await scenario.vm.$emit("update:inputs", {
+				...(scenario.props("inputs") as object),
+				start: { axes: { U: 50 } },
+			});
+			await vi.waitFor(() => expect(wrapper.find('[data-scenario-axis="U"]').exists()).toBe(true));
+			await stepForward(wrapper).trigger("click");
+			await vi.waitFor(() => expect(wrapper.find('[data-axis="U"]').text()).toContain("52.000"));
+			wrapper.unmount();
+		});
+
+		it("offers the values the file reads, and changing one takes the other branch", async () => {
+			const wrapper = await openStepper("if sensors.gpIn[0].value = 1\n    G1 X10\nelse\n    G1 X20\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("depends on")); // paused: no value yet
+			await openScenario(wrapper);
+			await vi.waitFor(() => expect(wrapper.find('[data-scenario-input="objectModel:sensors.gpIn[0].value"]').exists()).toBe(true));
+			expect(wrapper.find('[data-scenario-input="objectModel:sensors.gpIn[0].value"]').text()).toContain("needs a value");
+
+			const lastX = async (): Promise<string> => {
+				const total = Number(/Step \d+ \/ (\d+)/.exec(wrapper.text())![1]);
+				while (!wrapper.text().includes(`Step ${total} /`)) await stepForward(wrapper).trigger("click");
+				return wrapper.find('[data-axis="X"]').text();
+			};
+
+			await typeInto(wrapper, "Value of sensors.gpIn[0].value", "1");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"));
+			expect(await lastX()).toContain("10.000");
+
+			await typeInto(wrapper, "Value of sensors.gpIn[0].value", "0");
+			await vi.waitFor(() => expect(wrapper.find('[data-axis="X"]').text()).not.toContain("10.000"));
+			expect(await lastX()).toContain("20.000");
+			wrapper.unmount();
+		});
+
+		it("re-runs the walk when the buffer is edited while stepping", async () => {
+			const wrapper = await openStepper("G28\nG1 X10\n");
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+			// load() schedules a (0 ms) rebuild that may still be pending - it reads the buffer when it FIRES,
+			// so let it settle first, or it would pick the edit up below and this would pass without the
+			// edit-triggered rebuild it is meant to check.
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			const vm = wrapper.vm as unknown as { editorInstance: { view: EditorView } };
+			vm.editorInstance.view.dispatch({ changes: { from: 0, insert: "G90\n" } });
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(wrapper.text()).toContain("Step 1 / 2"); // debounced: not re-run yet
+			await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"), { timeout: 3000 });
+			wrapper.unmount();
+		});
 	});
 
 	it("step back and forward are disabled at the file's own bounds", async () => {

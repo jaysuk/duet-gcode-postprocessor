@@ -56,11 +56,10 @@
 			<v-progress-linear v-if="busy" indeterminate class="mb-2" />
 
 			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-step="stepperStep" :total-steps="stepperTotalSteps"
-								:line="stepperDisplayLine" :state="stepperState" :status="stepperStatus" :pending-path="stepperPendingPath"
+								:line="stepperDisplayLine" :view="stepperView" :status="stepperStatus" :pending-path="stepperPendingPath"
 								:message-box-prompt="stepperMessageBoxPrompt" :error-message="stepperErrorMessage"
-								:simulated-values="simulatedValuesList" :message-box-answers="messageBoxAnswersList" class="mb-2"
-								@update:current-step="setStepperStep" @resolve-path="resolveSimulatedPath"
-								@remove-simulated-value="removeSimulatedValue" @reset-simulated-values="resetSimulatedValues"
+								:inputs="inputs" :referenced="referencedInputs" :message-box-answers="messageBoxAnswersList" class="mb-2"
+								@update:current-step="setStepperStep" @update:inputs="updateInputs" @resolve-path="resolveSimulatedPath"
 								@resolve-message-box="resolveMessageBoxPrompt" @remove-message-box-answer="removeMessageBoxAnswer"
 								@reset-message-box-answers="resetMessageBoxAnswers" />
 
@@ -81,7 +80,7 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { lintGutter } from "@codemirror/lint";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { diagnoseDocument, parseDocument, type EvalValue, type MessageBoxAnswer, type MessageBoxPrompt } from "dwc-gcode-core";
+import { diagnoseDocument, parseDocument, type MessageBoxAnswer, type MessageBoxPrompt } from "dwc-gcode-core";
 import {
 	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
 	createThemeController, gcodeCompletion, gcodeCurrentLine, gcodeLanguage, gcodeLintUi,
@@ -98,17 +97,16 @@ import { createGateway } from "../dwc/gateway";
 import { editorColorScheme, loadEditorColorScheme } from "../dwc/editorColorSettings";
 import { mainboardFirmwareVersion, trackedObjectModelVersion } from "../dwc/machineSnapshot";
 import { blobToTextChunks } from "../model/gcode/editorDoc";
-import { buildExecutionIndex, type ExecutionIndex } from "dwc-gcode-core/stepper/executionIndex";
+import type { ExecutionIndex } from "dwc-gcode-core/stepper/executionIndex";
+import { messageBoxKey } from "dwc-gcode-core/stepper/messageBoxAnswers";
+import { parseSimulatedValueInput } from "dwc-gcode-core/stepper/simulatedValues";
+import {
+	describeStep, emptySimulationInputs, findReferencedInputs, formatEvalValue, runSimulation, sourceLines,
+	withInputValue, type ReferencedInput, type SimulationInputs,
+} from "dwc-gcode-core/stepper/simulation";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
-import {
-	createMessageBoxResolver, loadMessageBoxAnswers, messageBoxKey, saveMessageBoxAnswers,
-	type MessageBoxAnswerOverrides,
-} from "../model/gcode/messageBoxAnswers";
-import {
-	createSimulatedResolvePath, loadSimulatedOverrides, parseSimulatedValueInput, saveSimulatedOverrides,
-	type SimulatedValueOverrides,
-} from "../model/gcode/simulatedValues";
+import { loadSimulationScenario, saveSimulationScenario } from "../model/gcode/simulationScenario";
 
 const props = defineProps<{ path: string | null }>();
 
@@ -141,14 +139,17 @@ const lineIndex = shallowRef<LineStateIndex | null>(null);
 // contributes one per iteration), never a raw line number - see executionIndex.ts's own doc comment.
 const executionIndex = shallowRef<ExecutionIndex | null>(null);
 const stepperStep = ref(0);
-// User-supplied hypothetical values for object-model paths a condition referenced but this offline
-// simulation (no live machine) has no way to know - keyed by the exact concrete path
-// (`"sensors.gpIn[0].value"`), populated via the stepper panel's pause/prompt UI. A shallowRef holding
-// a fresh Map on every change (rather than mutating in place) so Vue's reactivity actually notices.
-const simulatedOverrides = shallowRef<SimulatedValueOverrides>(new Map());
-// Remembered answers to blocking M291 message boxes, keyed by the prompt's own content
-// (messageBoxKey) - same shallowRef-holds-a-fresh-Map convention as simulatedOverrides above.
-const messageBoxAnswers = shallowRef<MessageBoxAnswerOverrides>(new Map());
+// The scenario the walk runs under - where the machine starts (X/Y/Z and any other axis), the
+// object-model / param.* / global values this offline simulation (no live machine) has no way to know,
+// and remembered M291 answers (see dwc-gcode-core's stepper/simulation.ts). A shallowRef holding a
+// fresh object on every change (never mutated in place) so Vue's reactivity actually notices.
+const inputs = shallowRef<SimulationInputs>(emptySimulationInputs());
+// What the file reads (object-model paths, param.*, undeclared globals), offered as fields in the
+// scenario editor - computed with each rebuild, and only while the stepper is open.
+const referencedInputs = shallowRef<ReadonlyArray<ReferencedInput>>([]);
+// The source lines the current executionIndex was built from - the SAME text the walker indexed, so a
+// step's evaluated-expression offsets always line up with it even if the buffer has since been edited.
+const builtSourceLines = shallowRef<ReadonlyArray<string>>([]);
 
 const docsUrl = computed(() => {
 	const base = "https://docs.duet3d.com/en/User_manual/Reference/Gcodes";
@@ -159,14 +160,16 @@ const docsUrl = computed(() => {
 const quickSearchTitle = computed(() => cursorInExpression.value ? "Find Expression (F4)" : "Find Code (F4)");
 
 const stepperTotalSteps = computed(() => executionIndex.value?.steps.length ?? 0);
-const stepperCurrentStepInfo = computed(() => executionIndex.value?.steps[stepperStep.value] ?? null);
-// 1-based, matching setCurrentLine's own convention - executionIndex.ts's steps are 0-based physical
-// line indices (dwc-gcode-core's own convention, shared with `walkExecution`).
-const stepperDisplayLine = computed(() => {
-	const info = stepperCurrentStepInfo.value;
-	return info === null ? null : info.line + 1;
+// Everything the panel and the editor show about the current step - the line as evaluated, both
+// machine states with per-axis deltas, the variables (dwc-gcode-core's `describeStep`). Recomputed when
+// the step, the run, or the scenario changes.
+const stepperView = computed(() => {
+	const index = executionIndex.value;
+	return index === null ? null : describeStep(index, stepperStep.value, builtSourceLines.value, inputs.value);
 });
-const stepperState = computed(() => stepperCurrentStepInfo.value?.state ?? null);
+// 1-based, matching setCurrentLine's own convention - executionIndex.ts's steps are 0-based physical
+// line indices (dwc-gcode-core's own convention, shared with `walkExecution`); describeStep converts.
+const stepperDisplayLine = computed(() => stepperView.value?.line ?? null);
 const stepperStatus = computed(() => executionIndex.value?.status ?? "complete");
 const stepperPendingPath = computed(() => {
 	const index = executionIndex.value;
@@ -181,84 +184,94 @@ const stepperErrorMessage = computed(() => {
 	return index?.status === "error" ? index.message : null;
 });
 
-watch([stepperOpen, stepperDisplayLine], ([open, line]) => {
+// Highlights the current line and draws the line as evaluated beneath it. Scrolls only when the step
+// or line actually moved: a rebuild (the scenario changed, or the buffer was edited) produces a new
+// view too, and re-centring on every one of those would yank the page around while someone types.
+watch([stepperOpen, stepperView], ([open, view], [wasOpen, oldView]) => {
 	const instance = editorInstance.value;
 	if (instance === null) return;
-	setCurrentLine(instance.view, open ? line : null, { scroll: open });
+	const moved = !wasOpen || oldView?.step !== view?.step || oldView?.line !== view?.line;
+	const annotation = open && view !== null && view.evaluated.changed ? { segments: view.evaluated.segments } : null;
+	setCurrentLine(instance.view, open ? (view?.line ?? null) : null, { scroll: open && moved, annotation });
 });
 
-/** Rebuilds executionIndex from the live doc and the current simulatedOverrides - the same deferred
- *  (setTimeout) pattern load() already uses for lineIndex, so a rebuild (e.g. right after the user
- *  answers a pause prompt) doesn't block the next paint. Clamps stepperStep back into range, since a
- *  new simulated value can shrink OR grow the step count (a newly-false branch skips a body that used
- *  to run; a newly-resolved pause can run much further than before). */
+/** Rebuilds executionIndex from the live doc and the current scenario - the same deferred (setTimeout)
+ *  pattern load() already uses for lineIndex, so a rebuild (e.g. right after a value is entered)
+ *  doesn't block the next paint. Clamps stepperStep back into range, since a new value can shrink OR
+ *  grow the step count (a newly-false branch skips a body that used to run; a newly-resolved pause can
+ *  run much further than before). */
 function rebuildExecutionIndex(): void {
 	const instance = editorInstance.value;
 	if (instance === null) return;
 	setTimeout(() => {
 		if (editorInstance.value !== instance) return; // superseded by a newer load() already
-		executionIndex.value = buildExecutionIndex(
-			instance.view.state.doc.toString(),
-			createSimulatedResolvePath(simulatedOverrides.value),
-			createMessageBoxResolver(messageBoxAnswers.value),
-			trackedObjectModelVersion(machineStore.model),
-		);
-		const total = executionIndex.value.steps.length;
-		stepperStep.value = total === 0 ? 0 : Math.min(stepperStep.value, total - 1);
+		rebuildNow(instance);
 	}, 0);
 }
 
+function rebuildNow(instance: EditorInstance): void {
+	const text = instance.view.state.doc.toString();
+	const objectModelVersion = trackedObjectModelVersion(machineStore.model);
+	const index = runSimulation(text, inputs.value, { objectModelVersion });
+	executionIndex.value = index;
+	// The source lines (for the evaluated-line display) and the values the file reads (offered as fields
+	// in the scenario editor) each cost another parse of the text, and this also runs at load with the
+	// stepper closed - so only pay for them while it's showing. Opening the stepper rebuilds (below).
+	if (stepperOpen.value) {
+		builtSourceLines.value = sourceLines(text);
+		referencedInputs.value = findReferencedInputs(text, { objectModelVersion });
+	}
+	const total = index.steps.length;
+	stepperStep.value = total === 0 ? 0 : Math.min(stepperStep.value, total - 1);
+}
+
+// Editing the file while stepping through it re-runs the walk (debounced), so the steps never describe a
+// buffer that has since changed. Nothing runs while the stepper is closed.
+let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleRebuild(): void {
+	if (rebuildTimer !== null) clearTimeout(rebuildTimer);
+	rebuildTimer = setTimeout(() => {
+		rebuildTimer = null;
+		rebuildExecutionIndex();
+	}, 400);
+}
+
+// Opening the stepper builds what only it needs (source lines, what the file reads). Synchronous, not
+// deferred: someone just asked to see the steps, and a deferred build would leave the panel briefly
+// showing steps with no source line to go with them.
+watch(stepperOpen, (open) => {
+	const instance = editorInstance.value;
+	if (open && instance !== null) rebuildNow(instance);
+});
+
+/** Applies an edited scenario: keeps it, saves it for this file, and re-runs the walk under it. */
+function updateInputs(next: SimulationInputs): void {
+	inputs.value = next;
+	if (loadedPath !== null) saveSimulationScenario(loadedPath, next);
+	rebuildExecutionIndex();
+}
+
+/** The pause prompt's answer for one unresolved path. */
 function resolveSimulatedPath(path: string, rawValue: string): void {
-	const next = new Map(simulatedOverrides.value);
-	next.set(path, parseSimulatedValueInput(rawValue));
-	simulatedOverrides.value = next;
-	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, next);
-	rebuildExecutionIndex();
-}
-
-function removeSimulatedValue(path: string): void {
-	const next = new Map(simulatedOverrides.value);
-	next.delete(path);
-	simulatedOverrides.value = next;
-	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, next);
-	rebuildExecutionIndex();
-}
-
-function resetSimulatedValues(): void {
-	simulatedOverrides.value = new Map();
-	if (loadedPath !== null) saveSimulatedOverrides(loadedPath, simulatedOverrides.value);
-	rebuildExecutionIndex();
+	updateInputs(withInputValue(inputs.value, path.startsWith("param.") ? "param" : "objectModel", path, parseSimulatedValueInput(rawValue)));
 }
 
 function resolveMessageBoxPrompt(answer: MessageBoxAnswer): void {
 	const prompt = stepperMessageBoxPrompt.value;
 	if (prompt === null) return;
-	const next = new Map(messageBoxAnswers.value);
-	next.set(messageBoxKey(prompt), answer);
-	messageBoxAnswers.value = next;
-	if (loadedPath !== null) saveMessageBoxAnswers(loadedPath, next);
-	rebuildExecutionIndex();
+	const answers = new Map(inputs.value.messageBoxAnswers);
+	answers.set(messageBoxKey(prompt), answer);
+	updateInputs({ ...inputs.value, messageBoxAnswers: answers });
 }
 
 function removeMessageBoxAnswer(key: string): void {
-	const next = new Map(messageBoxAnswers.value);
-	next.delete(key);
-	messageBoxAnswers.value = next;
-	if (loadedPath !== null) saveMessageBoxAnswers(loadedPath, next);
-	rebuildExecutionIndex();
+	const answers = new Map(inputs.value.messageBoxAnswers);
+	answers.delete(key);
+	updateInputs({ ...inputs.value, messageBoxAnswers: answers });
 }
 
 function resetMessageBoxAnswers(): void {
-	messageBoxAnswers.value = new Map();
-	if (loadedPath !== null) saveMessageBoxAnswers(loadedPath, messageBoxAnswers.value);
-	rebuildExecutionIndex();
-}
-
-function formatEvalValue(v: EvalValue): string {
-	if (v === null) return "null";
-	if (Array.isArray(v)) return `[${v.map(formatEvalValue).join(", ")}]`;
-	if (typeof v === "string") return JSON.stringify(v);
-	return String(v);
+	updateInputs({ ...inputs.value, messageBoxAnswers: new Map() });
 }
 
 /** `prompt` is the SAME prompt the answer was originally given for (recovered from the content key -
@@ -270,13 +283,10 @@ function formatMessageBoxAnswer(answer: MessageBoxAnswer, prompt: MessageBoxProm
 	if (prompt?.mode === "choice" && typeof answer.input === "number") {
 		return prompt.choices[answer.input] ?? `#${answer.input}`;
 	}
-	return typeof answer.input === "string" ? JSON.stringify(answer.input) : String(answer.input);
+	return typeof answer.input === "string" ? JSON.stringify(answer.input) : formatEvalValue(answer.input);
 }
 
-const simulatedValuesList = computed(() => [...simulatedOverrides.value.entries()]
-	.map(([path, value]) => ({ path, display: formatEvalValue(value) })));
-
-const messageBoxAnswersList = computed(() => [...messageBoxAnswers.value.entries()]
+const messageBoxAnswersList = computed(() => [...inputs.value.messageBoxAnswers.entries()]
 	.map(([key, answer]) => {
 		// The key IS the prompt's own JSON serialisation (messageBoxKey) - reusing it here avoids
 		// storing the prompt a second time just for display purposes.
@@ -313,7 +323,10 @@ function editorExtensions(theme: ThemeController) {
 		gcodeQuickSearchKeymap(() => machineStore.model),
 		gcodeCurrentLine(),
 		EditorView.updateListener.of((update) => {
-			if (update.docChanged) dirty.value = true;
+			if (update.docChanged) {
+				dirty.value = true;
+				if (stepperOpen.value) scheduleRebuild();
+			}
 			if (update.docChanged || update.selectionSet) {
 				cursorCode.value = codeAtCursor(update.view);
 				const line = update.state.doc.lineAt(update.state.selection.main.head);
@@ -331,8 +344,13 @@ function destroyEditor(): void {
 	loadedPath = null;
 	lineIndex.value = null;
 	executionIndex.value = null;
-	simulatedOverrides.value = new Map();
-	messageBoxAnswers.value = new Map();
+	inputs.value = emptySimulationInputs();
+	referencedInputs.value = [];
+	builtSourceLines.value = [];
+	if (rebuildTimer !== null) {
+		clearTimeout(rebuildTimer);
+		rebuildTimer = null;
+	}
 	themeController = null;
 	originalDoc = null;
 	dirty.value = false;
@@ -372,8 +390,7 @@ async function load(path: string): Promise<void> {
 		loadedPath = path;
 		editorReady.value = true;
 		dirty.value = false;
-		simulatedOverrides.value = loadSimulatedOverrides(path);
-		messageBoxAnswers.value = loadMessageBoxAnswers(path);
+		inputs.value = loadSimulationScenario(path);
 
 		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
 		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently
