@@ -45,6 +45,7 @@
 				<v-btn v-if="editorReady" variant="text" icon="mdi-format-indent-increase" title="Align comments" @click="alignComments" />
 				<v-btn v-if="editorReady" variant="text" icon="mdi-restore" :disabled="!dirty" title="Revert" @click="revert" />
 				<v-btn variant="text" icon="mdi-palette" title="Editor colors" @click="colorSettingsOpen = true" />
+				<v-btn v-if="editorReady" variant="text" icon="mdi-keyboard-outline" title="Keyboard shortcuts (F1)" @click="openShortcuts" />
 				<v-btn v-if="editorReady" variant="text" :color="stepperOpen ? 'primary' : undefined" icon="mdi-motion-play-outline"
 					   title="Step through file" @click="stepperOpen = !stepperOpen" />
 			</div>
@@ -79,12 +80,12 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { lintGutter } from "@codemirror/lint";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { diagnoseDocument, parseDocument, type MessageBoxAnswer, type MessageBoxPrompt } from "dwc-gcode-core";
+import type { MessageBoxAnswer, MessageBoxPrompt } from "dwc-gcode-core";
 import {
-	alignLineComments, applyDiagnostics, buildDocFromChunks, codeAtCursor, createEditorInstance,
+	alignLineComments, buildDocFromChunks, canAutoCheck, checkDocument, codeAtCursor, createEditorInstance,
 	createThemeController, gcodeCompletion, gcodeCurrentLine, gcodeLanguage, gcodeLintUi,
-	gcodeQuickSearchKeymap, gcodeSearch, isInsideExpression, openExpressionQuickSearch,
-	openGcodeQuickSearch, openSearchPanel, setCurrentLine, type EditorInstance, type ThemeController,
+	gcodeLiveCheck, gcodeQuickSearchKeymap, gcodeSearch, gcodeShortcutsHelp, isInsideExpression, openExpressionQuickSearch,
+	openGcodeQuickSearch, openSearchPanel, openShortcutsHelp, setCurrentLine, type EditorInstance, type ThemeController,
 } from "dwc-gcode-editor";
 import type { Text } from "@codemirror/state";
 
@@ -333,6 +334,9 @@ let originalDoc: Text | null = null;
 // recreated on every load(), read by the darkTheme watcher below to push a live swap.
 let themeController: ThemeController | null = null;
 
+// This editor never saves (view + diagnose + edit only), so the help leaves Ctrl+S out.
+const SHORTCUTS_HIDDEN = ["save"];
+
 function editorExtensions(theme: ThemeController) {
 	return [
 		lineNumbers(),
@@ -342,8 +346,12 @@ function editorExtensions(theme: ThemeController) {
 		gcodeCompletion(),
 		gcodeLintUi(),
 		lintGutter(),
+		// Re-checks the lines being typed on (and, after a pause, the whole file when it is small enough),
+		// keeping the toolbar count current.
+		gcodeLiveCheck({ getOptions: () => checkOptions(loadedPath ?? props.path ?? ""), onChange: (count) => { diagnosticCount.value = count; } }),
 		gcodeSearch(),
 		gcodeQuickSearchKeymap(() => machineStore.model),
+		gcodeShortcutsHelp({ hide: SHORTCUTS_HIDDEN }),
 		gcodeCurrentLine(),
 		EditorView.updateListener.of((update) => {
 			if (update.docChanged) {
@@ -416,6 +424,7 @@ async function load(path: string): Promise<void> {
 		editorReady.value = true;
 		dirty.value = false;
 		scenarioSet.value = loadScenarioSet(path);
+		checkOnLoad(editorInstance.value);
 
 		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
 		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently
@@ -467,22 +476,41 @@ watch(editorColorScheme, (scheme) => {
 	if (instance !== null && themeController !== null) themeController.setCustomColors(instance.view, scheme);
 });
 
+// A whole-document string round-trip - the documented, accepted cost of a check (dwc-gcode-editor's own
+// diagnostics.ts explains why it is never done on every keystroke).
+function checkOptions(path: string): { path: string; firmwareVersion: string } {
+	return { path, firmwareVersion: mainboardFirmwareVersion(machineStore.model) ?? "0.0.0" };
+}
+
+function runCheck(instance: EditorInstance, path: string): void {
+	diagnosticCount.value = checkDocument(instance.view, checkOptions(path)).length;
+}
+
 async function checkForErrors(): Promise<void> {
 	const instance = editorInstance.value;
 	if (instance === null || loadedPath === null) return;
 	checking.value = true;
 	try {
-		// A whole-document string round-trip - the documented, accepted cost of a MANUAL check
-		// (dwc-gcode-editor's own diagnostics.ts explains why this is never done automatically).
-		const text = instance.view.state.doc.toString();
-		const parsed = parseDocument(text);
-		const firmwareVersion = mainboardFirmwareVersion(machineStore.model) ?? "0.0.0";
-		const diagnostics = diagnoseDocument(parsed, loadedPath, { firmwareVersion });
-		applyDiagnostics(instance.view, diagnostics);
-		diagnosticCount.value = diagnostics.length;
+		runCheck(instance, loadedPath);
 	} finally {
 		checking.value = false;
 	}
+}
+
+/** The same check as the button, run once right after a file has loaded so its problems are marked
+ *  without anyone asking. Skipped for a file too large to check without freezing the page (the button is
+ *  still there), and deferred so the editor paints first. */
+function checkOnLoad(instance: EditorInstance | null): void {
+	if (instance === null || loadedPath === null || !canAutoCheck(instance.view)) return;
+	const path = loadedPath;
+	setTimeout(() => {
+		if (editorInstance.value === instance) runCheck(instance, path); // not superseded by a newer load()
+	}, 0);
+}
+
+function openShortcuts(): void {
+	const instance = editorInstance.value;
+	if (instance !== null) openShortcutsHelp(instance.view, { hide: SHORTCUTS_HIDDEN });
 }
 
 function openSearch(): void {
