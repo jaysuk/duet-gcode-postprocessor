@@ -2,21 +2,27 @@
 .gcode-workspace {
 	min-height: 0;
 }
+/* One grid for both panes. Row 1 holds the tab strips, row 2 the editors; columns are the two panes and
+   the divider between them. Every editor is a direct child of this grid, placed in a column by an inline
+   style, so a tab that changes pane only changes `grid-column` - it is never re-parented, so its editor is
+   never unmounted (Vue cannot move a component between two parents; see the script's own doc comment). */
 .gcode-workspace-panes {
-	display: flex;
-	flex-direction: row;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
 	flex: 1 1 auto;
 	min-height: 0;
 }
+/* The per-pane wrapper is only a group for the eye and for tests; its children are the grid items. */
 .gcode-workspace-pane {
-	display: flex;
-	flex-direction: column;
-	flex: 1 1 auto;
+	display: contents;
+}
+.gcode-workspace-strip {
+	grid-row: 1;
 	min-width: 0;
-	min-height: 0;
 }
 .gcode-workspace-divider {
-	flex: 0 0 7px;
+	grid-row: 1 / span 2;
+	grid-column: 2;
 	margin: 0 -3px;
 	cursor: ew-resize;
 	touch-action: none;
@@ -25,12 +31,19 @@
 .gcode-workspace-divider:hover, .gcode-workspace-divider--dragging {
 	background: rgba(var(--v-theme-on-surface), 0.12);
 }
+/* An empty drop target under the editors, so a pane with no visible editor still accepts a dragged tab. */
 .gcode-workspace-body {
-	position: relative;
-	flex: 1 1 auto;
+	grid-row: 2;
+	min-width: 0;
 	min-height: 0;
 }
 .gcode-workspace-slot {
+	grid-row: 2;
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+}
+.gcode-workspace-slot-fill {
 	position: absolute;
 	inset: 0;
 }
@@ -42,11 +55,11 @@
 			Select a G-code file to edit it.
 		</v-alert>
 
-		<div v-else ref="panesEl" class="gcode-workspace-panes">
-			<template v-for="(group, gi) in workspace.groups" :key="group.id">
-				<div class="gcode-workspace-pane" :style="paneStyle(gi)">
-					<v-tabs v-if="tabsInGroup(group.id).length > 1 || workspace.groups.length > 1"
-							:model-value="group.activeTabId" density="compact" show-arrows
+		<div v-else ref="panesEl" class="gcode-workspace-panes" :style="{ gridTemplateColumns }">
+			<div v-for="group in workspace.groups" :key="group.id" class="gcode-workspace-pane">
+				<div v-if="tabsInGroup(group.id).length > 1 || workspace.groups.length > 1" class="gcode-workspace-strip"
+					 :style="{ gridColumn: columnOf(group.id) }">
+					<v-tabs :model-value="group.activeTabId" density="compact" show-arrows
 							@update:model-value="(id) => onActivate(id as number)">
 						<v-tab v-for="t in tabsInGroup(group.id)" :key="t.id" :value="t.id" class="text-none"
 							   draggable="true" @dragstart="onTabDragStart($event, t.id)">
@@ -66,21 +79,28 @@
 							<v-icon>mdi-dock-left</v-icon>
 						</v-btn>
 					</v-tabs>
-					<v-divider v-if="tabsInGroup(group.id).length > 1 || workspace.groups.length > 1" />
-
-					<div class="flex-grow-1 gcode-workspace-body" @dragover.prevent @drop="onTabDrop($event, group.id)">
-						<div v-for="t in tabsInGroup(group.id)" :key="t.id" v-show="t.id === group.activeTabId"
-							 class="gcode-workspace-slot">
-							<GcodeEditor :path="t.data.path" />
-						</div>
-					</div>
+					<v-divider />
 				</div>
 
-				<div v-if="gi === 0 && workspace.groups.length > 1" class="gcode-workspace-divider"
-					 :class="{ 'gcode-workspace-divider--dragging': dragging }"
-					 @pointerdown="onDividerPointerDown" @pointermove="onDividerPointerMove"
-					 @pointerup="onDividerPointerUp" @pointercancel="onDividerPointerUp" />
-			</template>
+				<div class="gcode-workspace-body" :style="{ gridColumn: columnOf(group.id) }"
+					 @dragover.prevent @drop="onTabDrop($event, group.id)" />
+			</div>
+
+			<!-- Every editor, flat and in a fixed (id) order - NOT inside its pane's element. A tab dragged to the
+				 other pane, a split, a close-split: each only changes the column below, so no editor is ever
+				 unmounted or even moved in the DOM, and unsaved edits, undo history, cursor and scroll all stay. -->
+			<div v-for="t in slotTabs" :key="t.id" v-show="isShowing(t)" class="gcode-workspace-slot"
+				 :data-tab-id="t.id" :style="{ gridColumn: columnOf(t.groupId) }"
+				 @dragover.prevent @drop="onTabDrop($event, t.groupId)">
+				<div class="gcode-workspace-slot-fill">
+					<GcodeEditor :path="t.data.path" />
+				</div>
+			</div>
+
+			<div v-if="workspace.groups.length > 1" class="gcode-workspace-divider"
+				 :class="{ 'gcode-workspace-divider--dragging': dragging }"
+				 @pointerdown="onDividerPointerDown" @pointermove="onDividerPointerMove"
+				 @pointerup="onDividerPointerUp" @pointercancel="onDividerPointerUp" />
 		</div>
 	</div>
 </template>
@@ -93,15 +113,21 @@
  * a draggable divider resizing two panes, tabs dragged from one pane's strip to the other, a
  * persisted ratio.
  *
+ * **Editors are rendered flat, not inside their pane.** A tab that moves to the other pane (drag, split, close
+ * split, an emptied pane collapsing) only changes the grid column its slot sits in. Rendering each pane's tabs
+ * inside that pane's own element instead would make Vue unmount and remount the editor on every such move -
+ * it cannot re-parent a component - losing the buffer, undo history, cursor and scroll. That is exactly what
+ * Duet3D/DuetWebControl#517 was sent back for; `test/component.test.ts` asserts the editor element survives.
+ *
  * Every opened tab's `GcodeEditor` instance stays mounted for the workspace's lifetime (`v-if` once,
  * then `v-show` to switch) rather than being torn down when inactive — the same "on-demand mount,
  * stay alive once opened" shape `Flexible-Layouts/ExplorerPanel.vue` already uses for Monaco. This
  * plugin's `GcodeEditor` has no save-back-to-SD-card path yet (view + diagnostics only), so there is
  * no in-progress-edit-loss risk from that choice today; revisit if/when it grows one.
  */
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import {
-	canSplit, closeSplit, closeTab, createWorkspace, moveTab, openTab,
+	canSplit, closeSplit, closeTab, collapseEmptyGroup, createWorkspace, moveTab, openTab,
 	SECONDARY_GROUP, setActiveTab, setSplitRatio, splitRight, tabsInGroup as tabsInGroupOf,
 	type GroupId, type WorkspaceState,
 } from "dwc-gcode-editor";
@@ -123,9 +149,24 @@ function tabsInGroup(groupId: GroupId) {
 	return workspace.value === null ? [] : tabsInGroupOf(workspace.value, groupId);
 }
 
-function paneStyle(groupIndex: number): Record<string, string> | undefined {
-	if (workspace.value === null || workspace.value.groups.length < 2 || groupIndex !== 0) return undefined;
-	return { flex: `0 0 ${workspace.value.splitRatio * 100}%` };
+/** The grid column a pane's strip, drop zone and editors sit in: 1 alone; 1 and 3 (2 is the divider) when split. */
+function columnOf(groupId: GroupId): number {
+	return workspace.value !== null && workspace.value.groups.length > 1 && groupId === SECONDARY_GROUP ? 3 : 1;
+}
+
+const gridTemplateColumns = computed(() => {
+	const w = workspace.value;
+	if (w === null || w.groups.length < 2) return "minmax(0, 1fr)";
+	return `minmax(0, ${w.splitRatio}fr) 7px minmax(0, ${1 - w.splitRatio}fr)`;
+});
+
+/** Every tab in a fixed order (by id). `moveTab` reorders `workspace.tabs`, and a keyed `v-for` follows the
+ *  order it is given by moving DOM nodes - which resets an element's scroll position. Sorting keeps each
+ *  editor's element exactly where it is; only its column changes. */
+const slotTabs = computed(() => (workspace.value === null ? [] : [...workspace.value.tabs].sort((a, b) => a.id - b.id)));
+
+function isShowing(tab: { id: number; groupId: GroupId }): boolean {
+	return workspace.value?.groups.find((g) => g.id === tab.groupId)?.activeTabId === tab.id;
 }
 
 function fileName(path: string): string {
@@ -157,7 +198,8 @@ function onActivate(id: number): void {
 function onClose(id: number): void {
 	if (workspace.value === null) return;
 	const next = closeTab(workspace.value, id);
-	workspace.value = next.tabs.length === 0 ? null : next;
+	// A pane whose last tab was closed goes away rather than sitting empty.
+	workspace.value = next.tabs.length === 0 ? null : collapseEmptyGroup(next);
 }
 
 function onSplitRight(): void {
@@ -180,7 +222,7 @@ function onTabDrop(event: DragEvent, groupId: GroupId): void {
 	const idFromTransfer = Number(event.dataTransfer?.getData("text/plain"));
 	const id = Number.isFinite(idFromTransfer) && idFromTransfer > 0 ? idFromTransfer : draggedTabId;
 	draggedTabId = null;
-	if (workspace.value !== null && id !== null) workspace.value = moveTab(workspace.value, id, groupId);
+	if (workspace.value !== null && id !== null) workspace.value = collapseEmptyGroup(moveTab(workspace.value, id, groupId));
 }
 
 function readStoredSplitRatio(): number {

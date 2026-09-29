@@ -1108,10 +1108,128 @@ describe("components mount", () => {
 			await dropTargets[1].trigger("drop", { dataTransfer: { getData: () => "1" } });
 			await wrapper.vm.$nextTick();
 
-			// Both files must now be in the SAME (secondary) pane's tab strip
-			const secondaryPaneTabs = dropTargets[1].element.closest(".gcode-workspace-pane")?.querySelectorAll(".v-tab");
-			expect(secondaryPaneTabs?.length).toBe(2);
+			// The primary pane lost its only tab, so the split collapses and both files share ONE strip.
+			expect(wrapper.find(".gcode-workspace-divider").exists()).toBe(false);
+			expect(wrapper.findAll(".gcode-workspace-pane")).toHaveLength(1);
+			expect(wrapper.findAll(".v-tab")).toHaveLength(2);
 			wrapper.unmount();
+		});
+
+		// The defect Duet3D/DuetWebControl#517 was sent back for: moving a tab between panes re-parented its
+		// editor, so Vue unmounted and remounted it and the unsaved text went with it. These pin that the SAME
+		// editor element - and so the same buffer - survives every pane transition.
+		describe("an editor survives every pane transition (no remount, unsaved text kept)", () => {
+			type EditorVm = { editorInstance: { view: import("@codemirror/view").EditorView } };
+			type W = ReturnType<typeof mountInDwc>;
+			const slot = (w: W, id: number) => w.find(`[data-tab-id="${id}"]`);
+			const editorVmOf = (w: W, id: number) =>
+				w.findAllComponents(GcodeEditor).find((c) => slot(w, id).element.contains(c.element))!.vm as unknown as EditorVm;
+			const splitBtn = (w: W) => w.findAll("button").find((b) => b.attributes("title") === "Split right")!;
+			const closeSplitBtn = (w: W) => w.findAll("button").find((b) => b.attributes("title") === "Close split");
+			const drop = (w: W, paneIndex: number, tabId: number) =>
+				w.findAll(".gcode-workspace-body")[paneIndex].trigger("drop", { dataTransfer: { getData: () => String(tabId) } });
+
+			/** Every open tab gets its own unsaved edit, and its slot + editor elements are remembered. */
+			async function withUnsavedEdits(ids: number[]) {
+				downloadMock.mockResolvedValue(new Blob(["G28"+"\n"]));
+				const wrapper = mountInDwc(GcodeWorkspace, { props: { selectedPath: "0:/gcodes/a.g" } });
+				await vi.waitFor(() => expect(wrapper.text()).toContain("G28"));
+				for (const name of ["b", "c"].slice(0, ids.length - 1)) {
+					await wrapper.setProps({ selectedPath: `0:/gcodes/${name}.g` });
+					await vi.waitFor(() => expect(wrapper.text()).toContain(`${name}.g`));
+				}
+				const snapshot = new Map<number, { el: Element; cm: Element }>();
+				for (const id of ids) {
+					await vi.waitFor(() => expect(slot(wrapper, id).find(".cm-editor").exists()).toBe(true));
+					snapshot.set(id, { el: slot(wrapper, id).element, cm: slot(wrapper, id).find(".cm-editor").element });
+					editorVmOf(wrapper, id).editorInstance.view.dispatch({ changes: { from: 0, insert: `; edit ${id}` + "\n" } });
+				}
+				return { wrapper, snapshot };
+			}
+
+			/** Every remembered slot and editor element is still THE SAME node, holding its own unsaved text. */
+			function expectAllSurvived(w: W, snapshot: Map<number, { el: Element; cm: Element }>): void {
+				for (const [id, { el, cm }] of snapshot) {
+					expect(slot(w, id).element, `slot ${id}`).toBe(el);
+					expect(slot(w, id).find(".cm-editor").element, `editor ${id}`).toBe(cm);
+					expect(editorVmOf(w, id).editorInstance.view.state.doc.toString(), `text ${id}`).toBe(`; edit ${id}` + "\nG28\n");
+				}
+			}
+
+			it("survives Split right and Close split (the moving tab and the staying one)", async () => {
+				const { wrapper, snapshot } = await withUnsavedEdits([1, 2]);
+				await splitBtn(wrapper).trigger("click"); // b -> secondary, a stays primary
+				await wrapper.vm.$nextTick();
+				expectAllSurvived(wrapper, snapshot);
+
+				await closeSplitBtn(wrapper)!.trigger("click"); // b -> back to primary
+				await wrapper.vm.$nextTick();
+				expectAllSurvived(wrapper, snapshot);
+				wrapper.unmount();
+			});
+
+			it("survives a tab being dragged to the other pane, both ways", async () => {
+				const { wrapper, snapshot } = await withUnsavedEdits([1, 2, 3]);
+				await splitBtn(wrapper).trigger("click"); // c -> secondary; a, b stay primary
+				await wrapper.vm.$nextTick();
+				await drop(wrapper, 1, 1); // a -> secondary
+				await wrapper.vm.$nextTick();
+				expectAllSurvived(wrapper, snapshot);
+				expect((slot(wrapper, 1).element as HTMLElement).style.gridColumn).toContain("3"); // it really moved
+
+				await drop(wrapper, 0, 1); // ...and back
+				await wrapper.vm.$nextTick();
+				expectAllSurvived(wrapper, snapshot);
+				expect((slot(wrapper, 1).element as HTMLElement).style.gridColumn).toContain("1");
+				wrapper.unmount();
+			});
+
+			it("survives the pane it was left in emptying and collapsing (PR #517's group-id rename)", async () => {
+				const { wrapper, snapshot } = await withUnsavedEdits([1, 2]);
+				await splitBtn(wrapper).trigger("click"); // a: primary, b: secondary
+				await wrapper.vm.$nextTick();
+				await drop(wrapper, 1, 1); // a -> secondary: primary is empty, so the split collapses
+				await wrapper.vm.$nextTick();
+
+				expect(wrapper.find(".gcode-workspace-divider").exists()).toBe(false);
+				expect(closeSplitBtn(wrapper)).toBeUndefined();
+				expectAllSurvived(wrapper, snapshot);
+				wrapper.unmount();
+			});
+
+			it("survives the OTHER pane's last tab being closed and the split collapsing", async () => {
+				const { wrapper, snapshot } = await withUnsavedEdits([1, 2]);
+				await splitBtn(wrapper).trigger("click");
+				await wrapper.vm.$nextTick();
+				snapshot.delete(2); // b is about to be closed for real
+				await wrapper.findAll("button").find((b) => b.attributes("title")?.includes("Close b.g"))!.trigger("click");
+				await wrapper.vm.$nextTick();
+
+				expect(wrapper.find(".gcode-workspace-divider").exists()).toBe(false);
+				expectAllSurvived(wrapper, snapshot);
+				wrapper.unmount();
+			});
+
+			it("shows exactly one editor per pane, in separate grid columns", async () => {
+				const { wrapper } = await withUnsavedEdits([1, 2]);
+				await splitBtn(wrapper).trigger("click");
+				await wrapper.vm.$nextTick();
+				const shown = wrapper.findAll(".gcode-workspace-slot").filter((s) => (s.element as HTMLElement).style.display !== "none");
+				expect(shown.map((s) => (s.element as HTMLElement).style.gridColumn).sort()).toEqual(["1", "3"]);
+				expect((wrapper.find(".gcode-workspace-panes").element as HTMLElement).style.gridTemplateColumns).toContain("7px");
+				wrapper.unmount();
+			});
+
+			it("keeps the editors in a fixed DOM order however the tabs are reordered (a moved node loses its scroll)", async () => {
+				const { wrapper } = await withUnsavedEdits([1, 2, 3]);
+				const order = () => wrapper.findAll(".gcode-workspace-slot").map((s) => s.attributes("data-tab-id"));
+				expect(order()).toEqual(["1", "2", "3"]);
+				await splitBtn(wrapper).trigger("click");
+				await drop(wrapper, 1, 1);
+				await wrapper.vm.$nextTick();
+				expect(order()).toEqual(["1", "2", "3"]);
+				wrapper.unmount();
+			});
 		});
 
 		it("persists the split ratio to localStorage on drag release", async () => {
