@@ -24,6 +24,24 @@ write back safely.
    worker would need the whole pipeline inlined into it at build time. `model/io/transfer.ts`
    documents this; see `docs/scripting-engines.md` for the route.
 
+**Gotchas learned the hard way:**
+
+- **`LineContext.x` / `.y` are undefined at runtime.** The type (`Readonly<MachineState>`) declares
+  them, but `syncLineContext` in `model/pipeline.ts` never copies them. A step or analysis collector
+  that needs position must track X/Y itself (relative moves via `ctx.relativeMoves`, `G92`, `G28`) —
+  see `model/analysis.ts` and `model/steps/adaptiveMesh.ts`. `tsc` will not catch this.
+- **A step that needs the whole file first** (a bound, a total, a later event) declares an
+  `analysis()` collector and reads its result from `RunContext.analysis` in `onStart`. Namespace the
+  collector id with `ctx.stepIndex` so two instances of one step don't collide.
+- **`token.body` includes the command word** (`"M557 R150 S15"`, not `"R150 S15"`), so `parseParams`
+  on a bare parameter string finds nothing. Tokenise first in tests.
+- **Fixtures are CRLF in a Windows autocrlf checkout** while the pipeline emits LF, so exact
+  output-equals-input assertions must normalise line endings.
+- **`npm run typecheck` reports "cannot find module" for `dwc-gcode-editor`, `expr-eval-fork` and
+  `@codemirror/*`** (and errors that follow from those) — the DWC checkout it copies `src/` into does
+  not have this plugin's own dependencies. That looks environmental rather than a regression
+  (not checked against a clean baseline); filter for the files you changed.
+
 Everything below is the general DWC 3.7 plugin scaffolding guide this repo was started from.
 
 ---

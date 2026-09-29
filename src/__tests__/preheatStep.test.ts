@@ -200,7 +200,8 @@ describe("preheat step", () => {
 		const transform = preheatStep.create(stepConfig as never, ctx);
 		const collectors = preheatStep.analysis?.(stepConfig as never, ctx) ?? [];
 		const { output, pipeline } = runStepsWithAnalysis([transform], collectors, loadFixture("two-tool-long"));
-		expect(output).toBe(loadFixture("two-tool-long"));
+		// The pipeline normalises line endings, and the fixture is CRLF in an autocrlf checkout.
+		expect(output).toBe(loadFixture("two-tool-long").replace(/\r\n/g, "\n"));
 		expect(pipeline.stats.warnings.some((w) => w.includes("motion limits"))).toBe(true);
 	});
 });

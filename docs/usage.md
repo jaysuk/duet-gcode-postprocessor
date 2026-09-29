@@ -442,6 +442,38 @@ that sets a temperature or an offset is not a retraction and switches nothing of
 
 Also run this **before** "Weld curves into arcs", for the same reason as "Z-hop".
 
+### Adaptive bed mesh
+
+Shrinks the `G29` probing grid to the area the print actually covers, so a small part on a big bed
+does not wait for the whole bed to be probed. The step reads the print's XY footprint from the file
+and rewrites the `M557` grid definition to that area plus a margin.
+
+Where the new `M557` goes: it **replaces** an existing grid-form `M557` in the file (a delta's `R`
+radius is kept), or is **inserted just before the first `G29`** that probes (a `G29 S1`/`S2`/`S3`
+that only loads, disables or saves a height map is not one). If the file has neither — the probing is
+in a macro the file only calls — the default is to leave the file unchanged and say so; choose
+*Insert M557 at the top of the file* to put it first instead.
+
+- **Mesh density by** — *Probe spacing* (`M557 S`) keeps the density constant however large the
+  print is; *Points per axis* (`M557 P`) gives a fixed-size grid that gets finer on a small print.
+- **Probe spacing (mm)** — Default: 25.
+- **Points per axis** — Default: 5.
+- **Margin around the print (mm)** — extends the mesh past the print's edge on every side.
+  Default: 5.
+- **Use the first layer only** — the mesh only matters where the first layer touches the bed.
+  Default: on.
+- **Ignore purge and prime lines** — skips extrusion before the first layer marker and anything the
+  slicer tags `;TYPE:Custom`, so a purge line at the bed edge does not stretch the mesh. Default: on.
+  A file with no layer markers at all falls back to every extruding move, with a warning.
+- **Limit to the probeable area** — clips the mesh to the region your probe can reach, given as
+  X/Y min and max. The print's bounds are nozzle positions and the probe is offset from the nozzle,
+  so on a machine where the probe cannot reach the whole bed, set this.
+
+A print narrower than the spacing on some axis is widened to the spacing (sliding back inside the
+probeable area if needed) so the firmware always gets at least two points on it. The step warns when
+the result would be more than 441 probe points, which is the limit on some Duet boards (others
+allow 961).
+
 ### Rules — scripting without code
 
 A declarative when/then list in JSON. It covers most of what post-processing scripts actually do,

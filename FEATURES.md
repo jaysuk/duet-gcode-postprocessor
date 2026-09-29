@@ -158,6 +158,7 @@ little-did-I-know) - ideas only, no code taken; see [docs/attribution.md](docs/a
 | H14 | ✅ **Timelapse trigger on each object's top layer only** | Done — `model/steps/timelapseTopLayer.ts` (an `analysisPass` collector, same pattern as `preheat`) plus `presets.ts`'s "Timelapse trigger per object". A file with no `M486` labels is left untouched and reported, never falls back to firing every layer |
 | H15 | ✅ **Plain-English file summary** generated from the analysis | Done — `model/summary.ts`'s `summariseFile`, shown at the top of the inspector |
 | H16 | **Integrate with DWC's G-code viewer** - jump it to the layer under discussion | Rather than building a second 3D engine |
+| H17 | ✅ **Adaptive bed mesh** — bound the print, rewrite `M557` to that area at a chosen density | Done — `model/steps/adaptiveMesh.ts` (an `analysisPass` collector for the footprint). Spacing (`S`) or points (`P`) density, margin, first-layer-only, purge-line filtering, optional probeable-area clamp. Replaces an existing `M557`, else inserts before the first probing `G29`; a file with neither is left alone unless told to insert at the top |
 
 ## Proposed v1 scope
 

@@ -6,6 +6,7 @@
  * so nothing else has to be touched and nothing can be half-added.
  */
 
+import { adaptiveMeshStep } from "./adaptiveMesh";
 import { arcWeldStep } from "./arcWeld";
 import { clampFeedrateStep } from "./clampFeedrate";
 import { commandMapStep } from "./commandMap";
@@ -51,6 +52,7 @@ export const STEP_DEFINITIONS: ReadonlyArray<StepDefinition<never>> = Object.fre
 	zHopStep,
 	oozeControlStep,
 	timelapseTopLayerStep,
+	adaptiveMeshStep,
 ] as unknown as Array<StepDefinition<never>>);
 
 const BY_ID = new Map<string, StepDefinition<never>>(STEP_DEFINITIONS.map((d) => [d.id, d]));
