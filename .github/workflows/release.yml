@@ -7,8 +7,9 @@ name: Release
 #   (or manually: bump the versions, commit, then `git tag v0.2.0 && git push origin v0.2.0`)
 #
 # This runs automatically on the tag, builds GCodePostProcessor-<version>.zip against DWC, and
-# publishes a Release with the ZIP attached. The notes (a Conventional-Commit changelog plus an
-# install footer) are generated; the tag name is the release title.
+# publishes a Release with the ZIP attached. The notes are the version's section of CHANGELOG.md (or,
+# failing that, a generated Conventional-Commit changelog) plus an install footer; the tag name is
+# the release title.
 #
 # You can also run it manually (Actions -> Release -> Run workflow) to build a ZIP as an artifact,
 # optionally against a different DWC ref.
@@ -121,7 +122,9 @@ jobs:
         run: |
           {
             echo 'body<<__CHANGELOG_EOF__'
-            node "$RUNNER_TEMP/changelog.mjs"
+            # Prefer the hand-written CHANGELOG.md section for this version; fall back to the
+            # generated Conventional-Commit list when there is none.
+            node scripts/changelog-section.mjs "$GITHUB_REF_NAME" || node "$RUNNER_TEMP/changelog.mjs"
             echo
             node scripts/release-footer.mjs
             echo
