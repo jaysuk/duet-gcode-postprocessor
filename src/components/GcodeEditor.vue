@@ -55,8 +55,10 @@
 			<GcodeStepperPanel v-if="stepperOpen && editorReady" :current-step="stepperStep" :total-steps="stepperTotalSteps"
 								:line="stepperDisplayLine" :view="stepperView" :status="stepperStatus" :pending-path="stepperPendingPath"
 								:message-box-prompt="stepperMessageBoxPrompt" :error-message="stepperErrorMessage"
-								:inputs="inputs" :referenced="referencedInputs" :message-box-answers="messageBoxAnswersList" class="mb-2"
-								@update:current-step="setStepperStep" @update:inputs="updateInputs" @resolve-path="resolveSimulatedPath"
+								:inputs="inputs" :referenced="referencedInputs" :message-box-answers="messageBoxAnswersList"
+								:scenario-names="scenarioNames(scenarioSet)" :active-scenario="scenarioSet.active" :cursor-line="cursorLine" class="mb-2"
+								@update:current-step="setStepperStep" @update:inputs="updateInputs" @select-scenario="selectScenarioByName" @add-scenario="addNamedScenario"
+								@duplicate-scenario="duplicateActiveScenario" @rename-scenario="renameActiveScenario" @delete-scenario="deleteActiveScenario" @resolve-path="resolveSimulatedPath"
 								@resolve-message-box="resolveMessageBoxPrompt" @remove-message-box-answer="removeMessageBoxAnswer"
 								@reset-message-box-answers="resetMessageBoxAnswers" />
 
@@ -98,12 +100,16 @@ import type { ExecutionIndex } from "dwc-gcode-core/stepper/executionIndex";
 import { messageBoxKey } from "dwc-gcode-core/stepper/messageBoxAnswers";
 import { parseSimulatedValueInput } from "dwc-gcode-core/stepper/simulatedValues";
 import {
-	describeStep, emptySimulationInputs, findReferencedInputs, formatEvalValue, runSimulation, sourceLines,
+	describeStep, findReferencedInputs, formatEvalValue, runSimulation, sourceLines,
 	withInputValue, type ReferencedInput, type SimulationInputs,
 } from "dwc-gcode-core/stepper/simulation";
+import {
+	activeScenario, addScenario, deleteScenario, duplicateScenario, renameScenario, scenarioNames, selectScenario,
+	singleScenarioSet, updateActiveScenario, type ScenarioSet,
+} from "dwc-gcode-core/stepper/scenarioSet";
 import { buildLineStateIndex, type LineStateIndex } from "../model/gcode/lineState";
 import { lineStateGutter } from "../model/gcode/lineStateGutter";
-import { loadSimulationScenario, saveSimulationScenario } from "../model/gcode/simulationScenario";
+import { loadScenarioSet, saveScenarioSet } from "../model/gcode/simulationScenario";
 
 const props = defineProps<{ path: string | null }>();
 
@@ -140,7 +146,11 @@ const stepperStep = ref(0);
 // object-model / param.* / global values this offline simulation (no live machine) has no way to know,
 // and remembered M291 answers (see dwc-gcode-core's stepper/simulation.ts). A shallowRef holding a
 // fresh object on every change (never mutated in place) so Vue's reactivity actually notices.
-const inputs = shallowRef<SimulationInputs>(emptySimulationInputs());
+// The file's named scenarios (`dwc-gcode-core/stepper/scenarioSet`); `inputs` is the active one.
+const scenarioSet = shallowRef<ScenarioSet>(singleScenarioSet());
+const inputs = computed<SimulationInputs>(() => activeScenario(scenarioSet.value));
+// The 1-based line the cursor is on, offered in the scenario panel as "start here".
+const cursorLine = ref<number | null>(null);
 // What the file reads (object-model paths, param.*, undeclared globals), offered as fields in the
 // scenario editor - computed with each rebuild, and only while the stepper is open.
 const referencedInputs = shallowRef<ReadonlyArray<ReferencedInput>>([]);
@@ -216,7 +226,7 @@ function rebuildNow(instance: EditorInstance): void {
 	// stepper closed - so only pay for them while it's showing. Opening the stepper rebuilds (below).
 	if (stepperOpen.value) {
 		builtSourceLines.value = sourceLines(text);
-		referencedInputs.value = findReferencedInputs(text, { objectModelVersion });
+		referencedInputs.value = findReferencedInputs(text, { objectModelVersion, startLine: inputs.value.startLine });
 	}
 	const total = index.steps.length;
 	stepperStep.value = total === 0 ? 0 : Math.min(stepperStep.value, total - 1);
@@ -243,10 +253,26 @@ watch(stepperOpen, (open) => {
 
 /** Applies an edited scenario: keeps it, saves it for this file, and re-runs the walk under it. */
 function updateInputs(next: SimulationInputs): void {
-	inputs.value = next;
-	if (loadedPath !== null) saveSimulationScenario(loadedPath, next);
+	setScenarioSet(updateActiveScenario(scenarioSet.value, next));
+}
+
+/** Keeps `set`, saves it for this file, and re-runs the walk under whichever scenario is now active. */
+function setScenarioSet(set: ScenarioSet): void {
+	scenarioSet.value = set;
+	if (loadedPath !== null) saveScenarioSet(loadedPath, set);
 	rebuildExecutionIndex();
 }
+
+// A different scenario is a different run: start it from its first step, not wherever the last one was.
+function changeScenarioSet(set: ScenarioSet): void {
+	stepperStep.value = 0;
+	setScenarioSet(set);
+}
+const selectScenarioByName = (name: string): void => changeScenarioSet(selectScenario(scenarioSet.value, name));
+const addNamedScenario = (name: string): void => changeScenarioSet(addScenario(scenarioSet.value, name));
+const duplicateActiveScenario = (): void => changeScenarioSet(duplicateScenario(scenarioSet.value));
+const renameActiveScenario = (name: string): void => setScenarioSet(renameScenario(scenarioSet.value, scenarioSet.value.active, name));
+const deleteActiveScenario = (): void => changeScenarioSet(deleteScenario(scenarioSet.value, scenarioSet.value.active));
 
 /** The pause prompt's answer for one unresolved path. */
 function resolveSimulatedPath(path: string, rawValue: string): void {
@@ -327,6 +353,7 @@ function editorExtensions(theme: ThemeController) {
 			if (update.docChanged || update.selectionSet) {
 				cursorCode.value = codeAtCursor(update.view);
 				const line = update.state.doc.lineAt(update.state.selection.main.head);
+				cursorLine.value = line.number;
 				const beforeCursor = line.text.slice(0, update.state.selection.main.head - line.from);
 				cursorInExpression.value = isInsideExpression(beforeCursor);
 			}
@@ -341,7 +368,8 @@ function destroyEditor(): void {
 	loadedPath = null;
 	lineIndex.value = null;
 	executionIndex.value = null;
-	inputs.value = emptySimulationInputs();
+	scenarioSet.value = singleScenarioSet();
+	cursorLine.value = null;
 	referencedInputs.value = [];
 	builtSourceLines.value = [];
 	if (rebuildTimer !== null) {
@@ -387,7 +415,7 @@ async function load(path: string): Promise<void> {
 		loadedPath = path;
 		editorReady.value = true;
 		dirty.value = false;
-		inputs.value = loadSimulationScenario(path);
+		scenarioSet.value = loadScenarioSet(path);
 
 		// Deferred rather than built inline above: buildLineStateIndex is a real, synchronous
 		// O(n) walk of the whole file (this plugin's own state.ts tracker is inherently
