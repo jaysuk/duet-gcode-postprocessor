@@ -3,7 +3,7 @@ import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { forEachDiagnostic } from "@codemirror/lint";
 import type { EditorView } from "@codemirror/view";
-import { dwc, mountInDwc, resetDwc, setConnected } from "dwc-plugin-test-kit";
+import { dwc, mountInDwc, patchModel, resetDwc, setConnected } from "dwc-plugin-test-kit";
 
 import BackupManager from "../src/components/BackupManager.vue";
 import BatchDialog from "../src/components/BatchDialog.vue";
@@ -753,6 +753,57 @@ describe("components mount", () => {
 				await buttonLabelled(wrapper, "X endstop never triggers").trigger("click");
 				await vi.waitFor(() => expect(axisText(wrapper, "X")).toContain("-300.000")); // stopped at its target instead
 				expect(wrapper.find('[data-axis="X"] [aria-label="Homed"]').exists()).toBe(false);
+				wrapper.unmount();
+			});
+
+			// A machine that homes Z UP (its endstop at the high end, limit 300) and X to a -10 minimum.
+			const homingMachine = () => ({
+				move: { axes: [{ letter: "X", min: -10, max: 235 }, { letter: "Y", min: 0, max: 210 }, { letter: "Z", min: 0, max: 300 }] },
+				sensors: { endstops: [{ highEnd: false }, { highEnd: false }, { highEnd: true }] },
+			});
+			const placeholderOf = (wrapper: ReturnType<typeof mountInDwc>, label: string): string =>
+				(wrapper.find(`input[aria-label="${label}"]`).element as HTMLInputElement).placeholder;
+
+			it("takes a G1 H1 move's endstops from the machine's object model, and the scenario overrides them", async () => {
+				patchModel(homingMachine());
+				const wrapper = await open("G91\nG1 H1 Z-400\nG1 H1 X-400\n", "homing-machine");
+				await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 3"));
+				await stepForward(wrapper).trigger("click");
+				await vi.waitFor(() => expect(axisText(wrapper, "Z")).toContain("300.000")); // its endstop is at the HIGH end
+				await stepForward(wrapper).trigger("click");
+				await vi.waitFor(() => expect(axisText(wrapper, "X")).toContain("-10.000")); // the machine's minimum, not RRF's default 0
+
+				await toggleScenarioPanel(wrapper);
+				await wrapper.find("[data-scenario-endstops-toggle]").trigger("click");
+				expect(wrapper.find("[data-scenario-endstops-machine]").exists()).toBe(true);
+				expect(wrapper.find('[data-scenario-endstop="Z"]').text()).toContain("Machine: high end (maximum)");
+				expect(wrapper.find('[data-scenario-endstop="X"]').text()).toContain("Machine: low end (minimum)");
+				expect(placeholderOf(wrapper, "Axis maximum Z")).toBe("300");
+				expect(placeholderOf(wrapper, "Axis minimum X")).toBe("-10");
+
+				await typeInto(wrapper, "Axis maximum Z", "250");
+				await vi.waitFor(() => expect(axisText(wrapper, "Z")).toContain("250.000"));
+				wrapper.unmount();
+			});
+
+			it("with no machine to ask, a blank endstop is the way-the-move-heads default and RRF's own limits", async () => {
+				const wrapper = await open("G91\nG1 H1 X-400\n", "homing-no-machine");
+				await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+				await toggleScenarioPanel(wrapper);
+				await wrapper.find("[data-scenario-endstops-toggle]").trigger("click");
+				expect(wrapper.find("[data-scenario-endstops-machine]").exists()).toBe(false);
+				expect(wrapper.find('[data-scenario-endstop="X"]').text()).toContain("Auto (way the move heads)");
+				expect(placeholderOf(wrapper, "Axis maximum X")).toBe("200");
+				wrapper.unmount();
+			});
+
+			it("re-runs the walk when the machine's endstops arrive or change", async () => {
+				const wrapper = await open("G91\nG1 H1 X-400\n", "homing-late");
+				await vi.waitFor(() => expect(wrapper.text()).toContain("Step 1 / 2"));
+				await stepForward(wrapper).trigger("click");
+				await vi.waitFor(() => expect(axisText(wrapper, "X")).toContain("0.000"));
+				patchModel(homingMachine());
+				await vi.waitFor(() => expect(axisText(wrapper, "X")).toContain("-10.000"), { timeout: 3000 });
 				wrapper.unmount();
 			});
 		});
