@@ -46,8 +46,8 @@ describe("trackedObjectModelVersion", () => {
 		expect(trackedObjectModelVersion(model)).toBe("3.7.0-rc.1");
 	});
 
-	it("returns undefined for a real RRF tag with no usable schema data (hasData: false)", () => {
-		const model = { boards: [{ canAddress: 0, firmwareVersion: "3.7.0-alpha.2" }] };
+	it("returns undefined for a real RRF release that predates the tracked window", () => {
+		const model = { boards: [{ canAddress: 0, firmwareVersion: "3.4.6" }] };
 		expect(trackedObjectModelVersion(model)).toBeUndefined();
 	});
 
