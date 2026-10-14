@@ -1,7 +1,7 @@
 # Changelog
 
 Release notes for each version. The GitHub Release body for a version is taken from its section
-here (see `scripts/changelog-section.mjs`), so write the section before tagging. Versions before
+here, so write the section before tagging (`npm run release` drafts it for you). Versions before
 1.3.0 are documented on the [Releases page](https://github.com/jaysuk/duet-gcode-postprocessor/releases).
 
 ## [1.3.0] - 2026-09-29
