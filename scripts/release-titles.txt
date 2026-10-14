@@ -1,0 +1,25 @@
+# GitHub Release titles for duet-gcode-postprocessor, one per line (blank lines and # comments ignored).
+# Picked by version index (semver-sorted), wrapping if it runs out. G-code-editing puns - top up
+# the list as it gets low (the release workflow warns when few unused titles remain).
+Post Haste
+Find and Replace
+Regex Appeal
+Line by Line
+Good Post
+Edit Distance
+Diff Erence
+Patch Notes
+Dry Run
+Macro Economics
+Mind Your G-Code
+Code Review
+Postmark
+Comma Chameleon
+Preview Before You Apply
+Capture Group Therapy
+Search and Rescue
+Step by Step
+Backup Plan
+Safe to Overwrite
+Syntax Tax
+Beyond the Pale Comments
