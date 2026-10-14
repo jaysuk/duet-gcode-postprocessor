@@ -75,7 +75,7 @@ internals that aren't in that list.
 6. `src/components/*.vue` — actual UI.
 7. `src/i18n/en.json` — strings, registered via `registerPluginMessages`.
 8. `src/__tests__/*.test.ts` — pure-logic unit tests. `test/component.test.ts` — mount smoke test.
-9. `.github/workflows/ci.yml` — one line, reuses `dwc-plugin-test-kit`'s shared workflow.
+9. `.github/workflows/ci.yml` — a few lines, calls the shared CI workflow in `jaysuk/dwc-plugin-workflows` (`ci.yml@v1`).
 
 ## `plugin.json` manifest
 
@@ -454,16 +454,15 @@ on:
   pull_request:
 jobs:
   test:
-    uses: jaysuk/dwc-plugin-test-kit/.github/workflows/dwc-plugin-ci.yml@v0.2.6
+    uses: jaysuk/dwc-plugin-workflows/.github/workflows/ci.yml@v1
     with:
       dwc-ref: v3.7-dev
-      kit-ref: v0.2.6
 ```
-Pin both `@v0.2.6` (the workflow ref) and `kit-ref: v0.2.6` (what it installs) to a real tag, matching
-the `dwc-plugin-test-kit` version in `package.json` — every plugin in this family does this, not
-`@main`, so a test-kit change can't silently break CI on an unrelated plugin the day it merges. Bump
-both together when you deliberately upgrade the kit. Runs unit + mount tests, then in a second job
-checks out DWC and runs `verify-build` + `typecheck`.
+`@v1` is a floating major tag in `jaysuk/dwc-plugin-workflows` (the shared CI and release workflows for every
+plugin in this family): a CI change there reaches all plugins without editing each repo, and a breaking one
+becomes `@v2`. There is nothing else to pin: the `dwc-plugin-test-kit` version is just the one in
+`package.json`. Runs unit + mount tests, then in a second job checks out DWC and runs `verify-build` +
+`typecheck`, on Node 26.
 
 ## Known gotchas
 
